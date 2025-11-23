@@ -6,7 +6,7 @@ import numpy as np
 from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Button
-from qnlp.image_encoding.base import Encoder
+from qnlp.image_tower.base import Encoder
 
 
 class DFTEncoder(Encoder):
