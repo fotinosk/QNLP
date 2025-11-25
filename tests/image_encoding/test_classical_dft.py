@@ -1,6 +1,6 @@
 import numpy as np
 from pathlib import Path
-from qnlp.image_encoding.classical_fourier_encoding import DFTEncoder
+from qnlp.image_tower.classical_fourier_encoding import DFTEncoder
 
 
 def test_dft_vs_numpy_fft():
