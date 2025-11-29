@@ -5,6 +5,7 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 import time
 from einops.layers.torch import Rearrange
+import wandb
 
 # ==========================================
 # 1. Configuration & Hyperparameters
@@ -37,7 +38,6 @@ class CPLowRankLayer(nn.Module):
         self.factor_left = nn.Parameter(torch.randn(num_nodes, rank, in_dim))
         self.factor_right = nn.Parameter(torch.randn(num_nodes, rank, in_dim))
         self.factor_out = nn.Parameter(torch.randn(num_nodes, rank, out_dim))
-        self.norm = nn.LayerNorm(out_dim)
         
         self.scale = nn.Parameter(torch.ones(num_nodes, rank))
 
@@ -68,7 +68,6 @@ class CPLowRankLayer(nn.Module):
 
         out = torch.einsum('bnr,nro->bno', merged, self.factor_out)
         out = out + x_l + x_r
-        out = self.norm(out)
         
         return out
 
@@ -80,12 +79,12 @@ class PatchTTN(nn.Module):
         num_patches = (img_size // patch_size) ** 2
         patch_dim = in_channels * patch_size * patch_size
         self.patch_embed = nn.Sequential(
-                    # 1. Chop the image physically into a sequence of flattened patches
-                    Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)', 
-                            p1=patch_size, p2=patch_size),
-                    # 2. Project raw pixels (16) to bond dimension (64)
-                    nn.Linear(patch_dim, bond_dim)
-                )
+            # 1. Chop the image physically into a sequence of flattened patches
+            Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)', 
+                    p1=patch_size, p2=patch_size),
+            # 2. Project raw pixels (16) to bond dimension (64)
+            nn.Linear(patch_dim, bond_dim)
+        )
         
         self.depth = int(torch.log2(torch.tensor(float(num_patches))))
         
@@ -110,7 +109,6 @@ class PatchTTN(nn.Module):
 
     def forward(self, x):
         x = self.patch_embed(x)
-        # x = x.flatten(2).transpose(1, 2)
         for layer in self.layers:
             x = layer(x)
         x = x.squeeze(1)
@@ -133,6 +131,7 @@ def get_mnist_loaders():
     return train_loader, test_loader
 
 def train():
+    run = wandb.init(project="ttn-classifier", name="no-norm", save_code=True)
     train_loader, test_loader = get_mnist_loaders()
     
     model = PatchTTN(
@@ -142,6 +141,8 @@ def train():
         cp_rank=CP_RANK,
         dropout=DROPOUT
     ).to(DEVICE)
+    
+    wandb.watch(models=model, log="all", log_freq=100, log_graph=True)
     
     optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.OneCycleLR(optimizer, max_lr=LEARNING_RATE, 
@@ -169,6 +170,7 @@ def train():
             
             optimizer.step()
             scheduler.step()
+            wandb.log({"loss": loss.item()})
             
             loss_epoch += loss.item()
             pred = output.argmax(dim=1)
@@ -195,6 +197,11 @@ def train():
     # --- SAVE MODEL ---
     save_path = "mnist_ttn_model.pth"
     torch.save(model.state_dict(), save_path)
+    artifact = wandb.Artifact(name="mnist-ttn-weights", type="model")
+    artifact.add_file(save_path)
+    run.log_artifact(artifact)
+    
+    wandb.finish()
     print(f"\nModel saved to {save_path}")
 
 if __name__ == "__main__":
