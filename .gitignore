@@ -3,3 +3,13 @@
 __pycache__/*
 *.jpg
 *.pth
+*.log
+*.patch
+*.pyc
+*.wandb
+*.graph.json
+wandb-metadata.json
+wandb-summary.json
+wandb/*
+*.egg-info
+*.pyc

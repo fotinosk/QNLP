@@ -6,6 +6,8 @@ import torchvision.transforms as transforms
 from torch.utils.data import DataLoader, Subset
 import tensornetwork as tn
 import numpy as np
+from qnlp.utils.feature import FeatureMap
+from qnlp.utils.data import get_mnist_loaders
 
 # --- 0. Setup ---
 tn.set_default_backend("pytorch")
@@ -23,14 +25,7 @@ EPOCHS = 10
 device = torch.device("mps") # CPU is fast enough for this tiny scale
 
 # --- 2. The Feature Map (Same as before) ---
-class FeatureMap(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.register_buffer("factor", torch.tensor(torch.pi / 2.0))
-
-    def forward(self, x):
-        x = x.unsqueeze(-1)
-        return torch.cat([torch.cos(self.factor * x), torch.sin(self.factor * x)], dim=-1)
+# Remove local FeatureMap definition entirely
 
 # --- 3. MPS Classifier (Same logic, better init) ---
 class MPSClassifier(nn.Module):
@@ -99,14 +94,7 @@ def main():
         transforms.Normalize((0.5,), (0.5,))
     ])
     
-    full_dataset = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
-    
-    # Filter dataset to only keep digits 0 and 1
-    idx = (full_dataset.targets == 0) | (full_dataset.targets == 1)
-    full_dataset.targets = full_dataset.targets[idx]
-    full_dataset.data = full_dataset.data[idx]
-    
-    train_loader = DataLoader(full_dataset, batch_size=BATCH_SIZE, shuffle=True)
+    train_loader, test_loader = get_mnist_loaders(IMG_SIZE, BATCH_SIZE, transform)
 
     print(f"Input Features: {N_PIXELS} (4x4 image)")
     print("Training Binary Classifier (0 vs 1)...")

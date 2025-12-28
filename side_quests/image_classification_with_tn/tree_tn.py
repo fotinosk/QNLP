@@ -4,6 +4,7 @@ import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 import time
+from qnlp.utils.data import get_mnist_loaders
 
 # ==========================================
 # 1. Configuration & Hyperparameters
@@ -109,21 +110,6 @@ class PatchTTN(nn.Module):
         x = x.squeeze(1)
         x = self.norm(x)
         return self.head(x)
-
-def get_mnist_loaders():
-    transform = transforms.Compose([
-        transforms.Resize((32,32)), 
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,)) # Added normalization for stability
-    ])
-    
-    train_set = datasets.MNIST('./data', train=True, download=True, transform=transform)
-    test_set = datasets.MNIST('./data', train=False, download=True, transform=transform)
-    
-    train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
-    test_loader = DataLoader(test_set, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
-    
-    return train_loader, test_loader
 
 def train():
     train_loader, test_loader = get_mnist_loaders()

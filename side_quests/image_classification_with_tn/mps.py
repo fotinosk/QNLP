@@ -5,6 +5,8 @@ import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 import tensornetwork as tn
+from qnlp.utils.feature import FeatureMap
+from qnlp.utils.data import get_mnist_loaders
 
 tn.set_default_backend("pytorch")
 
@@ -19,16 +21,6 @@ SWEEP_EPOCHS = 2  # We only need a couple of sweeps
 STEPS_PER_CORE = 5 # How many gradient steps to take on *each* core per visit
 
 device = torch.device("mps")
-
-# --- Feature Map ---
-class FeatureMap(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.register_buffer("factor", torch.tensor(torch.pi / 2.0))
-
-    def forward(self, x):
-        x = x.unsqueeze(-1)
-        return torch.cat([torch.cos(self.factor * x), torch.sin(self.factor * x)], dim=-1)
 
 # --- MPS Model ---
 class MPSClassifier(nn.Module):
@@ -79,8 +71,7 @@ class MPSClassifier(nn.Module):
 def train_sweep():
     # Setup Data
     transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))])
-    train_set = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
-    train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True)
+    train_loader, test_loader = get_mnist_loaders(batch_size=BATCH_SIZE, transform=transform)
 
     model = MPSClassifier(N_PIXELS, FEATURE_DIM, BOND_DIM, NUM_CLASSES).to(device)
     criterion = nn.CrossEntropyLoss()

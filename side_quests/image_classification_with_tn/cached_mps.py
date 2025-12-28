@@ -12,6 +12,7 @@ import os
 import glob
 from datetime import datetime
 import sys
+from qnlp.utils.data import get_mnist_loaders
 
 sys.setrecursionlimit(5000)
 
@@ -32,16 +33,6 @@ STEPS_PER_CORE = 1  # Gradient steps per core per sweep
 EPOCHS = 20
 
 # --- 2. HELPER CLASSES ---
-
-class FeatureMap(nn.Module):
-    """Maps scalar pixel values to a 2D quantum feature vector."""
-    def __init__(self):
-        super().__init__()
-        self.register_buffer("factor", torch.tensor(torch.pi / 2.0))
-
-    def forward(self, x):
-        x = x.unsqueeze(-1)
-        return torch.cat([torch.cos(self.factor * x), torch.sin(self.factor * x)], dim=-1)
 
 class CachedMPS(nn.Module):
     """
@@ -287,8 +278,7 @@ def main():
         transforms.ToTensor(), 
         transforms.Normalize((0.1307,), (0.3081,))
     ])
-    train_set = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
-    train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
+    train_loader, test_loader = get_mnist_loaders(IMG_SIZE, BATCH_SIZE, transform)
     
     mps = CachedMPS(N_PIXELS, FEATURE_DIM, BOND_DIM, NUM_CLASSES).to(device)
     criterion = nn.CrossEntropyLoss()

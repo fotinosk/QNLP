@@ -11,6 +11,7 @@ import torch.onnx
 import os
 from datetime import datetime
 import sys
+from qnlp.utils.feature import FeatureMap
 
 # --- 0. CONFIGURATION ---
 sys.setrecursionlimit(10000)
@@ -27,14 +28,6 @@ EPOCHS = 5
 SVD_THRESHOLD = 1e-4 
 
 # --- 1. MODEL CLASSES ---
-
-class FeatureMap(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.register_buffer("factor", torch.tensor(torch.pi / 2.0))
-    def forward(self, x):
-        x = x.unsqueeze(-1)
-        return torch.cat([torch.cos(self.factor * x), torch.sin(self.factor * x)], dim=-1)
 
 class CachedMPS(nn.Module):
     def __init__(self, input_dim, feature_dim, bond_dim, num_classes):

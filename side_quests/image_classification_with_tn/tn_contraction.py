@@ -3,21 +3,13 @@ import torch.nn as nn
 import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
+from qnlp.utils.feature import FeatureMap
 
 device = torch.device("mps")
 
 BATCH_SIZE = 4
 NUM_LABELS = 10
 
-class FeatureMap(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.register_buffer("factor", torch.tensor(torch.pi / 2.0))
-
-    def forward(self, x):
-        x = x.unsqueeze(-1)
-        return torch.cat([torch.cos(self.factor * x), torch.sin(self.factor * x)], dim=-1)
-    
 def loss(log_probs, y):
     d = y_pred.shape[0] # batch size
     loss = - 1/d * log_probs[torch.arange(d),y].sum()
