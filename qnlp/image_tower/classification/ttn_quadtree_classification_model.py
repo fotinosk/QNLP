@@ -5,8 +5,8 @@ from einops import rearrange
 import math
 
 BATCH_SIZE = 256
-LEARNING_RATE = 0.002
-EPOCHS = 10
+LEARNING_RATE = 0.005
+EPOCHS = 401
 BOND_DIM = 64          
 CP_RANK = 16           
 DROPOUT = 0.1          

@@ -1,5 +1,5 @@
 from qnlp.image_tower.reconstruction.ttn_reconstruction_model import QuadTreeAutoencoder
-
+import random
 import time
 import wandb
 import torch.optim as optim
@@ -7,11 +7,12 @@ import wandb
 import time
 import torch
 from torch import nn
-from qnlp.utils.data import get_mnist_loaders
+from qnlp.utils.data import get_caltech_sample_loaders
 from qnlp.image_tower.classification.ttn_quadtree_classification_model import DEVICE, LEARNING_RATE, EPOCHS, BOND_DIM, CP_RANK, PATCH_SIZE, BATCH_SIZE
 import os
 from torchvision.utils import save_image
 
+IMAGE_SIZE = 64
 
 def save_reconstruction_results(original, reconstructed, directory, filename="reconstruction.jpg"):
     """
@@ -53,9 +54,9 @@ def save_reconstruction_results(original, reconstructed, directory, filename="re
 def train_reconstruction(log_run: bool = True):
     # --- Setup ---
     if log_run:
-        run = wandb.init(project="quad-image-reconstruction", name="autoencoder-v1", save_code=True)
+        run = wandb.init(project="quad-image-reconstruction", name="voc-autoencoder-v1", save_code=True)
     
-    train_loader, test_loader = get_mnist_loaders(batch_size=BATCH_SIZE)
+    train_loader, test_loader = get_caltech_sample_loaders(batch_size=BATCH_SIZE, img_size=32)
     
     # Use the combined Autoencoder class from the previous response
     model = QuadTreeAutoencoder(
@@ -104,13 +105,13 @@ def train_reconstruction(log_run: bool = True):
         model.eval()
         val_loss = 0.0
         with torch.no_grad():
-            is_first = True
-            for val_imgs, _ in test_loader:
+            random_batch_idx = random.randint(0, len(test_loader) - 1)
+            for idx, (val_imgs, _) in enumerate(test_loader):
                 val_imgs = val_imgs.to(DEVICE)
                 val_out = model(val_imgs)
                 val_loss += criterion(val_out, val_imgs).item()
-                if is_first:
-                    save_reconstruction_results(val_imgs, val_out, directory="test_reconstructions",filename=f"reconstructed-epoch{epoch}.jpg")
+                if idx == random_batch_idx and epoch % 10 == 1:
+                    save_reconstruction_results(val_imgs, val_out, directory="test_voc_reconstructions",filename=f"reconstructed-epoch{epoch}.jpg")
                     is_first = False
 
             # Log some visual results to W&B
@@ -125,8 +126,19 @@ def train_reconstruction(log_run: bool = True):
               f"Train MSE: {loss_epoch/len(train_loader):.6f} | Val MSE: {val_loss/len(test_loader):.6f}")
 
     # --- SAVE MODEL ---
-    save_path = "reconstruction_ttn_model.pth"
+    save_path = "reconstruction_voc_ttn_model.pth"
     torch.save(model.state_dict(), save_path)
+    
+    i = 0
+    for image, _ in test_loader:
+        i += 1
+        if i > 20:
+            break
+        image = image.to(DEVICE)
+        image_out = model(image)
+        save_reconstruction_results(image, image_out, directory="test_voc_reconstructions",filename=f"reconstructed-final-sample{i}.jpg")
+        
+    
     if log_run:
         artifact = wandb.Artifact(name="reconstruction-ttn-weights", type="model")
         artifact.add_file(save_path)

@@ -13,3 +13,9 @@ wandb-summary.json
 wandb/*
 *.egg-info
 *.pyc
+.vscode/*
+qnlp/discoclip/frozen/discoclip_aro_minimal/data/*
+*.tar
+data/caltech256/*
+*.db*
+*.pt
