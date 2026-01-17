@@ -19,3 +19,5 @@ qnlp/discoclip/frozen/discoclip_aro_minimal/data/*
 data/caltech256/*
 *.db*
 *.pt
+*.zip
+image/*

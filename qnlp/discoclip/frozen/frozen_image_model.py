@@ -55,7 +55,7 @@ class LookupEmbedding(nn.Module):
         Load from a checkpoint saved via `save()`.
         Returns an ImageEmbedding on the requested device.
         """
-        ckpt = torch.load(path, map_location=map_location)
+        ckpt = torch.load(path, map_location=map_location, weights_only=False)
         model = cls(ckpt['labels'], ckpt['embedding_dim'])
         model.load_state_dict(ckpt['state_dict'])
         return model

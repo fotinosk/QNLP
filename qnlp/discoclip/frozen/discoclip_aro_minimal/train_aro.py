@@ -20,7 +20,7 @@ TRAIN_DATA_PATH = "qnlp/discoclip/frozen/discoclip_aro_minimal/data/train.json"
 TEST_DATA_PATH = "qnlp/discoclip/frozen/discoclip_aro_minimal/data/test.json"
 VAL_DATA_PATH = "qnlp/discoclip/frozen/discoclip_aro_minimal/data/val.json"
 
-IMAGE_LOOKUP_PATH = "qnlp/discoclip/frozen/discoclip_aro_minimal/image_model_artefacts/clip_ViT-B-32.pt"
+IMAGE_LOOKUP_PATH = "/Users/fotinoskyriakides/.cache/clip/ViT-B-32.pt"
 EMBEDDING_DIM = 768
 BOND_DIM = 16
 
