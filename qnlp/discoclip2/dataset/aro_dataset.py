@@ -71,6 +71,7 @@ class ARODataset(Dataset):
             raise ValueError(f"ARODataset must contain the following columns: {required_columns}")
 
         if text_transform is not None:
+            print("Precomputing text")
             self.precompute_text(text_transform)
 
     def precompute_text(self, text_transform):

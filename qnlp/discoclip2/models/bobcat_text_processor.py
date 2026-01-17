@@ -14,6 +14,7 @@ The symbols will be used to initialize the tensors in the model.
 from typing import Optional
 from itertools import count
 
+import opt_einsum as oe
 from lambeq import CCGTree, TreeReader, TensorAnsatz
 from lambeq import BobcatParser, TensorAnsatz, TreeReaderMode, Rewriter
 from lambeq.backend.tensor import Diagram, Swap, Cup, Cap, Spider
@@ -210,7 +211,7 @@ class BobcatTextProcessor:
                     'trees': trees,
                     'lemma_trees': lemma_trees}
         else:
-            del tokens, lemmas, trees  # Free memory
+            # del tokens, lemmas, trees  # Free memory
             return {'lemma_trees': lemma_trees}
 
     def parse(self, sentences: list[str], suppress_exceptions: bool = False,
@@ -252,12 +253,12 @@ class BobcatTextProcessor:
                     filtered_results[key] = results[key]
         
         # Explicitly delete all large objects if not returning them
-        del results
-        del einsum_inputs
-        del diagrams
-        del rewritten_diagrams
-        del circuits
-        del lemma_trees  # Free memory
+        # del results
+        # del einsum_inputs
+        # del diagrams
+        # del rewritten_diagrams
+        # del circuits
+        # del lemma_trees  # Free memory
         
         return filtered_results
 

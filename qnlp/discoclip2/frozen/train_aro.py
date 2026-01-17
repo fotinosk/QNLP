@@ -1,7 +1,5 @@
 import logging
 import os
-import yaml
-from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from diskcache import Cache
 
 import mlflow
@@ -29,174 +27,40 @@ torch.serialization.add_safe_globals([Symbol])
 READER = "bobcat"
 CHECKPOINT_PATH = "checkpoints/"
 
-def parse_args():
-    parser = ArgumentParser(
-        description="Discoclip ARO Dataset Training Script",
-        formatter_class=ArgumentDefaultsHelpFormatter
-    )
-    
-    # Add config file argument
-    parser.add_argument(
-        "--config",
-        type=str,
-        help="Path to YAML config file",
-    )
-    
-    # Data arguments
-    data_group = parser.add_argument_group("Data")
-    data_group.add_argument(
-        "--train-data-path",
-        type=str,
-        help="Path to the training data JSON file",
-    )
-    data_group.add_argument(
-        "--val-data-path",
-        type=str,
-        help="Path to the validation data JSON file",
-    )
-    data_group.add_argument(
-        "--test-data-path",
-        type=str,
-        help="Path to the test data JSON file",
-    )
-    data_group.add_argument(
-        "--image-lookup-path",
-        type=str,
-        help="Path to the image lookup file",
-    )
-    
-    # Model arguments
-    model_group = parser.add_argument_group("Model")
-    model_group.add_argument(
-        "--embedding-dim",
-        type=int,
-        help="Dimension of the embeddings",
-    )
-    model_group.add_argument(
-        "--bond-dim",
-        type=int,
-        help="Bond dimension for the MPS ansatz",
-    )
-    
-    # Training arguments
-    training_group = parser.add_argument_group("Training")
-    training_group.add_argument(
-        "--batch-size",
-        type=int,
-        help="Batch size for training",
-    )
-    training_group.add_argument(
-        "--learning-rate",
-        type=float,
-        help="Learning rate for the optimizer",
-    )
-    training_group.add_argument(
-        "--weight-decay",
-        type=float,
-        help="Weight decay for the optimizer",
-    )
-    training_group.add_argument(
-        "--epochs",
-        type=int,
-        help="Number of epochs to train the model",
-    )
-    training_group.add_argument(
-        "--patience",
-        type=int,
-        help="Patience for early stopping",
-    )
-    
-    # Loss arguments
-    loss_group = parser.add_argument_group("Loss")
-    loss_group.add_argument(
-        "--temperature",
-        type=float,
-        help="Temperature for the InfoNCE loss",
-    )
-    loss_group.add_argument(
-        "--hard-neg-loss-weight",
-        type=float,
-        help="Weight for the hard negative loss component",
-    )
-    loss_group.add_argument(
-        "--hard-neg-margin",
-        type=float,
-        help="Margin for the hard negative loss",
-    )
-    loss_group.add_argument(
-        "--hard-neg-distance-function",
-        type=str,
-        choices=["cosine", "euclidean"],
-        help="Distance function for the hard negative loss",
-    )
-    loss_group.add_argument(
-        "--hard-neg-swap",
-        action="store_true",
-        help="Whether to use the distance swap for the hard negative loss",
-    )
-    
-    # Logging arguments
-    logging_group = parser.add_argument_group("Logging")
-    logging_group.add_argument(
-        "--log-path",
-        type=str,
-        help="Path to save training logs",
-    )
-    logging_group.add_argument(
-        "--checkpoint-path",
-        type=str,
-        help="Path to save model checkpoints",
-    )
-    logging_group.add_argument(
-        "--mlflow-uri",
-        type=str,
-        help="URI for MLflow tracking server",
-    )
-    logging_group.add_argument(
-        "--mlflow-experiment",
-        type=str,
-        help="Name of the MLflow experiment",
-    )
-    
-    # System arguments
-    system_group = parser.add_argument_group("System")
-    system_group.add_argument(
-        "--device",
-        type=str,
-        choices=["cpu", "cuda", "mps"],
-        help="Device to run the training on",
-    )
-    system_group.add_argument(
-        "--seed",
-        type=int,
-        help="Random seed for reproducibility",
-    )
-    
-    args = parser.parse_args()
-    
-    # Load config file if provided
-    if args.config:
-        with open(args.config, 'r') as f:
-            config = yaml.safe_load(f)
-            # Update args with config values, but don't override command line args
-            for key, value in config.items():
-                if not hasattr(args, key) or getattr(args, key) is None:
-                    setattr(args, key, value)
+EMBEDDING_DIM= 768
+BOND_DIM= 16
 
-    # If the mlflow uri is not set
-    if not args.mlflow_uri:
-        args.mlflow_uri = f"sqlite:///{os.path.expanduser('~/mlflow/mlruns.db')}"
-   
-    print(f"Using MLflow URI: {args.mlflow_uri}") 
-    return args
+DEVICE = "mps"
+SEED   = 42
 
+
+TRAIN_DATA_PATH = "data/aro/processed/combined/train.json"
+VAL_DATA_PATH   = "data/aro/processed/combined/val.json"
+TEST_DATA_PATH  = "data/aro/processed/combined/test.json"
+IMAGE_LOOKUP_PATH = "models/lookup_embedding_ViT-B_32.pt"
+
+BATCH_SIZE    = 32
+LEARNING_RATE = 0.001
+WEIGHT_DECAY  = 0.001
+EPOCHS        = 10
+PATIENCE      = 5
+
+TEMPERATURE = 0.07
+HARD_NEG_LOSS_WEIGHT = 1.0
+HARD_NEG_MARGIN      = 0.2
+HARD_NEG_DISTANCE_FUNCTION = "euclidian" 
+HARD_NEG_SWAP        = False          
+
+LOG_PATH        = "runs/logs/"
+CHECKPOINT_PATH = "./checkpoints"
+MLFLOW_EXPERIMENT = "discoclip_aro_experiment"
+MLFLOW_URI = None 
 
 
 def get_aro_dataset(
     data_path: str, dim: int, bond_dim: int, progress: bool = True
 ) -> ARODataset:
     
-    reader = READER
     cache_dir = os.path.join(os.path.dirname(data_path), '.cache')
     os.makedirs(cache_dir, exist_ok=True)
     
@@ -204,7 +68,7 @@ def get_aro_dataset(
    
     cache_key = os.path.join(
         os.path.basename(data_path),
-        f"{reader}_dim{dim}_bond{bond_dim}"
+        f"{READER}_dim{dim}_bond{bond_dim}"
     )
     
     state_dict = cache.get(cache_key)
@@ -276,7 +140,7 @@ def train_epoch(
     contrastive_criterion,
     hard_neg_criterion,
     optimizer,
-    hard_neg_loss_weight=0,
+    hard_neg_loss_weight=0.0,
     device="cpu",
 ):
     """
@@ -360,8 +224,8 @@ def evaluate_model(
     image_model,
     dataloader,
     contrastive_criterion,
-    hard_neg_criterion=None,
-    hard_neg_loss_weight=0,
+    hard_neg_criterion,
+    hard_neg_loss_weight=0.0,
     device="cpu",
 ):
     """
@@ -414,8 +278,11 @@ def evaluate_model(
 
             hard_neg_acc = (pos_sim > neg_sim).float().mean().item()
             hard_neg_draw = (pos_sim == neg_sim).float().mean().item()
-            hard_neg_loss = hard_neg_criterion(image_embeddings, 
-                                             true_caption_embeddings, false_caption_embeddings)
+            hard_neg_loss = hard_neg_criterion(
+                image_embeddings, 
+                true_caption_embeddings, 
+                false_caption_embeddings
+            )
 
             loss = infonce_loss + hard_neg_loss_weight * hard_neg_loss
 
@@ -446,41 +313,39 @@ def get_einsum_model(datasets: list):
     return model
 
 
-def train_model(args, parent_run=None):
+def train_model(parent_run=None):
     with mlflow.start_run(parent_run_id=parent_run.info.run_id if parent_run else None,
                           nested=True if parent_run else False) as run:
-        mlflow.log_params(vars(args))
 
         logger = setup_logger(
-            os.path.join(args.log_path, f"train_{run.info.run_id}.log")
+            os.path.join(LOG_PATH, f"train_{run.info.run_id}.log")
         )
         logger.info(
-            f"Running experiment: {args.mlflow_experiment}, run ID: {run.info.run_id}, run name: {run.info.run_name}"
+            f"Running experiment: {MLFLOW_EXPERIMENT}, run ID: {run.info.run_id}, run name: {run.info.run_name}"
         )
         
-        logger.info(f"Args: {vars(args)}")
         
-        set_seed(args.seed)
+        set_seed(SEED)
 
         # Get datasets
         train_ds = get_aro_dataset(
-            data_path=args.train_data_path,
-            dim=args.embedding_dim,
-            bond_dim=args.bond_dim,
+            data_path=TRAIN_DATA_PATH,
+            dim=EMBEDDING_DIM,
+            bond_dim=BOND_DIM,
             progress=True,
         )
 
         val_ds = get_aro_dataset(
-            data_path=args.val_data_path,
-            dim=args.embedding_dim,
-            bond_dim=args.bond_dim,
+            data_path=VAL_DATA_PATH,
+            dim=EMBEDDING_DIM,
+            bond_dim=BOND_DIM,
             progress=True,
         )
 
         test_ds = get_aro_dataset(
-            data_path=args.test_data_path,
-            dim=args.embedding_dim,
-            bond_dim=args.bond_dim,
+            data_path=TEST_DATA_PATH,
+            dim=EMBEDDING_DIM,
+            bond_dim=BOND_DIM,
             progress=True,
         )
         
@@ -493,54 +358,54 @@ def train_model(args, parent_run=None):
 
         train_loader = DataLoader(
             train_ds,
-            batch_size=args.batch_size,
+            batch_size=BATCH_SIZE,
             shuffle=True,
             collate_fn=collate_fn,
         )
 
         val_loader = DataLoader(
             val_ds,
-            batch_size=args.batch_size,
+            batch_size=BATCH_SIZE,
             shuffle=False,
             collate_fn=collate_fn,
         )
 
         test_loader = DataLoader(
             test_ds,
-            batch_size=args.batch_size,
+            batch_size=BATCH_SIZE,
             shuffle=False,
             collate_fn=collate_fn,
         )
 
-        model = get_einsum_model([train_ds, val_ds, test_ds]).to(args.device)
+        model = get_einsum_model([train_ds, val_ds, test_ds]).to(DEVICE)
        
         number_params = sum(p.numel() for p in model.parameters())
         mlflow.log_params({"model_num_params": number_params})
 
-        image_model = LookupEmbedding.load_from_checkpoint(args.image_lookup_path)
-        image_model = image_model.to(args.device)
+        image_model = LookupEmbedding.load_from_checkpoint(IMAGE_LOOKUP_PATH)
+        image_model = image_model.to(DEVICE)
 
         # Define optimizer and loss functions
-        contrastive_loss = InfoNCE(temperature=args.temperature)
-        if args.hard_neg_distance_function == "cosine":
+        contrastive_loss = InfoNCE(temperature=TEMPERATURE)
+        if HARD_NEG_DISTANCE_FUNCTION == "cosine":
             distance_function = lambda x, y: 1 - nn.CosineSimilarity(dim=-1)(x, y)
-        elif args.hard_neg_distance_function == "euclidean":
+        elif HARD_NEG_DISTANCE_FUNCTION == "euclidean":
             distance_function = nn.PairwiseDistance(p=2)
         else:
-            raise ValueError(f"Unknown distance function: {args.hard_neg_distance_function}")
+            raise ValueError(f"Unknown distance function: {HARD_NEG_DISTANCE_FUNCTION}")
         hard_neg_loss = nn.TripletMarginWithDistanceLoss(
             distance_function=distance_function,
-            margin=args.hard_neg_margin,
-            swap=args.hard_neg_swap,
+            margin=HARD_NEG_MARGIN,
+            swap=HARD_NEG_SWAP,
         )
         optimizer = optim.AdamW(
-            model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+            model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
         )
 
         best_val_hard_neg_loss = float("inf")
 
-        for epoch in trange(1, args.epochs + 1, desc="Training Epochs"):
-            logger.info(f"Starting epoch {epoch}/{args.epochs}")
+        for epoch in trange(1, EPOCHS + 1, desc="Training Epochs"):
+            logger.info(f"Starting epoch {epoch}/{EPOCHS}")
 
             # Train
             train_metrics = train_epoch(
@@ -550,8 +415,8 @@ def train_model(args, parent_run=None):
                 contrastive_loss,
                 hard_neg_loss,
                 optimizer,
-                hard_neg_loss_weight=args.hard_neg_loss_weight,
-                device=args.device,
+                hard_neg_loss_weight=HARD_NEG_LOSS_WEIGHT,
+                device=DEVICE,
             )
             mlflow.log_metrics(
                 {f"train/{key}": value for key, value in train_metrics.items()},
@@ -565,15 +430,15 @@ def train_model(args, parent_run=None):
                 val_loader,
                 contrastive_loss,
                 hard_neg_loss,
-                hard_neg_loss_weight=args.hard_neg_loss_weight,
-                device=args.device,
+                hard_neg_loss_weight=HARD_NEG_LOSS_WEIGHT,
+                device=DEVICE,
             )
 
             mlflow.log_metrics(
                 {f"val/{key}": value for key, value in val_metrics.items()}, step=epoch
             )
             logger.info(
-                f"Epoch {epoch}/{args.epochs} - "
+                f"Epoch {epoch}/{EPOCHS} - "
                 f"Train Loss: {train_metrics['loss']:.4f}, "
                 f"Val Loss: {val_metrics['loss']:.4f}, "
                 f"Val Acc: {val_metrics['hard_neg_acc']:.4f}"
@@ -586,7 +451,6 @@ def train_model(args, parent_run=None):
                     "optimizer_state_dict": optimizer.state_dict(),
                     "epoch": epoch,
                     "val_metrics": val_metrics,
-                    "args": vars(args),
                 }
                 checkpoint_path = os.path.join(
                     CHECKPOINT_PATH, f"{run.info.run_id}/best_model.pt"
@@ -600,11 +464,11 @@ def train_model(args, parent_run=None):
         best_model_path = os.path.join(
             CHECKPOINT_PATH, f"{run.info.run_id}/best_model.pt"
         )
-        best_checkpoint = torch.load(best_model_path, map_location=args.device)
+        best_checkpoint = torch.load(best_model_path, map_location=DEVICE)
         
         best_model = EinsumModel()
         best_model.load_state_dict(best_checkpoint["model_state_dict"])
-        best_model = best_model.to(args.device)        
+        best_model = best_model.to(DEVICE)        
 
         test_metrics = evaluate_model(
             best_model,
@@ -612,8 +476,8 @@ def train_model(args, parent_run=None):
             test_loader,
             contrastive_loss,
             hard_neg_loss,
-            hard_neg_loss_weight=args.hard_neg_loss_weight,
-            device=args.device,
+            hard_neg_loss_weight=HARD_NEG_LOSS_WEIGHT,
+            device=DEVICE,
         )
         mlflow.log_metrics(
             {f"test/{key}": value for key, value in test_metrics.items()}
@@ -626,7 +490,7 @@ def train_model(args, parent_run=None):
             f"Test Acc: {test_metrics['hard_neg_acc']:.4f}"
         )
         logger.info("Training complete.")
-        mlflow.log_artifact(os.path.join(args.log_path, f"train_{run.info.run_id}.log"))
+        mlflow.log_artifact(os.path.join(LOG_PATH, f"train_{run.info.run_id}.log"))
 
 
 def set_seed(seed):
@@ -647,9 +511,8 @@ def set_seed(seed):
 
 
 if __name__ == "__main__":
-    args = parse_args()
 
-    mlflow.set_tracking_uri(args.mlflow_uri)
-    mlflow.set_experiment(args.mlflow_experiment)
+    # mlflow.set_tracking_uri(MLFLOW_URI)
+    # mlflow.set_experiment(MLFLOW_EXPERIMENT)
 
-    train_model(args)
+    train_model()
