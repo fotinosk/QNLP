@@ -16,9 +16,9 @@ from qnlp.discoclip.frozen.frozen_image_model import LookupEmbedding
 
 torch.serialization.add_safe_globals([Symbol])
 
-TRAIN_DATA_PATH = "qnlp/discoclip/frozen/discoclip_aro_minimal/data/train.json"
-TEST_DATA_PATH = "qnlp/discoclip/frozen/discoclip_aro_minimal/data/test.json"
-VAL_DATA_PATH = "qnlp/discoclip/frozen/discoclip_aro_minimal/data/val.json"
+TRAIN_DATA_PATH = "data/aro/processed/combined/train.json"
+TEST_DATA_PATH = "data/aro/processed/combined/test.json"
+VAL_DATA_PATH = "data/aro/processed/combined/val.json"
 
 IMAGE_LOOKUP_PATH = "/Users/fotinoskyriakides/.cache/clip/ViT-B-32.pt"
 EMBEDDING_DIM = 768

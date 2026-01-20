@@ -2,32 +2,45 @@ import gc
 import json
 import pandas as pd
 from dataclasses import asdict
-from concurrent.futures import ProcessPoolExecutor, as_completed
+import concurrent.futures
+import os
+import psutil
+import time
+from threading import Thread
+from qnlp.discoclip.frozen.discoclip_aro_minimal.train_aro import BOND_DIM, EMBEDDING_DIM, VAL_DATA_PATH
 
-from lambeq import AtomicType, Rewriter
-from lambeq.backend.tensor import Dim
+# --- SAFETY WATCHDOG ---
+def memory_watchdog(threshold_gb):
+    process = psutil.Process(os.getpid())
+    while True:
+        current_mem_gb = process.memory_info().rss / (1024**3)
+        if current_mem_gb > threshold_gb:
+            print(f"\n[!!!] KILLING SCRIPT: {current_mem_gb:.2f}GB exceeds {threshold_gb}GB limit.")
+            os._exit(1)
+        time.sleep(5)
 
-from qnlp.discoclip.ansatz import CustomMPSAnsatz
-from qnlp.discoclip.text_processor import BobcatTextProcessor
-from qnlp.discoclip.cached_parser import CachedBobcatParser
 
-worker_transform = None
+# Global variables for worker processes
+_processor = None
+_parser = None
+_ansatz = None
 
-def chunk_list(lst, chunk_size):
-    """Split a list into chunks of specified size."""
-    for i in range(0, len(lst), chunk_size):
-        yield lst[i:i + chunk_size]
-        
-def create_text_transform(dim, bond_dim):
-    ansatz = CustomMPSAnsatz(
-    {
-        AtomicType.SENTENCE: Dim(dim),
-        AtomicType.NOUN: Dim(dim),
-        AtomicType.PREPOSITIONAL_PHRASE: Dim(dim),
-    },
-    bond_dim=bond_dim,
-)
+def worker_init(bond_dim, embedding_dim):
+    """
+    Initialise heavy objects ONCE per worker process.
+    """
+    global _processor, _parser, _ansatz
+    from lambeq import AtomicType, Rewriter
+    from lambeq.backend.tensor import Dim
+    from qnlp.discoclip.ansatz import CustomMPSAnsatz
+    from qnlp.discoclip.text_processor import BobcatTextProcessor
+    from qnlp.discoclip.cached_parser import CachedBobcatParser
 
+    _ansatz = CustomMPSAnsatz(
+        {AtomicType.SENTENCE: Dim(embedding_dim), AtomicType.NOUN: Dim(embedding_dim), AtomicType.PREPOSITIONAL_PHRASE: Dim(embedding_dim)},
+        bond_dim=bond_dim
+    )
+    
     rules = [
         "auxiliary",
         "connector",
@@ -39,61 +52,74 @@ def create_text_transform(dim, bond_dim):
         "object_rel_pronoun",
         "subject_rel_pronoun",
     ]
-    rewriter = Rewriter(rules)
-    bobcat_parser = CachedBobcatParser()
-    text_transform = BobcatTextProcessor(
-        ccg_parser=bobcat_parser,
-        ansatz=ansatz,
-        rewriter=rewriter,
-    )
-    return text_transform
-
-def init_worker(dim, bond_dim):
-    global worker_transform
-    worker_transform = create_text_transform(dim, bond_dim)
-
-def process_batch(batch):
-    # text_transform = create_text_transform(dim, bond_dim)
-    global worker_transform
-    return worker_transform(batch) # type: ignore
-    # try: 
-    #     res = worker_transform(batch)
-    #     return res
-    # finally: 
-    #     del worker_transform
-    #     gc.collect()
-
-def preprocess_aro(data_path: str, dim: int, bond_dim: int):
-    dataset = pd.read_json(data_path)
-    captions = dataset['true_caption'].unique().tolist() + dataset['false_caption'].unique().tolist()
     
-    batches = list(chunk_list(captions, 100))
-    dir_data_path, file_name = data_path.rsplit("/", 1)
-    file_name = file_name.split(".")[0]
-    processed_file_name = f"{dir_data_path}/processed_{file_name}.jsonl"
-    with open(processed_file_name, "w") as f: 
-        print(f"Streaming results to {processed_file_name}")
-            
-        with ProcessPoolExecutor(max_workers=2, initializer=init_worker, initargs=(dim, bond_dim)) as executor:
-            future_to_batch = {executor.submit(process_batch, batch): batch for batch in batches}
-            # Collect results as they complete
-            for future in as_completed(future_to_batch, timeout=60):
-                batch_result = future.result()
+    _parser = CachedBobcatParser(device="mps")
+    _processor = BobcatTextProcessor(ccg_parser=_parser, ansatz=_ansatz, rewriter=Rewriter(rules),)
+
+def process_batch_standalone(batch_data):
+    """
+    Process a batch of data using the pre-initialised processor.
+    """
+    global _processor
+    if _processor is None:
+        raise RuntimeError("Processor not initialised in worker process.")
+    
+    result = _processor(batch_data)
+    import gc
+    gc.collect()
+    return result
+
+def preprocess_aro(data_path: str, max_line_to_process:int = 4000):
+    dataset = pd.read_json(data_path)
+    # filter out bad sentences
+    dataset = dataset[(~dataset['true_caption'].str.contains("pasture")) & (~dataset['false_caption'].str.contains("pasture"))]
+    captions = set(dataset['true_caption'].unique().tolist() + dataset['false_caption'].unique().tolist())
+
+    output_path = f"{data_path.split('.')[0]}_processed.jsonl"
+    print(output_path)
+    processed_dataset = pd.read_json(output_path, lines=True)
+    if not processed_dataset.empty:
+        processed_captions = set(processed_dataset['caption'].unique())
+        captions = list(captions - processed_captions)
+        print(f"{len(captions)} captions left to process, already processed {len(processed_captions)}")
+    else:
+        captions = list(captions)
+
+    captions = captions[:min(len(captions), max_line_to_process)]
+    print(f"Processing {len(captions)} captions")
+    
+    # Smaller chunks (e.g., 50) allow more frequent RAM clearing
+    chunks = [captions[i:i + 50] for i in range(0, len(captions), 50)]
+    
+    
+    print(f"Processing {len(captions)} lines in {len(chunks)} chunks...")
+
+    # max_workers=1 or 2 is safest for Bobcat on a standard laptop
+    with concurrent.futures.ProcessPoolExecutor(max_workers=4, initializer=worker_init, initargs=(BOND_DIM, EMBEDDING_DIM)) as executor:
+        # We use executor.map because it yields results in order and 
+        # doesn't store all futures in a massive dictionary upfront.
+        results_iterator = executor.map(process_batch_standalone, chunks)
+
+        with open(output_path, "a") as f:
+            for i, batch_result in enumerate(results_iterator):
                 einsum_inputs = batch_result['einsum_inputs']
-                captions_2 = batch_result['sentences']
+                sentences = batch_result['sentences']
                 
-                for c, out in zip(captions_2, einsum_inputs):
+                for c, out in zip(sentences, einsum_inputs):
                     line = {
                         "caption": c,
                         "diagram": out[0],
                         "symbols": [[asdict(x[0]), x[1]] for x in out[1]]
                     }
                     f.write(json.dumps(line) + "\n")
-                    f.flush()
-                print("Finished processing batch")
-    print("Finished!")
-    
+                
+                f.flush() # Force write to disk
+                print(f"Batch {i+1}/{len(chunks)} written to disk. (RAM: {psutil.Process().memory_info().rss/(1024**2):.0f}MB)")
+                
+                # Explicit trigger for the main process
+                gc.collect()
 
 if __name__ == "__main__":
-    from qnlp.discoclip.frozen.discoclip_aro_minimal.train_aro import VAL_DATA_PATH, BOND_DIM, EMBEDDING_DIM
-    preprocess_aro(VAL_DATA_PATH, EMBEDDING_DIM, BOND_DIM)
+    
+    Thread(target=memory_watchdog, args=(6.0,), daemon=True).start()
+    preprocess_aro(VAL_DATA_PATH)

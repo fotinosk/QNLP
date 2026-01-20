@@ -1,25 +1,19 @@
 import logging
 import os
-from diskcache import Cache
 
 import mlflow
 import torch
 import torch.optim as optim
-from lambeq import AtomicType, Rewriter, Symbol
-from lambeq.backend.tensor import Dim
+from lambeq import Symbol
 from torch import nn
 from torch.nn.functional import cosine_similarity
 from torch.utils.data import DataLoader
 from tqdm import trange
 
-from qnlp.discoclip2.dataset.aro_dataset import ARODataset, aro_tn_collate_fn
-from qnlp.discoclip2.models.bobcat_text_processor import BobcatTextProcessor
+from qnlp.discoclip2.dataset.aro_dataset import aro_tn_collate_fn, ProcessedARODataset
 from qnlp.discoclip2.models.loss import InfoNCE
 from qnlp.discoclip2.models.lookup_embeddings import LookupEmbedding
 from qnlp.discoclip2.models.einsum_model import EinsumModel
-
-from qnlp.discoclip2.parser.cached_bobcat import CachedBobcatParser
-from qnlp.discoclip2.parser.asnsatz import CustomMPSAnsatz
 
 
 torch.serialization.add_safe_globals([Symbol])
@@ -37,6 +31,10 @@ SEED   = 42
 TRAIN_DATA_PATH = "data/aro/processed/combined/train.json"
 VAL_DATA_PATH   = "data/aro/processed/combined/val.json"
 TEST_DATA_PATH  = "data/aro/processed/combined/test.json"
+# TRAIN_DATA_PATH = "data/aro/processed/processed_train.jsonl"
+# VAL_DATA_PATH   = "data/aro/processed/processed_val.json"
+# TEST_DATA_PATH  = "data/aro/processed/processed_test.json"
+
 IMAGE_LOOKUP_PATH = "models/lookup_embedding_ViT-B_32.pt"
 
 BATCH_SIZE    = 32
@@ -48,73 +46,13 @@ PATIENCE      = 5
 TEMPERATURE = 0.07
 HARD_NEG_LOSS_WEIGHT = 1.0
 HARD_NEG_MARGIN      = 0.2
-HARD_NEG_DISTANCE_FUNCTION = "euclidian" 
+HARD_NEG_DISTANCE_FUNCTION = "euclidean" 
 HARD_NEG_SWAP        = False          
 
 LOG_PATH        = "runs/logs/"
 CHECKPOINT_PATH = "./checkpoints"
 MLFLOW_EXPERIMENT = "discoclip_aro_experiment"
 MLFLOW_URI = None 
-
-
-def get_aro_dataset(
-    data_path: str, dim: int, bond_dim: int, progress: bool = True
-) -> ARODataset:
-    
-    cache_dir = os.path.join(os.path.dirname(data_path), '.cache')
-    os.makedirs(cache_dir, exist_ok=True)
-    
-    cache = Cache(cache_dir, size_limit=10 * 2**30) # 10GB
-   
-    cache_key = os.path.join(
-        os.path.basename(data_path),
-        f"{READER}_dim{dim}_bond{bond_dim}"
-    )
-    
-    state_dict = cache.get(cache_key)
-    if state_dict is not None:
-        print(f"Loading cached dataset from {cache_key}")
-
-        dataset = ARODataset(data_path=data_path, text_transform=None)
-        dataset.load_state_dict(state_dict)
-        return dataset
-
-    ansatz = CustomMPSAnsatz(
-        {
-            AtomicType.SENTENCE: Dim(dim),
-            AtomicType.NOUN: Dim(dim),
-            AtomicType.PREPOSITIONAL_PHRASE: Dim(dim),
-        },
-        bond_dim=bond_dim,
-    )
-
-    rules = [
-        "auxiliary",
-        "connector",
-        "determiner",
-        "postadverb",
-        "preadverb",
-        "prepositional_phrase",
-        "coordination",
-        "object_rel_pronoun",
-        "subject_rel_pronoun",
-    ]
-    rewriter = Rewriter(rules)
-    bobcat_parser = CachedBobcatParser()
-    text_transform = BobcatTextProcessor(
-        ccg_parser=bobcat_parser,
-        ansatz=ansatz,
-        rewriter=rewriter,
-    )
-    
-    dataset = ARODataset(
-        data_path=data_path, text_transform=text_transform, progress=progress
-    )
-
-    print(f"Caching dataset to {cache_key}")
-    cache.set(cache_key, dataset.state_dict())
-    cache.close()
-    return dataset
 
 
 def setup_logger(log_path):
@@ -327,32 +265,10 @@ def train_model(parent_run=None):
         
         set_seed(SEED)
 
-        # Get datasets
-        train_ds = get_aro_dataset(
-            data_path=TRAIN_DATA_PATH,
-            dim=EMBEDDING_DIM,
-            bond_dim=BOND_DIM,
-            progress=True,
-        )
-
-        val_ds = get_aro_dataset(
-            data_path=VAL_DATA_PATH,
-            dim=EMBEDDING_DIM,
-            bond_dim=BOND_DIM,
-            progress=True,
-        )
-
-        test_ds = get_aro_dataset(
-            data_path=TEST_DATA_PATH,
-            dim=EMBEDDING_DIM,
-            bond_dim=BOND_DIM,
-            progress=True,
-        )
         
-        mlflow.log_params({"ds_size_train": len(train_ds), 
-                           "ds_size_val": len(val_ds), 
-                           "ds_size_test": len(test_ds)})
-
+        train_ds = ProcessedARODataset(data_path=TRAIN_DATA_PATH)
+        val_ds = ProcessedARODataset(data_path=VAL_DATA_PATH)
+        test_ds = ProcessedARODataset(data_path=TEST_DATA_PATH)
 
         collate_fn = aro_tn_collate_fn
 

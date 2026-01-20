@@ -21,3 +21,4 @@ data/caltech256/*
 *.pt
 *.zip
 image/*
+fil-result/

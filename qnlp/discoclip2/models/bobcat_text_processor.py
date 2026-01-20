@@ -10,7 +10,7 @@ The pipeline involves the following steps:
 Before training, we need to gather the symbols and their shapes from the training data.
 The symbols will be used to initialize the tensors in the model.
 """
-
+import copy
 from typing import Optional
 from itertools import count
 
@@ -253,12 +253,12 @@ class BobcatTextProcessor:
                     filtered_results[key] = results[key]
         
         # Explicitly delete all large objects if not returning them
-        # del results
-        # del einsum_inputs
-        # del diagrams
-        # del rewritten_diagrams
-        # del circuits
-        # del lemma_trees  # Free memory
+        del results
+        del einsum_inputs
+        del diagrams
+        del rewritten_diagrams
+        del circuits
+        del lemma_trees  # Free memory
         
         return filtered_results
 
@@ -271,7 +271,8 @@ class BobcatTextProcessor:
         Returns:
             A new CCGTree with the leaves' text replaced by the lemmas.
         """
-        tree = CCGTree.from_json(tree.to_json())
+        # tree = CCGTree.from_json(tree.to_json())
+        tree = copy.deepcopy(tree)
         def traverse(node: CCGTree, lemma_iter):
             if node.is_leaf:
                 node._text = next(lemma_iter)

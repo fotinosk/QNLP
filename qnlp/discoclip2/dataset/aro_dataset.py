@@ -2,7 +2,20 @@ import os
 import pandas as pd
 from tqdm import tqdm
 from torch.utils.data import Dataset
+from diskcache import Cache
+
+from lambeq.backend.tensor import Dim
+from lambeq.backend.symbol import Symbol
+
+from lambeq import AtomicType, Rewriter
+
 from sklearn.model_selection import train_test_split
+
+
+from qnlp.discoclip2.parser.cached_bobcat import CachedBobcatParser
+from qnlp.discoclip2.parser.asnsatz import CustomMPSAnsatz
+from qnlp.discoclip2.models.bobcat_text_processor import BobcatTextProcessor
+
 
 def create_train_val_test_split(vga_data_path, vgr_data_path,
                                 vga_save_path, vgr_save_path, 
@@ -59,7 +72,7 @@ def create_train_val_test_split(vga_data_path, vgr_data_path,
 class ARODataset(Dataset):
     def __init__(self, 
                  data_path: str, 
-                 text_transform,
+                 text_transform=None,
                  crop: bool = True,
                  progress = True):
         self.dataset = pd.read_json(data_path)
@@ -157,3 +170,138 @@ def aro_tn_collate_fn(batch):
         "false_captions": false_captions,
         "indices": indices
     }
+
+
+def get_aro_dataset(
+    data_path: str, dim: int, bond_dim: int, progress: bool = True
+) -> ARODataset:
+    
+    cache_dir = os.path.join(os.path.dirname(data_path), '.cache')
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    cache = Cache(cache_dir, size_limit=10 * 2**30) # 10GB
+   
+    cache_key = os.path.join(
+        os.path.basename(data_path),
+        f"bobcat_dim{dim}_bond{bond_dim}"
+    )
+    
+    state_dict = cache.get(cache_key)
+    if state_dict is not None:
+        print(f"Loading cached dataset from {cache_key}")
+
+        dataset = ARODataset(data_path=data_path, text_transform=None)
+        dataset.load_state_dict(state_dict)
+        return dataset
+
+    ansatz = CustomMPSAnsatz(
+        {
+            AtomicType.SENTENCE: Dim(dim),
+            AtomicType.NOUN: Dim(dim),
+            AtomicType.PREPOSITIONAL_PHRASE: Dim(dim),
+        },
+        bond_dim=bond_dim,
+    )
+
+    rules = [
+        "auxiliary",
+        "connector",
+        "determiner",
+        "postadverb",
+        "preadverb",
+        "prepositional_phrase",
+        "coordination",
+        "object_rel_pronoun",
+        "subject_rel_pronoun",
+    ]
+    rewriter = Rewriter(rules)
+    bobcat_parser = CachedBobcatParser()
+    text_transform = BobcatTextProcessor(
+        ccg_parser=bobcat_parser,
+        ansatz=ansatz,
+        rewriter=rewriter,
+    )
+    
+    dataset = ARODataset(
+        data_path=data_path, text_transform=text_transform, progress=progress
+    )
+
+    print(f"Caching dataset to {cache_key}")
+    cache.set(cache_key, dataset.state_dict())
+    cache.close()
+    return dataset
+
+class ProcessedARODataset(Dataset):
+    def __init__(self, 
+                data_path: str, 
+                crop: bool = True,
+                progress = True):
+        self.dataset = pd.read_json(data_path)
+        self.crop = crop
+        self.progress = progress
+        
+        
+        dir_data_path, file_name = data_path.rsplit("/", 1)
+        file_name = file_name.split(".")[0]
+        processed_file_name = f"{dir_data_path}/processed_{file_name}.jsonl"
+        self.processed_dataset = pd.read_json(processed_file_name, lines=True)
+        
+        self.text_map = self.processed_dataset.set_index("caption")['diagram'].to_dict()
+        
+        self.symbols = []
+        self.sizes = []
+        
+        for row in self.processed_dataset['symbols']:
+            for x in row:
+                self.symbols.append(Symbol(**x[0]))
+                self.sizes.append(x[1])
+                
+        print(f"Initialized dataset for {data_path}")
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        if self.crop:
+            x = self.dataset.iloc[idx]['bbox_x']
+            y = self.dataset.iloc[idx]['bbox_y']
+            w = self.dataset.iloc[idx]['bbox_w']
+            h = self.dataset.iloc[idx]['bbox_h']
+            image = f'{self.dataset.iloc[idx]["image_path"].split(".")[0]}_{x}_{y}_{w}_{h}.jpg'
+        else:
+            image = self.dataset.iloc[idx]['image_path']
+
+        true_caption = self.dataset.iloc[idx]['true_caption']
+        false_caption = self.dataset.iloc[idx]['false_caption']
+
+        true_caption = self.text_map.get(true_caption, None)
+        false_caption = self.text_map.get(false_caption, None)
+
+        true_caption = self.remove_shape(true_caption)
+        false_caption = self.remove_shape(false_caption)
+
+        return {
+            "image": image,
+            "true_caption": true_caption,
+            "false_caption": false_caption,
+            "index": idx
+        }
+
+    @staticmethod
+    def remove_shape(einsum_input):
+        if einsum_input is None:
+            return None
+        einsum_expr, symbol_size_list = einsum_input
+        return (einsum_expr, [sym for sym, _ in symbol_size_list])
+
+    def state_dict(self):
+        return {
+            'text_map': self.text_map,
+            'symbols': self.symbols,
+            'sizes': self.sizes
+        }
+
+    def load_state_dict(self, state_dict):
+        self.text_map = state_dict['text_map']
+        self.symbols = state_dict['symbols']
+        self.sizes = state_dict['sizes']
