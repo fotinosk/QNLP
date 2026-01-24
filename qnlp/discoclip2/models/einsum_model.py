@@ -2,6 +2,22 @@ import torch
 import torch.nn as nn
 from typing import List, Dict, Any
 from lambeq import Symbol
+from cotengra import einsum
+
+
+def get_einsum_model(datasets: list):
+    symbol_sizes = dict()
+    for ds in datasets:
+        for sym, size in zip(ds.symbols, ds.sizes):
+            if sym in symbol_sizes and symbol_sizes[sym] != size:
+                raise ValueError(f"Symbol {sym} has different sizes in the datasets: {symbol_sizes[sym]} and {size}")
+            symbol_sizes[sym] = size
+    
+    symbols = list(symbol_sizes.keys())
+    sizes = list(symbol_sizes.values())
+            
+    model = EinsumModel(symbols, sizes)
+    return model
 
 class EinsumModel(nn.Module):
     def __init__(self, symbols: List[Symbol] = [], sizes: List[tuple[int, ...]] = []):
@@ -110,7 +126,6 @@ class EinsumModel(nn.Module):
         """
         Forward pass of the model.
         """
-        from cotengra import einsum
         einsum_expr, symbols = input
 
         return einsum(einsum_expr, *[self.sym2weight[sym] for sym in symbols])

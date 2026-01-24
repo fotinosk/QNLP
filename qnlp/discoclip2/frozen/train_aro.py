@@ -13,16 +13,15 @@ from tqdm import trange
 from qnlp.discoclip2.dataset.aro_dataset import aro_tn_collate_fn, ProcessedARODataset
 from qnlp.discoclip2.models.loss import InfoNCE
 from qnlp.discoclip2.models.lookup_embeddings import LookupEmbedding
-from qnlp.discoclip2.models.einsum_model import EinsumModel
+from qnlp.discoclip2.models.einsum_model import EinsumModel, get_einsum_model
 
 
 torch.serialization.add_safe_globals([Symbol])
 
-READER = "bobcat"
 CHECKPOINT_PATH = "checkpoints/"
 
-EMBEDDING_DIM= 768
-BOND_DIM= 16
+EMBEDDING_DIM= 512
+BOND_DIM= 10
 
 DEVICE = "mps"
 SEED   = 42
@@ -31,9 +30,6 @@ SEED   = 42
 TRAIN_DATA_PATH = "data/aro/processed/combined/train.json"
 VAL_DATA_PATH   = "data/aro/processed/combined/val.json"
 TEST_DATA_PATH  = "data/aro/processed/combined/test.json"
-# TRAIN_DATA_PATH = "data/aro/processed/processed_train.jsonl"
-# VAL_DATA_PATH   = "data/aro/processed/processed_val.json"
-# TEST_DATA_PATH  = "data/aro/processed/processed_test.json"
 
 IMAGE_LOOKUP_PATH = "models/lookup_embedding_ViT-B_32.pt"
 
@@ -79,7 +75,7 @@ def train_epoch(
     hard_neg_criterion,
     optimizer,
     hard_neg_loss_weight=0.0,
-    device="cpu",
+    device="mps",
 ):
     """
     Train the model for one epoch.
@@ -236,20 +232,6 @@ def evaluate_model(
         metrics[key] /= total_samples
     return metrics
 
-def get_einsum_model(datasets: list):
-    symbol_sizes = dict()
-    for ds in datasets:
-        for sym, size in zip(ds.symbols, ds.sizes):
-            if sym in symbol_sizes and symbol_sizes[sym] != size:
-                raise ValueError(f"Symbol {sym} has different sizes in the datasets: {symbol_sizes[sym]} and {size}")
-            symbol_sizes[sym] = size
-    
-    symbols = list(symbol_sizes.keys())
-    sizes = list(symbol_sizes.values())
-            
-    model = EinsumModel(symbols, sizes)
-    return model
-
 
 def train_model(parent_run=None):
     with mlflow.start_run(parent_run_id=parent_run.info.run_id if parent_run else None,
@@ -265,7 +247,6 @@ def train_model(parent_run=None):
         
         set_seed(SEED)
 
-        
         train_ds = ProcessedARODataset(data_path=TRAIN_DATA_PATH)
         val_ds = ProcessedARODataset(data_path=VAL_DATA_PATH)
         test_ds = ProcessedARODataset(data_path=TEST_DATA_PATH)

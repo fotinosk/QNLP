@@ -199,7 +199,7 @@ class BobcatTextProcessor:
         lemmas = [self.tokenizer.lemmatize(tokens) for tokens in tokens]
 
         trees = self.ccg_parser.sentences2trees(tokens, tokenised=True, 
-                                                suppress_exceptions=suppress_exceptions)
+                                                suppress_exceptions=suppress_exceptions, verbose="suppress")
         lemma_trees = [
             self.lemmatize_tree(tree, lemma) if tree else None 
             for tree, lemma in zip(trees, lemmas)
@@ -241,6 +241,7 @@ class BobcatTextProcessor:
         # Create a new results dictionary with only what we need
         filtered_results = {}
         filtered_results['einsum_inputs'] = einsum_inputs
+        filtered_results['sentences'] = sentences
         
         if return_details:
             filtered_results['lemma_trees'] = lemma_trees

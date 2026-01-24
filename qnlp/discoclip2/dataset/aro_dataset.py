@@ -1,4 +1,5 @@
 import os
+from typing import Tuple, List
 import pandas as pd
 from tqdm import tqdm
 from torch.utils.data import Dataset
@@ -233,75 +234,61 @@ def get_aro_dataset(
 
 class ProcessedARODataset(Dataset):
     def __init__(self, 
-                data_path: str, 
-                crop: bool = True,
-                progress = True):
-        self.dataset = pd.read_json(data_path)
-        self.crop = crop
-        self.progress = progress
-        
-        
+                 data_path: str, 
+                ):
+        raw_dataset = pd.read_json(data_path)
         dir_data_path, file_name = data_path.rsplit("/", 1)
         file_name = file_name.split(".")[0]
-        processed_file_name = f"{dir_data_path}/processed_{file_name}.jsonl"
+        processed_file_name = f"{dir_data_path}/{file_name}_processed_512.jsonl"
         self.processed_dataset = pd.read_json(processed_file_name, lines=True)
         
-        self.text_map = self.processed_dataset.set_index("caption")['diagram'].to_dict()
+        self.text_map = {}        
+        for _, row in self.processed_dataset.iterrows():
+            self.text_map[row["caption"]] = self.remove_shape((row['diagram'], row['symbols']))
+
+        valid_mask = (
+            raw_dataset['true_caption'].isin(self.text_map.keys()) & 
+            raw_dataset['false_caption'].isin(self.text_map.keys())
+        )
         
+        self.dataset = raw_dataset[valid_mask].reset_index(drop=True)
+
+        self.image_paths = self.dataset['image_path'].to_list()
+
+        self.true_captions = [self.text_map[c] for c in self.dataset['true_caption']]
+        self.false_captions = [self.text_map[c] for c in self.dataset['false_caption']]
+
         self.symbols = []
         self.sizes = []
-        
         for row in self.processed_dataset['symbols']:
             for x in row:
                 self.symbols.append(Symbol(**x[0]))
+                # self.symbols.append(x[0])
                 self.sizes.append(x[1])
-                
-        print(f"Initialized dataset for {data_path}")
+        
+        assert isinstance(self.true_captions[0][0], str)
+        assert isinstance(self.true_captions[0][1][0], Symbol)
+        assert isinstance(self.symbols[0], Symbol)
+        
+        print(f"Initialized dataset for {data_path}. Final size: {len(self.dataset)}")
 
     def __len__(self):
         return len(self.dataset)
 
     def __getitem__(self, idx):
-        if self.crop:
-            x = self.dataset.iloc[idx]['bbox_x']
-            y = self.dataset.iloc[idx]['bbox_y']
-            w = self.dataset.iloc[idx]['bbox_w']
-            h = self.dataset.iloc[idx]['bbox_h']
-            image = f'{self.dataset.iloc[idx]["image_path"].split(".")[0]}_{x}_{y}_{w}_{h}.jpg'
-        else:
-            image = self.dataset.iloc[idx]['image_path']
-
-        true_caption = self.dataset.iloc[idx]['true_caption']
-        false_caption = self.dataset.iloc[idx]['false_caption']
-
-        true_caption = self.text_map.get(true_caption, None)
-        false_caption = self.text_map.get(false_caption, None)
-
-        true_caption = self.remove_shape(true_caption)
-        false_caption = self.remove_shape(false_caption)
-
+        # Optimized: Just simple list indexing. No pandas, no string splits.
         return {
-            "image": image,
-            "true_caption": true_caption,
-            "false_caption": false_caption,
+            "image": self.image_paths[idx],
+            "true_caption": self.true_captions[idx],
+            "false_caption": self.false_captions[idx],
             "index": idx
         }
 
     @staticmethod
-    def remove_shape(einsum_input):
-        if einsum_input is None:
-            return None
+    def remove_shape(einsum_input) -> Tuple[str, List[Symbol]]:
         einsum_expr, symbol_size_list = einsum_input
-        return (einsum_expr, [sym for sym, _ in symbol_size_list])
+        return (
+            einsum_expr, 
+            [Symbol(**sym) for sym, _ in symbol_size_list]
+        )
 
-    def state_dict(self):
-        return {
-            'text_map': self.text_map,
-            'symbols': self.symbols,
-            'sizes': self.sizes
-        }
-
-    def load_state_dict(self, state_dict):
-        self.text_map = state_dict['text_map']
-        self.symbols = state_dict['symbols']
-        self.sizes = state_dict['sizes']
