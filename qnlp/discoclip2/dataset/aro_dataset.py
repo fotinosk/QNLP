@@ -1,21 +1,15 @@
 import os
 from typing import Tuple, List
 import pandas as pd
-from tqdm import tqdm
+import torch
 from torch.utils.data import Dataset
-from diskcache import Cache
-
-from lambeq.backend.tensor import Dim
+from PIL import Image
 from lambeq.backend.symbol import Symbol
-
-from lambeq import AtomicType, Rewriter
 
 from sklearn.model_selection import train_test_split
 
+from qnlp.discoclip2.models.image_model import preprocess
 
-from qnlp.discoclip2.parser.cached_bobcat import CachedBobcatParser
-from qnlp.discoclip2.parser.asnsatz import CustomMPSAnsatz
-from qnlp.discoclip2.models.bobcat_text_processor import BobcatTextProcessor
 
 
 def create_train_val_test_split(vga_data_path, vgr_data_path,
@@ -70,172 +64,35 @@ def create_train_val_test_split(vga_data_path, vgr_data_path,
     print(f"VGA datasets saved to {vga_save_path}")
 
 
-class ARODataset(Dataset):
-    def __init__(self, 
-                 data_path: str, 
-                 text_transform=None,
-                 crop: bool = True,
-                 progress = True):
-        self.dataset = pd.read_json(data_path)
-        self.crop = crop
-        self.progress = progress
-
-        required_columns = ['true_caption', 'false_caption', 'image_path']
-        if not all(col in self.dataset.columns for col in required_columns):
-            raise ValueError(f"ARODataset must contain the following columns: {required_columns}")
-
-        if text_transform is not None:
-            print("Precomputing text")
-            self.precompute_text(text_transform)
-
-    def precompute_text(self, text_transform):
-        # build a map from text to einsum inputs
-        self.text_map = {}
-        symbol_size_set = set()
-
-        captions = list(set(self.dataset['true_caption'].tolist() + self.dataset['false_caption'].tolist()))
-        batch_size = 6
-
-        for i in tqdm(range(0, len(captions), batch_size), disable=not self.progress):
-            batch_captions = captions[i:i + batch_size]
-
-            einsum_inputs = text_transform(batch_captions, suppress_exceptions=True)['einsum_inputs']
-            for caption, einsum_input in zip(batch_captions, einsum_inputs):
-                self.text_map[caption] = einsum_input
-                if einsum_input is not None:
-                    _, symbol_size_list = einsum_input
-                    for symbol, size in symbol_size_list:
-                        symbol_size_set.add((symbol, size))
-        self.symbols, self.sizes = zip(*symbol_size_set) if symbol_size_set else ([], [])
-                    
-    def __len__(self):
-        return len(self.dataset)
-
-    def __getitem__(self, idx):
-        if self.crop:
-            x = self.dataset.iloc[idx]['bbox_x']
-            y = self.dataset.iloc[idx]['bbox_y']
-            w = self.dataset.iloc[idx]['bbox_w']
-            h = self.dataset.iloc[idx]['bbox_h']
-            image = f'{self.dataset.iloc[idx]["image_path"].split(".")[0]}_{x}_{y}_{w}_{h}.jpg'
-        else:
-            image = self.dataset.iloc[idx]['image_path']
-
-        true_caption = self.dataset.iloc[idx]['true_caption']
-        false_caption = self.dataset.iloc[idx]['false_caption']
-
-        true_caption = self.text_map.get(true_caption, None)
-        false_caption = self.text_map.get(false_caption, None)
-
-        def remove_shape(einsum_input):
-            if einsum_input is None:
-                return None
-            einsum_expr, symbol_size_list = einsum_input
-            return (einsum_expr, [sym for sym, _ in symbol_size_list])
-        true_caption = remove_shape(true_caption)
-        false_caption = remove_shape(false_caption)
-
-        return {
-            "image": image,
-            "true_caption": true_caption,
-            "false_caption": false_caption,
-            "index": idx
-        }
-    
-    def state_dict(self):
-        return {
-            'text_map': self.text_map,
-            'symbols': self.symbols,
-            'sizes': self.sizes
-        }
-    
-    def load_state_dict(self, state_dict):
-        self.text_map = state_dict['text_map']
-        self.symbols = state_dict['symbols']
-        self.sizes = state_dict['sizes']
-
 def aro_tn_collate_fn(batch):
-    valid = [item['true_caption'] is not None and item['false_caption'] is not None for item in batch]
-    # print the number of invalid samples if any
-    if not all(valid):
-        print(f"Found {sum(not v for v in valid)} invalid samples")
-
-    images = [item['image'] for item, v in zip(batch, valid) if v]
-    true_captions = [item['true_caption'] for item, v in zip(batch, valid) if v]
-    false_captions = [item['false_caption'] for item, v in zip(batch, valid) if v]
-    indices = [item['index'] for item, v in zip(batch, valid) if v]
-
+    images  = []
+    true_captions = []
+    false_captions = []
+    indices = []
+        
+    for el in batch:
+        true_captions.append(el['true_caption'])
+        false_captions.append(el['false_caption'])
+        indices.append(el['index'])
+        images.append(el['image'])
+    
     return {
-        "images": images,
+        "images": torch.stack(images),
         "true_captions": true_captions,
         "false_captions": false_captions,
         "indices": indices
     }
 
 
-def get_aro_dataset(
-    data_path: str, dim: int, bond_dim: int, progress: bool = True
-) -> ARODataset:
-    
-    cache_dir = os.path.join(os.path.dirname(data_path), '.cache')
-    os.makedirs(cache_dir, exist_ok=True)
-    
-    cache = Cache(cache_dir, size_limit=10 * 2**30) # 10GB
-   
-    cache_key = os.path.join(
-        os.path.basename(data_path),
-        f"bobcat_dim{dim}_bond{bond_dim}"
-    )
-    
-    state_dict = cache.get(cache_key)
-    if state_dict is not None:
-        print(f"Loading cached dataset from {cache_key}")
-
-        dataset = ARODataset(data_path=data_path, text_transform=None)
-        dataset.load_state_dict(state_dict)
-        return dataset
-
-    ansatz = CustomMPSAnsatz(
-        {
-            AtomicType.SENTENCE: Dim(dim),
-            AtomicType.NOUN: Dim(dim),
-            AtomicType.PREPOSITIONAL_PHRASE: Dim(dim),
-        },
-        bond_dim=bond_dim,
-    )
-
-    rules = [
-        "auxiliary",
-        "connector",
-        "determiner",
-        "postadverb",
-        "preadverb",
-        "prepositional_phrase",
-        "coordination",
-        "object_rel_pronoun",
-        "subject_rel_pronoun",
-    ]
-    rewriter = Rewriter(rules)
-    bobcat_parser = CachedBobcatParser()
-    text_transform = BobcatTextProcessor(
-        ccg_parser=bobcat_parser,
-        ansatz=ansatz,
-        rewriter=rewriter,
-    )
-    
-    dataset = ARODataset(
-        data_path=data_path, text_transform=text_transform, progress=progress
-    )
-
-    print(f"Caching dataset to {cache_key}")
-    cache.set(cache_key, dataset.state_dict())
-    cache.close()
-    return dataset
-
 class ProcessedARODataset(Dataset):
     def __init__(self, 
-                 data_path: str, 
-                ):
+                 data_path: str,
+                 image_dir_path: str | None = None,
+                 return_images: bool = False
+        ):
+        self.return_images = return_images
+        self.image_path = image_dir_path
+        
         raw_dataset = pd.read_json(data_path)
         dir_data_path, file_name = data_path.rsplit("/", 1)
         file_name = file_name.split(".")[0]
@@ -263,12 +120,7 @@ class ProcessedARODataset(Dataset):
         for row in self.processed_dataset['symbols']:
             for x in row:
                 self.symbols.append(Symbol(**x[0]))
-                # self.symbols.append(x[0])
                 self.sizes.append(x[1])
-        
-        assert isinstance(self.true_captions[0][0], str)
-        assert isinstance(self.true_captions[0][1][0], Symbol)
-        assert isinstance(self.symbols[0], Symbol)
         
         print(f"Initialized dataset for {data_path}. Final size: {len(self.dataset)}")
 
@@ -276,9 +128,17 @@ class ProcessedARODataset(Dataset):
         return len(self.dataset)
 
     def __getitem__(self, idx):
-        # Optimized: Just simple list indexing. No pandas, no string splits.
+        img_name = self.image_paths[idx]
+        if self.return_images:
+            img_path = f"{self.image_path}/{img_name}"
+            
+            # Using a context manager or just Image.open
+            image = preprocess(Image.open(img_path).convert("RGB"))
+        else: 
+            image = img_name
+        
         return {
-            "image": self.image_paths[idx],
+            "image": image,
             "true_caption": self.true_captions[idx],
             "false_caption": self.false_captions[idx],
             "index": idx
