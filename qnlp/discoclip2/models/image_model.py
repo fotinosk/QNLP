@@ -11,7 +11,8 @@ BOND_DIM = 20
 CP_RANK = 16           
 DROPOUT = 0.1          
 PATCH_SIZE = 4  
-IMAGE_SIZE = 128
+IMAGE_SIZE = 32
+# IMAGE_SIZE = 64
 
 
 preprocess = v2.Compose([

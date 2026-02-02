@@ -10,6 +10,8 @@ from torch.nn.functional import cosine_similarity
 from torch.utils.data import DataLoader
 from tqdm import trange
 
+from qnlp.utils.logging import setup_logger
+from qnlp.utils.seeding import set_seed
 from qnlp.discoclip2.dataset.aro_dataset import aro_tn_collate_fn, ProcessedARODataset
 from qnlp.discoclip2.models.loss import InfoNCE
 from qnlp.discoclip2.models.einsum_model import EinsumModel, get_einsum_model
@@ -31,7 +33,7 @@ TRAIN_DATA_PATH = "data/aro/processed/combined/train.json"
 VAL_DATA_PATH   = "data/aro/processed/combined/val.json"
 TEST_DATA_PATH  = "data/aro/processed/combined/test.json"
 
-BATCH_SIZE    = 32
+BATCH_SIZE    = 128
 LEARNING_RATE = 0.001
 WEIGHT_DECAY  = 0.001
 EPOCHS        = 100
@@ -47,22 +49,6 @@ LOG_PATH        = "runs/logs/"
 CHECKPOINT_PATH = "./checkpoints"
 MLFLOW_EXPERIMENT = "discoclip_unfrozen_aro_experiment"
 MLFLOW_URI = "mlflow_experiments/unfrozen_aro" 
-
-
-def setup_logger(log_path):
-    logger = logging.getLogger("train_logger")
-    logger.setLevel(logging.INFO)
-
-    if logger.hasHandlers():
-        logger.handlers.clear()
-
-    # File handler
-    fh = logging.FileHandler(log_path)
-    fh.setLevel(logging.INFO)
-    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
-    fh.setFormatter(formatter)
-    logger.addHandler(fh)
-    return logger
 
 
 def train_epoch(
@@ -291,7 +277,9 @@ def train_model(parent_run=None):
             swap=HARD_NEG_SWAP,
         )
         optimizer = optim.AdamW(
-            model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
+            list(model.parameters()) + list(image_model.parameters()), 
+            lr=LEARNING_RATE, 
+            weight_decay=WEIGHT_DECAY
         )
 
         best_val_hard_neg_loss = float("inf")

@@ -69,18 +69,20 @@ def aro_tn_collate_fn(batch):
     true_captions = []
     false_captions = []
     indices = []
+    image_names = []
         
     for el in batch:
         true_captions.append(el['true_caption'])
         false_captions.append(el['false_caption'])
         indices.append(el['index'])
         images.append(el['image'])
-    
+        image_names.append(el['image_name'])
     return {
         "images": torch.stack(images),
         "true_captions": true_captions,
         "false_captions": false_captions,
-        "indices": indices
+        "indices": indices,
+        "image_names": image_names
     }
 
 
@@ -141,7 +143,8 @@ class ProcessedARODataset(Dataset):
             "image": image,
             "true_caption": self.true_captions[idx],
             "false_caption": self.false_captions[idx],
-            "index": idx
+            "index": idx,
+            "image_name": img_name
         }
 
     @staticmethod

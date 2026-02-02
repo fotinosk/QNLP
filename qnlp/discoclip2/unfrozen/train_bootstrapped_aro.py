@@ -9,12 +9,14 @@ from torch.nn.functional import cosine_similarity
 from torch.utils.data import DataLoader
 from tqdm import trange
 
-from qnlp.utils.seeding import set_seed
 from qnlp.utils.logging import setup_logger
+from qnlp.utils.seeding import set_seed
 from qnlp.discoclip2.dataset.aro_dataset import aro_tn_collate_fn, ProcessedARODataset
 from qnlp.discoclip2.models.loss import InfoNCE
-from qnlp.discoclip2.models.lookup_embeddings import LookupEmbedding
 from qnlp.discoclip2.models.einsum_model import EinsumModel, get_einsum_model
+from qnlp.discoclip2.models.image_model import TTNImageModel
+from qnlp.discoclip2.models.lookup_embeddings import LookupEmbedding
+
 
 
 torch.serialization.add_safe_globals([Symbol])
@@ -25,19 +27,17 @@ EMBEDDING_DIM= 512
 BOND_DIM= 10
 
 DEVICE = "mps"
+SEED   = 42
 
 
 TRAIN_DATA_PATH = "data/aro/processed/combined/train.json"
 VAL_DATA_PATH   = "data/aro/processed/combined/val.json"
 TEST_DATA_PATH  = "data/aro/processed/combined/test.json"
 
-IMAGE_LOOKUP_PATH = "models/lookup_embedding_ViT-B_32.pt"
-
-SEED          = 42
-BATCH_SIZE    = 32
+BATCH_SIZE    = 128
 LEARNING_RATE = 0.001
 WEIGHT_DECAY  = 0.001
-EPOCHS        = 10
+EPOCHS        = 20
 PATIENCE      = 5
 
 TEMPERATURE = 0.07
@@ -48,9 +48,127 @@ HARD_NEG_SWAP        = False
 
 LOG_PATH        = "runs/logs/"
 CHECKPOINT_PATH = "./checkpoints"
-MLFLOW_EXPERIMENT = "discoclip_aro_experiment"
-MLFLOW_URI = None 
+MLFLOW_EXPERIMENT = "discoclip_unfrozen_bootstrapped_aro_experiment"
+MLFLOW_URI = "mlflow_experiments/unfrozen_bootstrapped_aro" 
 
+IMAGE_LOOKUP_PATH = "models/lookup_embedding_ViT-B_32.pt"
+
+
+def bootstrap_image_model(
+    image_model, 
+    bootstrapped_image_model, 
+    train_loader, 
+    val_loader,
+    logger,
+    device="mps",
+    num_bootstrapping_epochs: int=50
+    ):
+    logger.info(f"Bootstrapping image model for {num_bootstrapping_epochs} epochs")
+    
+    optimizer = optim.AdamW(
+        image_model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
+    )
+    image_model.train()
+    
+    for epoch in trange(num_bootstrapping_epochs, desc="Bootstrapping Epochs"):
+        logger.info(f"Starting epoch {epoch}/{num_bootstrapping_epochs}")
+        loss = 0.0
+        total_samples = 0
+        for batch in train_loader:
+            optimizer.zero_grad()
+            images = batch["images"].to(device)
+            image_names = batch["image_names"]
+            
+            image_embeddings = image_model(images)
+            
+            with torch.no_grad():
+                bootstrapped_image_embeddings = bootstrapped_image_model(image_names)
+            
+            loss = torch.nn.functional.mse_loss(image_embeddings, bootstrapped_image_embeddings)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(image_model.parameters(), max_norm=1.0)
+            optimizer.step()
+            
+            loss += loss.item() * len(images)
+            total_samples += len(images)
+            
+        loss /= total_samples
+        logger.info(f"Epoch {epoch}/{num_bootstrapping_epochs} - Training Loss: {loss}")
+        mlflow.log_metric("train_bootstrap_image_model/loss", loss, step=epoch)
+        
+        # evaluate on val set
+        image_model.eval()
+        bootstrapped_image_model.eval()
+        with torch.no_grad():
+            val_loss = 0.0
+            for batch in val_loader:
+                images = batch["images"].to(device)
+                image_names = batch["image_names"]
+                image_embeddings = image_model(images)
+                bootstrapped_image_embeddings = bootstrapped_image_model(image_names)
+                loss = torch.nn.functional.mse_loss(image_embeddings, bootstrapped_image_embeddings)
+                val_loss += loss.item() * len(images)
+                total_samples += len(images)
+                
+        val_loss /= total_samples
+        logger.info(f"Epoch {epoch}/{num_bootstrapping_epochs} - Val Loss: {val_loss}")
+        mlflow.log_metric("val_bootstrap_image_model/loss", val_loss, step=epoch)
+    return image_model
+        
+        
+def bootstrap_einsum_model(
+    einsum_model, 
+    bootstrapped_image_model, 
+    train_loader, 
+    val_loader, 
+    logger,
+    device="mps", 
+    num_bootstrapping_epochs: int=50
+):
+    logger.info(f"Bootstrapping einsum model for {num_bootstrapping_epochs} epochs")
+    
+    optimizer = optim.AdamW(
+        einsum_model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
+    )
+    einsum_model.train()
+    for epoch in trange(num_bootstrapping_epochs, desc="Bootstrapping Epochs"):
+        logger.info(f"Starting epoch {epoch}/{num_bootstrapping_epochs}")
+        loss = 0.0
+        total_samples = 0
+        for batch in train_loader:
+            optimizer.zero_grad()
+            images = batch["images"].to(device)
+            image_names = batch["image_names"].to(device)
+            text_embeddings = einsum_model(images)
+            with torch.no_grad():
+                bootstrapped_text_embeddings = bootstrapped_image_model(image_names)
+            loss = torch.nn.functional.mse_loss(text_embeddings, bootstrapped_text_embeddings)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(einsum_model.parameters(), max_norm=1.0)
+            optimizer.step()
+            loss += loss.item() * len(images)
+            total_samples += len(images)
+        loss /= total_samples
+        logger.info(f"Epoch {epoch}/{num_bootstrapping_epochs} - Training Loss: {loss}")
+        mlflow.log_metric("train_bootstrap_einsum_model/loss", loss, step=epoch)
+        
+        # evaluate on val set
+        einsum_model.eval()
+        bootstrapped_image_model.eval()
+        with torch.no_grad():
+            for batch in val_loader:
+                images = batch["images"].to(device)
+                image_names = batch["image_names"].to(device)
+                text_embeddings = einsum_model(images)
+                bootstrapped_text_embeddings = bootstrapped_image_model(image_names)
+                loss = torch.nn.functional.mse_loss(text_embeddings, bootstrapped_text_embeddings)
+                val_loss += loss.item() * len(images)
+                total_samples += len(images)
+        val_loss /= total_samples
+        logger.info(f"Epoch {epoch}/{num_bootstrapping_epochs} - Val Loss: {val_loss}")
+        mlflow.log_metric("val_bootstrap_einsum_model/loss", val_loss, step=epoch)
+    return einsum_model
+    
 def train_epoch(
     model,
     image_model,
@@ -85,14 +203,12 @@ def train_epoch(
     for batch in dataloader:
         optimizer.zero_grad()
 
-        images = batch["images"]
+        images = batch["images"].to(device)
         true_captions = batch["true_captions"]
         false_captions = batch["false_captions"]
         batch_size = len(images)
 
-        with torch.no_grad():
-            image_embeddings = image_model(images).to(device)
-
+        image_embeddings = image_model(images)
         true_caption_embeddings = model(true_captions)
         false_caption_embeddings = model(false_captions)
 
@@ -168,12 +284,12 @@ def evaluate_model(
     total_samples = 0
     with torch.no_grad():
         for batch in dataloader:
-            images = batch["images"]
+            images = batch["images"].to(device)
             true_captions = batch["true_captions"]
             false_captions = batch["false_captions"]
             batch_size = len(images)
 
-            image_embeddings = image_model(images).to(device)
+            image_embeddings = image_model(images)
             true_caption_embeddings = model(true_captions)
             false_caption_embeddings = model(false_captions)
 
@@ -218,8 +334,10 @@ def evaluate_model(
 
 
 def train_model(parent_run=None):
-    with mlflow.start_run(parent_run_id=parent_run.info.run_id if parent_run else None,
-                          nested=True if parent_run else False) as run:
+    with mlflow.start_run(
+        parent_run_id=parent_run.info.run_id if parent_run else None,
+        nested=True if parent_run else False
+    ) as run:
 
         logger = setup_logger(
             os.path.join(LOG_PATH, f"train_{run.info.run_id}.log")
@@ -227,23 +345,24 @@ def train_model(parent_run=None):
         logger.info(
             f"Running experiment: {MLFLOW_EXPERIMENT}, run ID: {run.info.run_id}, run name: {run.info.run_name}"
         )
-        
-        
         set_seed(SEED)
-
-        train_ds = ProcessedARODataset(data_path=TRAIN_DATA_PATH)
-        val_ds = ProcessedARODataset(data_path=VAL_DATA_PATH)
-        test_ds = ProcessedARODataset(data_path=TEST_DATA_PATH)
+        
+        logger.info("Loading datasets...")
+        train_ds = ProcessedARODataset(data_path=TRAIN_DATA_PATH, image_dir_path="data/aro/raw/images/", return_images=True)
+        val_ds = ProcessedARODataset(data_path=VAL_DATA_PATH, image_dir_path="data/aro/raw/images/", return_images=True)
+        test_ds = ProcessedARODataset(data_path=TEST_DATA_PATH, image_dir_path="data/aro/raw/images/", return_images=True)
+        logger.info("Datasets loaded.")
 
         collate_fn = aro_tn_collate_fn
 
+        logger.info("Creating data loaders...")
         train_loader = DataLoader(
             train_ds,
             batch_size=BATCH_SIZE,
             shuffle=True,
             collate_fn=collate_fn,
         )
-
+        
         val_loader = DataLoader(
             val_ds,
             batch_size=BATCH_SIZE,
@@ -257,15 +376,36 @@ def train_model(parent_run=None):
             shuffle=False,
             collate_fn=collate_fn,
         )
-
-        model = get_einsum_model([train_ds, val_ds, test_ds]).to(DEVICE)
-       
-        number_params = sum(p.numel() for p in model.parameters())
-        mlflow.log_params({"model_num_params": number_params})
-
-        image_model = LookupEmbedding.load_from_checkpoint(IMAGE_LOOKUP_PATH)
-        image_model = image_model.to(DEVICE)
-
+        logger.info("Data loaders created.")
+        
+        logger.info("Initializing models...")
+        text_model = get_einsum_model([train_ds, val_ds, test_ds]).to(DEVICE)
+        image_model = TTNImageModel(EMBEDDING_DIM).to(DEVICE)
+        bootstrapped_image_model = LookupEmbedding.load_from_checkpoint(IMAGE_LOOKUP_PATH).to(DEVICE)
+        logger.info("Models initialized.")
+               
+        image_model = bootstrap_image_model(
+            image_model, 
+            bootstrapped_image_model, 
+            train_loader, 
+            val_loader, 
+            logger,
+            device=DEVICE, 
+            num_bootstrapping_epochs=20
+        )
+        logger.info("Image model bootstrapping complete.")
+        
+        text_model = bootstrap_einsum_model(
+            text_model, 
+            bootstrapped_image_model,
+            train_loader, 
+            val_loader, 
+            logger,
+            device=DEVICE, 
+            num_bootstrapping_epochs=20
+        )
+        logger.info("Einsum model bootstrapping complete.")
+        
         # Define optimizer and loss functions
         contrastive_loss = InfoNCE(temperature=TEMPERATURE)
         if HARD_NEG_DISTANCE_FUNCTION == "cosine":
@@ -280,17 +420,17 @@ def train_model(parent_run=None):
             swap=HARD_NEG_SWAP,
         )
         optimizer = optim.AdamW(
-            model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
+            list(text_model.parameters()) + list(image_model.parameters()), 
+            lr=LEARNING_RATE, 
+            weight_decay=WEIGHT_DECAY
         )
 
         best_val_hard_neg_loss = float("inf")
 
         for epoch in trange(1, EPOCHS + 1, desc="Training Epochs"):
-            logger.info(f"Starting epoch {epoch}/{EPOCHS}")
-
             # Train
             train_metrics = train_epoch(
-                model,
+                text_model,
                 image_model,
                 train_loader,
                 contrastive_loss,
@@ -303,10 +443,11 @@ def train_model(parent_run=None):
                 {f"train/{key}": value for key, value in train_metrics.items()},
                 step=epoch,
             )
+            logger.info(f"Epoch {epoch}/{EPOCHS} - Training metrics logged.")
 
             # Evaluate
             val_metrics = evaluate_model(
-                model,
+                text_model,
                 image_model,
                 val_loader,
                 contrastive_loss,
@@ -318,6 +459,7 @@ def train_model(parent_run=None):
             mlflow.log_metrics(
                 {f"val/{key}": value for key, value in val_metrics.items()}, step=epoch
             )
+            logger.info(f"Epoch {epoch}/{EPOCHS} - Validation metrics logged.")
             logger.info(
                 f"Epoch {epoch}/{EPOCHS} - "
                 f"Train Loss: {train_metrics['loss']:.4f}, "
@@ -328,7 +470,8 @@ def train_model(parent_run=None):
             # Save best model checkpoint
             if val_metrics["hard_neg_loss"] < best_val_hard_neg_loss:
                 checkpoint = {
-                    "model_state_dict": model.state_dict(),
+                    "model_state_dict": text_model.state_dict(),
+                    "image_model_state_dict": image_model.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
                     "epoch": epoch,
                     "val_metrics": val_metrics,
@@ -349,7 +492,10 @@ def train_model(parent_run=None):
         
         best_model = EinsumModel()
         best_model.load_state_dict(best_checkpoint["model_state_dict"])
-        best_model = best_model.to(DEVICE)        
+        best_image_model = TTNImageModel(EMBEDDING_DIM)
+        best_image_model.load_state_dict(best_checkpoint["image_model_state_dict"])
+        best_model = best_model.to(DEVICE)
+        best_image_model = best_image_model.to(DEVICE)
 
         test_metrics = evaluate_model(
             best_model,
@@ -372,11 +518,14 @@ def train_model(parent_run=None):
         )
         logger.info("Training complete.")
         mlflow.log_artifact(os.path.join(LOG_PATH, f"train_{run.info.run_id}.log"))
-
-
+        
 if __name__ == "__main__":
+    import pathlib
+    
+    path = pathlib.Path(MLFLOW_URI)
+    path = "file:" / path
 
-    # mlflow.set_tracking_uri(MLFLOW_URI)
-    # mlflow.set_experiment(MLFLOW_EXPERIMENT)
+    mlflow.set_tracking_uri(MLFLOW_URI)
+    mlflow.set_experiment(MLFLOW_EXPERIMENT)
 
     train_model()
