@@ -1,21 +1,19 @@
-import logging
 import os
 
 import mlflow
 import torch
 import torch.optim as optim
 from lambeq import Symbol
-from torch import nn
 from torch.nn.functional import cosine_similarity
 from torch.utils.data import DataLoader
 from tqdm import trange
 
-from qnlp.utils.logging import setup_logger
 from qnlp.utils.seeding import set_seed
+from qnlp.utils.logging import setup_logger
 from qnlp.discoclip2.dataset.aro_dataset import aro_tn_collate_fn, ProcessedARODataset
-from qnlp.discoclip2.models.loss import InfoNCE
+from qnlp.discoclip2.models.loss import create_loss_functions
+from qnlp.discoclip2.models.lookup_embeddings import LookupEmbedding
 from qnlp.discoclip2.models.einsum_model import EinsumModel, get_einsum_model
-from qnlp.discoclip2.models.image_model import TTNImageModel
 
 
 torch.serialization.add_safe_globals([Symbol])
@@ -26,17 +24,19 @@ EMBEDDING_DIM= 512
 BOND_DIM= 10
 
 DEVICE = "mps"
-SEED   = 42
 
 
 TRAIN_DATA_PATH = "data/aro/processed/combined/train.json"
 VAL_DATA_PATH   = "data/aro/processed/combined/val.json"
 TEST_DATA_PATH  = "data/aro/processed/combined/test.json"
 
-BATCH_SIZE    = 128
+IMAGE_LOOKUP_PATH = "models/lookup_embedding_ViT-B_32.pt"
+
+SEED          = 42
+BATCH_SIZE    = 32
 LEARNING_RATE = 0.001
 WEIGHT_DECAY  = 0.001
-EPOCHS        = 100
+EPOCHS        = 10
 PATIENCE      = 5
 
 TEMPERATURE = 0.07
@@ -46,10 +46,9 @@ HARD_NEG_DISTANCE_FUNCTION = "euclidean"
 HARD_NEG_SWAP        = False          
 
 LOG_PATH        = "runs/logs/"
-CHECKPOINT_PATH = "./checkpoints"
-MLFLOW_EXPERIMENT = "discoclip_unfrozen_aro_experiment"
-MLFLOW_URI = "mlflow_experiments/unfrozen_aro" 
-
+CHECKPOINT_PATH = "checkpoints"
+MLFLOW_EXPERIMENT = "discoclip_aro_experiment"
+MLFLOW_URI = None 
 
 def train_epoch(
     model,
@@ -85,12 +84,14 @@ def train_epoch(
     for batch in dataloader:
         optimizer.zero_grad()
 
-        images = batch["images"].to(device)
+        images = batch["images"]
         true_captions = batch["true_captions"]
         false_captions = batch["false_captions"]
         batch_size = len(images)
 
-        image_embeddings = image_model(images)
+        with torch.no_grad():
+            image_embeddings = image_model(images).to(device)
+
         true_caption_embeddings = model(true_captions)
         false_caption_embeddings = model(false_captions)
 
@@ -166,12 +167,12 @@ def evaluate_model(
     total_samples = 0
     with torch.no_grad():
         for batch in dataloader:
-            images = batch["images"].to(device)
+            images = batch["images"]
             true_captions = batch["true_captions"]
             false_captions = batch["false_captions"]
             batch_size = len(images)
 
-            image_embeddings = image_model(images)
+            image_embeddings = image_model(images).to(device)
             true_caption_embeddings = model(true_captions)
             false_caption_embeddings = model(false_captions)
 
@@ -229,9 +230,9 @@ def train_model(parent_run=None):
         
         set_seed(SEED)
 
-        train_ds = ProcessedARODataset(data_path=TRAIN_DATA_PATH, image_dir_path="data/aro/raw/images/", return_images=True)
-        val_ds = ProcessedARODataset(data_path=VAL_DATA_PATH, image_dir_path="data/aro/raw/images/", return_images=True)
-        test_ds = ProcessedARODataset(data_path=TEST_DATA_PATH, image_dir_path="data/aro/raw/images/", return_images=True)
+        train_ds = ProcessedARODataset(data_path=TRAIN_DATA_PATH)
+        val_ds = ProcessedARODataset(data_path=VAL_DATA_PATH)
+        test_ds = ProcessedARODataset(data_path=TEST_DATA_PATH)
 
         collate_fn = aro_tn_collate_fn
 
@@ -261,25 +262,18 @@ def train_model(parent_run=None):
         number_params = sum(p.numel() for p in model.parameters())
         mlflow.log_params({"model_num_params": number_params})
 
-        image_model = TTNImageModel(EMBEDDING_DIM).to(DEVICE)
+        image_model = LookupEmbedding.load_from_checkpoint(IMAGE_LOOKUP_PATH)
+        image_model = image_model.to(DEVICE)
 
         # Define optimizer and loss functions
-        contrastive_loss = InfoNCE(temperature=TEMPERATURE)
-        if HARD_NEG_DISTANCE_FUNCTION == "cosine":
-            distance_function = lambda x, y: 1 - nn.CosineSimilarity(dim=-1)(x, y)
-        elif HARD_NEG_DISTANCE_FUNCTION == "euclidean":
-            distance_function = nn.PairwiseDistance(p=2)
-        else:
-            raise ValueError(f"Unknown distance function: {HARD_NEG_DISTANCE_FUNCTION}")
-        hard_neg_loss = nn.TripletMarginWithDistanceLoss(
-            distance_function=distance_function,
+        contrastive_loss, hard_neg_loss = create_loss_functions(
+            temperature=TEMPERATURE,
+            hard_neg_distance_function=HARD_NEG_DISTANCE_FUNCTION,
             margin=HARD_NEG_MARGIN,
-            swap=HARD_NEG_SWAP,
+            swap=HARD_NEG_SWAP
         )
         optimizer = optim.AdamW(
-            list(model.parameters()) + list(image_model.parameters()), 
-            lr=LEARNING_RATE, 
-            weight_decay=WEIGHT_DECAY
+            model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
         )
 
         best_val_hard_neg_loss = float("inf")
@@ -373,30 +367,9 @@ def train_model(parent_run=None):
         mlflow.log_artifact(os.path.join(LOG_PATH, f"train_{run.info.run_id}.log"))
 
 
-def set_seed(seed):
-    """
-    Set the random seed for reproducibility.
-    """
-    import random
-
-    import numpy as np
-
-    np.random.seed(seed)
-    random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
-    elif torch.backends.mps.is_available():
-        torch.mps.manual_seed(seed)
-
-
 if __name__ == "__main__":
-    import pathlib
-    
-    path = pathlib.Path(MLFLOW_URI)
-    path = "file:" / path
 
-    mlflow.set_tracking_uri(MLFLOW_URI)
-    mlflow.set_experiment(MLFLOW_EXPERIMENT)
+    # mlflow.set_tracking_uri(MLFLOW_URI)
+    # mlflow.set_experiment(MLFLOW_EXPERIMENT)
 
     train_model()

@@ -4,7 +4,7 @@ import pandas as pd
 from dataclasses import asdict
 import concurrent.futures
 import psutil
-from qnlp.discoclip2.frozen.train_aro import BOND_DIM, EMBEDDING_DIM, VAL_DATA_PATH, TEST_DATA_PATH, TRAIN_DATA_PATH
+from qnlp.discoclip2.trainers.frozen.train_aro import BOND_DIM, EMBEDDING_DIM, TRAIN_DATA_PATH
 
 
 # Global variables for worker processes

@@ -4,6 +4,7 @@ from typing import List, Dict, Any
 from lambeq import Symbol
 from cotengra import einsum
 
+torch.serialization.add_safe_globals([Symbol])
 
 def get_einsum_model(datasets: list):
     symbol_sizes = dict()

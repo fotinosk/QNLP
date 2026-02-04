@@ -1,6 +1,9 @@
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+
+from torch import nn
+from torch.nn import TripletMarginWithDistanceLoss
+
 
 class InfoNCE(nn.Module):
     """
@@ -66,3 +69,24 @@ class InfoNCE(nn.Module):
                 correct = (torch.argmax(logits, dim=1) == labels).float().mean()
         
         return loss, correct
+
+
+def create_loss_functions(
+        temperature: float,
+        hard_neg_distance_function: str,
+        margin : float,
+        swap: bool
+) -> tuple[InfoNCE, TripletMarginWithDistanceLoss]:
+    contrastive_loss = InfoNCE(temperature=temperature)
+    if hard_neg_distance_function == "cosine":
+        distance_function = lambda x, y: 1 - nn.CosineSimilarity(dim=-1)(x, y)
+    elif hard_neg_distance_function == "euclidean":
+        distance_function = nn.PairwiseDistance(p=2)
+    else:
+        raise ValueError(f"Unknown distance function: {hard_neg_distance_function}")
+    hard_neg_loss = nn.TripletMarginWithDistanceLoss(
+        distance_function=distance_function,
+        margin=margin,
+        swap=swap,
+    )
+    return contrastive_loss, hard_neg_loss

@@ -3,7 +3,7 @@ import random
 import numpy as np
 
 
-def set_seed(seed):
+def set_seed(seed=42):
     """
     Set the random seed for reproducibility.
     """

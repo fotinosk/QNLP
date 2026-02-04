@@ -1,0 +1,19 @@
+from typing import Any
+from contextlib import contextmanager
+import mlflow
+from datetime import datetime
+
+
+@contextmanager
+def setup_mlflow_run(experiment_name: str, params: dict[str, Any], port: int = 5000):
+    ts_string = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+
+    mlflow.config.enable_async_logging()
+    mlflow.set_experiment(experiment_name=experiment_name)
+    mlflow.set_tracking_uri(f"http://localhost:{port}")
+    mlflow.config.enable_system_metrics_logging()
+    mlflow.config.set_system_metrics_sampling_interval(15)
+
+    with mlflow.start_run(run_name=f"{experiment_name}_{ts_string}") as run:
+        mlflow.log_params(params)
+        yield run
