@@ -18,7 +18,6 @@ from qnlp.discoclip2.models.image_model import TTNImageModel
 from qnlp.discoclip2.models.lookup_embeddings import LookupEmbedding
 
 
-
 torch.serialization.add_safe_globals([Symbol])
 
 CHECKPOINT_PATH = "checkpoints/"
@@ -43,7 +42,7 @@ PATIENCE      = 5
 TEMPERATURE = 0.07
 HARD_NEG_LOSS_WEIGHT = 1.0
 HARD_NEG_MARGIN      = 0.2
-HARD_NEG_DISTANCE_FUNCTION = "euclidean" 
+HARD_NEG_DISTANCE_FUNCTION = "cosine" 
 HARD_NEG_SWAP        = False          
 
 LOG_PATH        = "runs/logs/"
@@ -68,12 +67,12 @@ def bootstrap_image_model(
     optimizer = optim.AdamW(
         image_model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
     )
-    image_model.train()
     
     for epoch in trange(num_bootstrapping_epochs, desc="Bootstrapping Epochs"):
+        image_model.train()
+        
         logger.info(f"Starting epoch {epoch}/{num_bootstrapping_epochs}")
-        loss = 0.0
-        total_samples = 0
+        total_loss = 0.0
         for batch in train_loader:
             optimizer.zero_grad()
             images = batch["images"].to(device)
@@ -83,18 +82,20 @@ def bootstrap_image_model(
             
             with torch.no_grad():
                 bootstrapped_image_embeddings = bootstrapped_image_model(image_names)
+                bootstrapped_image_embeddings = torch.nn.functional.normalize(bootstrapped_image_embeddings, p=2, dim=-1)
+            image_embeddings = torch.nn.functional.normalize(image_embeddings, p=2, dim=-1)
             
-            loss = torch.nn.functional.mse_loss(image_embeddings, bootstrapped_image_embeddings)
+            similarity = torch.nn.functional.cosine_similarity(image_embeddings, bootstrapped_image_embeddings)
+            loss = (1-similarity).mean()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(image_model.parameters(), max_norm=1.0)
             optimizer.step()
             
-            loss += loss.item() * len(images)
-            total_samples += len(images)
+            total_loss += loss.item() * len(images)
             
-        loss /= total_samples
-        logger.info(f"Epoch {epoch}/{num_bootstrapping_epochs} - Training Loss: {loss}")
-        mlflow.log_metric("train_bootstrap_image_model/loss", loss, step=epoch)
+        loss /= len(train_loader)
+        logger.info(f"Epoch {epoch}/{num_bootstrapping_epochs} - Training Loss: {total_loss}")
+        mlflow.log_metric("train_bootstrap_image_model/loss", total_loss, step=epoch)
         
         # evaluate on val set
         image_model.eval()
@@ -106,11 +107,11 @@ def bootstrap_image_model(
                 image_names = batch["image_names"]
                 image_embeddings = image_model(images)
                 bootstrapped_image_embeddings = bootstrapped_image_model(image_names)
-                loss = torch.nn.functional.mse_loss(image_embeddings, bootstrapped_image_embeddings)
+                similarity = torch.nn.functional.cosine_similarity(image_embeddings, bootstrapped_image_embeddings)
+                loss = (1-similarity).mean()
                 val_loss += loss.item() * len(images)
-                total_samples += len(images)
                 
-        val_loss /= total_samples
+        val_loss /= len(val_loader)
         logger.info(f"Epoch {epoch}/{num_bootstrapping_epochs} - Val Loss: {val_loss}")
         mlflow.log_metric("val_bootstrap_image_model/loss", val_loss, step=epoch)
     return image_model
@@ -122,7 +123,6 @@ def bootstrap_einsum_model(
     train_loader, 
     val_loader, 
     logger,
-    device="mps", 
     num_bootstrapping_epochs: int=50
 ):
     logger.info(f"Bootstrapping einsum model for {num_bootstrapping_epochs} epochs")
@@ -130,45 +130,56 @@ def bootstrap_einsum_model(
     optimizer = optim.AdamW(
         einsum_model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
     )
-    einsum_model.train()
     for epoch in trange(num_bootstrapping_epochs, desc="Bootstrapping Epochs"):
+        einsum_model.train()
+        
         logger.info(f"Starting epoch {epoch}/{num_bootstrapping_epochs}")
-        loss = 0.0
-        total_samples = 0
+        total_loss = 0.0
+
         for batch in train_loader:
             optimizer.zero_grad()
-            images = batch["images"].to(device)
-            image_names = batch["image_names"].to(device)
-            text_embeddings = einsum_model(images)
+            
+            image_names = batch["image_names"]
+            true_captions = batch["true_captions"]
+            text_embeddings = einsum_model(true_captions)
+
             with torch.no_grad():
-                bootstrapped_text_embeddings = bootstrapped_image_model(image_names)
-            loss = torch.nn.functional.mse_loss(text_embeddings, bootstrapped_text_embeddings)
+                bootstrapped_image_embeddings = bootstrapped_image_model(image_names)
+                bootstrapped_image_embeddings = torch.nn.functional.normalize(bootstrapped_image_embeddings, p=2, dim=-1)
+
+            text_embeddings = torch.nn.functional.normalize(text_embeddings, p=2, dim=-1)
+
+            similarity = torch.nn.functional.cosine_similarity(text_embeddings, bootstrapped_image_embeddings)
+            loss = (1-similarity).mean()
             loss.backward()
+            
             torch.nn.utils.clip_grad_norm_(einsum_model.parameters(), max_norm=1.0)
             optimizer.step()
-            loss += loss.item() * len(images)
-            total_samples += len(images)
-        loss /= total_samples
-        logger.info(f"Epoch {epoch}/{num_bootstrapping_epochs} - Training Loss: {loss}")
-        mlflow.log_metric("train_bootstrap_einsum_model/loss", loss, step=epoch)
+            total_loss += loss.item() * len(image_names)
+
+        total_loss /= len(train_loader)
+        logger.info(f"Epoch {epoch}/{num_bootstrapping_epochs} - Training Loss: {total_loss}")
+        mlflow.log_metric("train_bootstrap_einsum_model/loss", total_loss, step=epoch)
         
         # evaluate on val set
         einsum_model.eval()
         bootstrapped_image_model.eval()
         with torch.no_grad():
+            val_loss = 0.0
             for batch in val_loader:
-                images = batch["images"].to(device)
-                image_names = batch["image_names"].to(device)
-                text_embeddings = einsum_model(images)
+                true_captions = batch["true_captions"]
+                image_names = batch["image_names"]
+                text_embeddings = einsum_model(true_captions)
                 bootstrapped_text_embeddings = bootstrapped_image_model(image_names)
-                loss = torch.nn.functional.mse_loss(text_embeddings, bootstrapped_text_embeddings)
-                val_loss += loss.item() * len(images)
-                total_samples += len(images)
-        val_loss /= total_samples
+                similarity = torch.nn.functional.cosine_similarity(text_embeddings, bootstrapped_text_embeddings)
+                loss = (1 - similarity).mean()
+                val_loss += loss.item() * len(image_names)
+        val_loss /= len(val_loader)
         logger.info(f"Epoch {epoch}/{num_bootstrapping_epochs} - Val Loss: {val_loss}")
         mlflow.log_metric("val_bootstrap_einsum_model/loss", val_loss, step=epoch)
     return einsum_model
-    
+
+
 def train_epoch(
     model,
     image_model,
@@ -383,6 +394,16 @@ def train_model(parent_run=None):
         image_model = TTNImageModel(EMBEDDING_DIM).to(DEVICE)
         bootstrapped_image_model = LookupEmbedding.load_from_checkpoint(IMAGE_LOOKUP_PATH).to(DEVICE)
         logger.info("Models initialized.")
+
+        text_model = bootstrap_einsum_model(
+            text_model,
+            bootstrapped_image_model,
+            train_loader,
+            val_loader,
+            logger,
+            num_bootstrapping_epochs=10
+        )
+        logger.info("Einsum model bootstrapping complete.")
                
         image_model = bootstrap_image_model(
             image_model, 
@@ -391,20 +412,9 @@ def train_model(parent_run=None):
             val_loader, 
             logger,
             device=DEVICE, 
-            num_bootstrapping_epochs=20
+            num_bootstrapping_epochs=10
         )
         logger.info("Image model bootstrapping complete.")
-        
-        text_model = bootstrap_einsum_model(
-            text_model, 
-            bootstrapped_image_model,
-            train_loader, 
-            val_loader, 
-            logger,
-            device=DEVICE, 
-            num_bootstrapping_epochs=20
-        )
-        logger.info("Einsum model bootstrapping complete.")
         
         # Define optimizer and loss functions
         contrastive_loss = InfoNCE(temperature=TEMPERATURE)
