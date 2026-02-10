@@ -23,7 +23,7 @@ CHECKPOINT_PATH = "checkpoints/"
 EMBEDDING_DIM= 512
 BOND_DIM= 10
 
-DEVICE = "mps"
+DEVICE = "cpu"
 SEED   = 42
 
 
@@ -107,6 +107,10 @@ def train_epoch(
         image_embeddings = image_model(images)
         true_caption_embeddings = model(true_captions)
         false_caption_embeddings = model(false_captions)
+
+        image_embeddings = torch.nn.functional.normalize(image_embeddings, p=2, dim=-1)
+        true_caption_embeddings = torch.nn.functional.normalize(true_caption_embeddings, p=2, dim=-1)
+        false_caption_embeddings = torch.nn.functional.normalize(false_caption_embeddings, p=2, dim=-1)
 
         metrics["true_caption_embedding_mean_norm"] += (
             true_caption_embeddings.norm(dim=-1).mean().item()
@@ -243,9 +247,9 @@ def train_model(parent_run=None):
         
         set_seed(SEED)
 
-        train_ds = ProcessedARODataset(data_path=TRAIN_DATA_PATH, image_dir_path="data/aro/raw/images/", return_images=True)
-        val_ds = ProcessedARODataset(data_path=VAL_DATA_PATH, image_dir_path="data/aro/raw/images/", return_images=True)
-        test_ds = ProcessedARODataset(data_path=TEST_DATA_PATH, image_dir_path="data/aro/raw/images/", return_images=True)
+        train_ds = ProcessedARODataset(data_path=TRAIN_DATA_PATH, image_dir_path="data/aro/raw/images", return_images=True)
+        val_ds = ProcessedARODataset(data_path=VAL_DATA_PATH, image_dir_path="data/aro/raw/images", return_images=True)
+        test_ds = ProcessedARODataset(data_path=TEST_DATA_PATH, image_dir_path="data/aro/raw/images", return_images=True)
 
         collate_fn = aro_tn_collate_fn
 
@@ -291,7 +295,7 @@ def train_model(parent_run=None):
             swap=HARD_NEG_SWAP,
         )
         optimizer = optim.AdamW(
-            model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
+            list(model.parameters()) + list(image_model.parameters()), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
         )
 
         best_val_hard_neg_loss = float("inf")
