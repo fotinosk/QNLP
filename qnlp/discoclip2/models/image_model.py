@@ -9,7 +9,7 @@ from einops import rearrange
 
 BOND_DIM = 20       
 CP_RANK = 16           
-DROPOUT = 0.1          
+DROPOUT = 0.3
 PATCH_SIZE = 4  
 IMAGE_SIZE = 32
 # IMAGE_SIZE = 64
@@ -78,7 +78,6 @@ class CPQuadRankLayer(nn.Module):
         # 4. Residual Connection
         # Sum of all inputs added to output (Skip connection)
         out = out + x_tl + x_tr + x_bl + x_br
-        
         return out
 
 
@@ -149,4 +148,5 @@ class TTNImageModel(nn.Module):
             
         x = x.squeeze(1) # [B, 1, Dim] -> [B, Dim]
         x = self.norm(x)
-        return self.head(x)
+        x = self.head(x)
+        return nn.functional.normalize(x, dim=-1)

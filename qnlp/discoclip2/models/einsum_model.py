@@ -129,7 +129,9 @@ class EinsumModel(nn.Module):
         """
         einsum_expr, symbols = input
 
-        return einsum(einsum_expr, *[self.sym2weight[sym] for sym in symbols])
+        # return einsum(einsum_expr, *[self.sym2weight[sym] for sym in symbols])
+        x = einsum(einsum_expr, *[self.sym2weight[sym] for sym in symbols])
+        return nn.functional.normalize(x, dim=-1)
 
     def forward(self, inputs: List[tuple[str, List[Symbol]]]) -> torch.Tensor:
         """
