@@ -45,6 +45,11 @@ class CPQuadRankLayer(nn.Module):
         self.factor_out = nn.Parameter(torch.empty(num_nodes, rank, out_dim))
         self.scale = nn.Parameter(torch.ones(num_nodes, rank) * (1.0 / rank))
 
+        if in_dim != out_dim:
+            self.res_proj = nn.Linear(in_dim, out_dim, bias=False)
+        else:
+            self.res_proj = nn.Identity()
+
         self._initialize()
 
     def _initialize(self):
@@ -56,7 +61,7 @@ class CPQuadRankLayer(nn.Module):
 
     def forward(self, x):
         # CHANGED: Residual is now the MEAN to control magnitude
-        res = x.mean(dim=2) 
+        res = self.res_proj(x.mean(dim=2))
         
         # ADDED: Pre-Norm application
         x = self.norm(x)
@@ -79,7 +84,6 @@ class CPQuadRankLayer(nn.Module):
 
         out = torch.einsum('bnr,nro->bno', merged, self.factor_out)
         
-        # CHANGED: Combining with Mean-residual (No layer-norm here)
         return out + res
 
 class TTNImageModel(nn.Module):
@@ -108,20 +112,23 @@ class TTNImageModel(nn.Module):
         
         self.layers = nn.ModuleList()
         current_nodes = num_patches // 4 # First layer outputs this many nodes
+
+        in_dim = BOND_DIM
         
         for _ in range(self.depth):
             layer = CPQuadRankLayer(
                 num_nodes=current_nodes,
-                in_dim=BOND_DIM,
-                out_dim=BOND_DIM,
+                in_dim=in_dim,
+                out_dim=in_dim * 2,
                 rank=CP_RANK,
                 dropout_p=DROPOUT
             )
             self.layers.append(layer)
             current_nodes //= 4
+            in_dim *= 2
             
-        self.norm = nn.LayerNorm(BOND_DIM)
-        self.head = nn.Linear(BOND_DIM, self.embedding_dim)
+        self.norm = nn.LayerNorm(in_dim)
+        self.head = nn.Linear(in_dim, self.embedding_dim)
         
     def forward(self, x):
         x = self.patch_embed(x)

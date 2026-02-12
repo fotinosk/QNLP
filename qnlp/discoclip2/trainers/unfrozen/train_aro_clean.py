@@ -297,7 +297,7 @@ def train_epoch(
 
 def run_training():
     hyperparams = ModelSettings()
-    with setup_mlflow_run(EXPERIMENT_NAME, hyperparams.model_dump(), 8080):
+    with setup_mlflow_run(EXPERIMENT_NAME, hyperparams.model_dump(), 8080, run_name="increasing_image_bond_dim"):
 
         logger.info("Starting training with hyperparameters:")
         logger.info(hyperparams.model_dump_json(indent=2))
