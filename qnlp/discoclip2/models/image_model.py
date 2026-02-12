@@ -125,7 +125,7 @@ class TTNImageModel(nn.Module):
         
     def forward(self, x):
         x = self.patch_embed(x)
-        x = x + self.pos_embed
+        x = x + self.positional_embedding
         
         current_grid_dim = self.num_patches_side
 
