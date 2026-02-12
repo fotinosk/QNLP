@@ -19,7 +19,6 @@ from qnlp.utils.torch_utils import get_device, create_checkpoint_path
 from qnlp.discoclip2.dataset.aro_dataloader import get_aro_dataloader
 from qnlp.discoclip2.models.einsum_model import get_einsum_model, EinsumModel
 from qnlp.discoclip2.models.image_model import TTNImageModel
-from qnlp.discoclip2.models.itn_image_model import InhomogeneousTTNImageModel
 
 EXPERIMENT_NAME = "train_vlm_on_aro"
 ts_string = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
@@ -320,8 +319,7 @@ def run_training():
 
         # get models
         model = get_einsum_model([train_ds, val_ds, test_ds]).to(DEVICE)
-        # image_model = TTNImageModel(hyperparams.embedding_dim).to(DEVICE)
-        image_model = InhomogeneousTTNImageModel(hyperparams.embedding_dim).to(DEVICE)
+        image_model = TTNImageModel(hyperparams.embedding_dim).to(DEVICE)
 
         logger.info("Text model structure:")
         logger.info(model)
@@ -406,8 +404,7 @@ def run_training():
         text_model.load_state_dict(best_checkpoint["text_model_state_dict"])
         text_model = text_model.to(DEVICE)
 
-        # image_model = TTNImageModel(hyperparams.embedding_dim)
-        image_model = InhomogeneousTTNImageModel(hyperparams.embedding_dim)
+        image_model = TTNImageModel(hyperparams.embedding_dim)
         image_model.load_state_dict(best_checkpoint["image_model_state_dict"])
         image_model = image_model.to(DEVICE)
 
