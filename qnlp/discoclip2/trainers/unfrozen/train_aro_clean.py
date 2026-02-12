@@ -299,6 +299,9 @@ def run_training():
     hyperparams = ModelSettings()
     with setup_mlflow_run(EXPERIMENT_NAME, hyperparams.model_dump(), 8080):
 
+        logger.info("Starting training with hyperparameters:")
+        logger.info(hyperparams.model_dump_json(indent=2))
+
         # get datasets and dataloaders
         loaders, datasets = get_aro_dataloader(
             batch_size=hyperparams.batch_size,
@@ -317,6 +320,11 @@ def run_training():
         # get models
         model = get_einsum_model([train_ds, val_ds, test_ds]).to(DEVICE)
         image_model = TTNImageModel(hyperparams.embedding_dim).to(DEVICE)
+
+        logger.info("Text model structure:")
+        logger.info(model)
+        logger.info("Image model structure:")
+        logger.info(image_model)
 
         mlflow.log_params({
             "text_model_total_params": sum(p.numel() for p in model.parameters()),

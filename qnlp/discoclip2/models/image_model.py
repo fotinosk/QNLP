@@ -93,12 +93,12 @@ class TTNImageModel(nn.Module):
         num_patches = self.num_patches_side ** 2
         patch_dim = PATCH_SIZE * PATCH_SIZE
         
-                # Standard patch embedding
         self.patch_embed = nn.Sequential(
             Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)', 
                     p1=PATCH_SIZE, p2=PATCH_SIZE),
             nn.Linear(patch_dim, BOND_DIM)
         )
+        self.positional_embedding = nn.Parameter(torch.randn(1, num_patches, BOND_DIM))
         
         # Calculate Depth (Log base 4 because we reduce nodes by 4 each time)
         # e.g., 64 patches -> 16 nodes -> 4 nodes -> 1 node (Depth 3)
@@ -124,7 +124,8 @@ class TTNImageModel(nn.Module):
         self.head = nn.Linear(BOND_DIM, self.embedding_dim)
         
     def forward(self, x):
-        x = self.patch_embed(x) 
+        x = self.patch_embed(x)
+        x = x + self.pos_embed
         
         current_grid_dim = self.num_patches_side
 
@@ -140,5 +141,4 @@ class TTNImageModel(nn.Module):
         x = self.norm(x)
         x = self.head(x)
         
-        # ADDED: Essential final normalization for Contrastive Learning
         return nn.functional.normalize(x, p=2, dim=-1)

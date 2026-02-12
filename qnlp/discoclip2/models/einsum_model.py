@@ -40,19 +40,9 @@ class EinsumModel(nn.Module):
         self.sym2weight = self.compute_sym2weight()
     
     def compute_sym2weight(self) -> Dict[Symbol, nn.Parameter]:
-        """
-        Compute a dictionary mapping symbols to their corresponding weights.
-        This is useful for accessing the weights by symbol.
-        """
         return {sym: weight for sym, weight in zip(self.symbols, self.weights)}
 
     def reset_parameters(self, symbols: List[Symbol] = None):
-        """
-        Initialize all parameters with a uniform distribution.
-        Args:
-            symbols: if provided, only reset the parameters for these symbols.
-                     If None, reset all parameters.
-        """
         def mean(size: int) -> float:
             if size < 6:
                 correction_factor = [0, 3, 2.6, 2, 1.6, 1.3][size]
@@ -67,11 +57,6 @@ class EinsumModel(nn.Module):
             nn.init.uniform_(weight, -bound, bound)
 
     def set_weights(self, symbols: List[Symbol], tensors: List[torch.Tensor], freeze: bool = False):
-        """
-        Overwrite the model's parameters with the provided tensors.
-        Unknown symbols will trigger an error.
-        If `freeze` is True, the parameters will not be updated during training.
-        """
         if len(symbols) != len(tensors):
             raise ValueError("Symbols and tensors must have the same length.")
         
@@ -88,10 +73,6 @@ class EinsumModel(nn.Module):
                 self.weights[idx].data.copy_(tensor.data)
     
     def add_symbols(self, symbols: List[Symbol], sizes: List[tuple[int, ...]]):
-        """
-        Add new symbols and their corresponding parameters to the model.
-        If a symbol already exists, it will be ignored.
-        """
         if len(symbols) != len(sizes):
             raise ValueError("Symbols and sizes must have the same length.")
         
@@ -109,9 +90,6 @@ class EinsumModel(nn.Module):
         self.sym2weight = self.compute_sym2weight()
     
     def remove_symbols(self, symbols: List[Symbol]):
-        """
-        Remove the specified symbols and their corresponding parameters from the model.
-        """
         sym2idx = {sym: idx for idx, sym in enumerate(self.symbols)}
         indices_to_remove = [sym2idx[sym] for sym in symbols if sym in sym2idx]
         
@@ -124,9 +102,6 @@ class EinsumModel(nn.Module):
         self.sym2weight = self.compute_sym2weight()
 
     def _forward_single(self, input: tuple[str, List[Symbol]]) -> torch.Tensor:
-        """
-        Forward pass of the model.
-        """
         einsum_expr, symbols = input
 
         # return einsum(einsum_expr, *[self.sym2weight[sym] for sym in symbols])
@@ -134,14 +109,6 @@ class EinsumModel(nn.Module):
         return nn.functional.normalize(x, dim=-1)
 
     def forward(self, inputs: List[tuple[str, List[Symbol]]]) -> torch.Tensor:
-        """
-        Forward pass of the model.
-        Args:
-            inputs: A list of tuples, where each tuple contains an einsum expression
-                    and a list of symbols.
-        Returns:
-            A tensor representing the result of the einsum operation for each input.
-        """
         return torch.stack([self._forward_single(input) for input in inputs])
 
     def state_dict(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
