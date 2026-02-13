@@ -39,7 +39,6 @@ Also revisit bootstrapped models
 
 class ModelSettings(BaseSettings):
     embedding_dim: int = 512
-    bond_dim: int = 10
 
     batch_size: int = 128
     text_learning_rate: float = 0.001
@@ -75,7 +74,6 @@ def create_epoch_metrics(
         "contrastive_acc": torchmetrics.MeanMetric().to(DEVICE),
         "hard_neg_loss": torchmetrics.MeanMetric().to(DEVICE),
         "hard_neg_acc": torchmetrics.MeanMetric().to(DEVICE),
-        "hard_neg_draw": torchmetrics.MeanMetric().to(DEVICE),
         "true_cosine_mean": torchmetrics.MeanMetric().to(DEVICE),
         "false_cosine_mean": torchmetrics.MeanMetric().to(DEVICE),
     }
@@ -86,7 +84,6 @@ def create_epoch_metrics(
         "contrastive_acc": torch.zeros(num_batches, device=DEVICE),
         "hard_neg_loss": torch.zeros(num_batches, device=DEVICE),
         "hard_neg_acc": torch.zeros(num_batches, device=DEVICE),
-        "hard_neg_draw": torch.zeros(num_batches, device=DEVICE),
         "true_cosine_mean": torch.zeros(num_batches, device=DEVICE),
         "false_cosine_mean": torch.zeros(num_batches, device=DEVICE),
     }
@@ -134,14 +131,12 @@ def calculate_and_store_metrics(
     false_cosine_mean = neg_sim.mean()
 
     hard_neg_acc = (pos_sim > neg_sim).float().mean()
-    hard_neg_draw = (pos_sim == neg_sim).float().mean()
 
     batch_avg_metrics["loss"][i] = loss.detach()
     batch_avg_metrics["contrastive_loss"][i] = infonce_loss.detach()
     batch_avg_metrics["contrastive_acc"][i] = infonce_acc.detach()
     batch_avg_metrics["hard_neg_loss"][i] = hard_neg_loss.detach()
     batch_avg_metrics["hard_neg_acc"][i] = hard_neg_acc.detach()
-    batch_avg_metrics["hard_neg_draw"][i] = hard_neg_draw.detach()
     batch_avg_metrics["true_cosine_mean"][i] = true_cosine_mean.detach()
     batch_avg_metrics["false_cosine_mean"][i] = false_cosine_mean.detach()
 
@@ -217,7 +212,7 @@ def evaluate_models(
             logger.info(f"{key}: {avg_val:.4f}")
 
         mlflow.log_metrics(final_epoch_logs, step=epoch)
-        return final_epoch_logs[f"{usage}/epoch_hard_neg_loss"]
+        return final_epoch_logs[f"{usage}/epoch_hard_neg_acc"]
 
 
 def train_epoch(
@@ -325,7 +320,7 @@ def run_training():
             "image_model_total_params": sum(p.numel() for p in image_model.parameters())
         })
 
-        early_stopping = EarlyStopping(patience=hyperparams.patience, min_delta=0.0001, minimize=True)
+        early_stopping = EarlyStopping(patience=hyperparams.patience, min_delta=0.0001, minimize=False)
 
         # get loss functions
         contrastive_loss, hard_neg_loss = create_loss_functions(
@@ -365,7 +360,7 @@ def run_training():
                 epoch=epoch
             )
 
-            loss = evaluate_models(
+            bin_acc = evaluate_models(
                 text_model=model,
                 image_model=image_model,
                 dataloader=val_loader,
@@ -376,7 +371,7 @@ def run_training():
                 usage="val"
             )
 
-            training_status = early_stopping(loss)
+            training_status = early_stopping(bin_acc)
             if training_status == ModelTrainingStatus.stop:
                 logger.info("Early stopping triggered")
                 break
