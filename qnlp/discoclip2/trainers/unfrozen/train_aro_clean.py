@@ -15,6 +15,7 @@ from qnlp.utils.logging import setup_logger
 from qnlp.utils.mlflow_utils import setup_mlflow_run
 from qnlp.utils.seeding import set_seed
 from qnlp.utils.torch_utils import get_device, create_checkpoint_path
+from qnlp.utils.early_stopping import EarlyStopping, ModelTrainingStatus
 
 from qnlp.discoclip2.dataset.aro_dataloader import get_aro_dataloader
 from qnlp.discoclip2.models.einsum_model import get_einsum_model, EinsumModel
@@ -28,6 +29,12 @@ logger = setup_logger(log_name=EXPERIMENT_NAME, ts_string=ts_string)
 DEVICE = get_device()
 set_seed()
 global_step = 0
+
+"""
+IMPORTANT THREAD TO PULL:
+overall loss can increase (bad) even though accuracy can be improving
+Also revisit bootstrapped models 
+"""
 
 
 class ModelSettings(BaseSettings):
@@ -69,9 +76,6 @@ def create_epoch_metrics(
         "hard_neg_loss": torchmetrics.MeanMetric().to(DEVICE),
         "hard_neg_acc": torchmetrics.MeanMetric().to(DEVICE),
         "hard_neg_draw": torchmetrics.MeanMetric().to(DEVICE),
-        "true_caption_embedding_mean_norm": torchmetrics.MeanMetric().to(DEVICE),
-        "false_caption_embedding_mean_norm": torchmetrics.MeanMetric().to(DEVICE),
-        "image_embedding_mean_norm": torchmetrics.MeanMetric().to(DEVICE),
         "true_cosine_mean": torchmetrics.MeanMetric().to(DEVICE),
         "false_cosine_mean": torchmetrics.MeanMetric().to(DEVICE),
     }
@@ -83,9 +87,6 @@ def create_epoch_metrics(
         "hard_neg_loss": torch.zeros(num_batches, device=DEVICE),
         "hard_neg_acc": torch.zeros(num_batches, device=DEVICE),
         "hard_neg_draw": torch.zeros(num_batches, device=DEVICE),
-        "true_caption_embedding_mean_norm": torch.zeros(num_batches, device=DEVICE),
-        "false_caption_embedding_mean_norm": torch.zeros(num_batches, device=DEVICE),
-        "image_embedding_mean_norm": torch.zeros(num_batches, device=DEVICE),
         "true_cosine_mean": torch.zeros(num_batches, device=DEVICE),
         "false_cosine_mean": torch.zeros(num_batches, device=DEVICE),
     }
@@ -132,10 +133,6 @@ def calculate_and_store_metrics(
     true_cosine_mean = pos_sim.mean()
     false_cosine_mean = neg_sim.mean()
 
-    true_caption_embeddings_norm = true_caption_embeddings.norm(dim=-1).mean()
-    false_caption_embeddings_norm = false_caption_embeddings.norm(dim=-1).mean()
-    image_embeddings_norm = image_embeddings.norm(dim=-1).mean()
-
     hard_neg_acc = (pos_sim > neg_sim).float().mean()
     hard_neg_draw = (pos_sim == neg_sim).float().mean()
 
@@ -145,9 +142,6 @@ def calculate_and_store_metrics(
     batch_avg_metrics["hard_neg_loss"][i] = hard_neg_loss.detach()
     batch_avg_metrics["hard_neg_acc"][i] = hard_neg_acc.detach()
     batch_avg_metrics["hard_neg_draw"][i] = hard_neg_draw.detach()
-    batch_avg_metrics["true_caption_embedding_mean_norm"][i] = true_caption_embeddings_norm.detach()
-    batch_avg_metrics["false_caption_embedding_mean_norm"][i] = false_caption_embeddings_norm.detach()
-    batch_avg_metrics["image_embedding_mean_norm"][i] = image_embeddings_norm.detach()
     batch_avg_metrics["true_cosine_mean"][i] = true_cosine_mean.detach()
     batch_avg_metrics["false_cosine_mean"][i] = false_cosine_mean.detach()
 
@@ -297,7 +291,7 @@ def train_epoch(
 
 def run_training():
     hyperparams = ModelSettings()
-    with setup_mlflow_run(EXPERIMENT_NAME, hyperparams.model_dump(), 8080, run_name="inhomogeneous_image_model"):
+    with setup_mlflow_run(EXPERIMENT_NAME, hyperparams.model_dump(), 8080):
 
         logger.info("Starting training with hyperparameters:")
         logger.info(hyperparams.model_dump_json(indent=2))
@@ -331,6 +325,8 @@ def run_training():
             "image_model_total_params": sum(p.numel() for p in image_model.parameters())
         })
 
+        early_stopping = EarlyStopping(patience=hyperparams.patience, min_delta=0.0001, minimize=True)
+
         # get loss functions
         contrastive_loss, hard_neg_loss = create_loss_functions(
             temperature=hyperparams.temperature,
@@ -354,8 +350,6 @@ def run_training():
         ])
         logger.info(optimizer)
         logger.info(f"Starting training with {hyperparams.epochs} epochs")
-
-        best_loss = float("inf")
 
         for epoch in trange(1, hyperparams.epochs + 1, desc="Training Epochs"):
             logger.info(f"Starting epoch {epoch}/{hyperparams.epochs}")
@@ -382,8 +376,11 @@ def run_training():
                 usage="val"
             )
 
-            if loss < best_loss:
-                best_loss = loss
+            training_status = early_stopping(loss)
+            if training_status == ModelTrainingStatus.stop:
+                logger.info("Early stopping triggered")
+                break
+            elif training_status == ModelTrainingStatus.improved:
                 logger.info(f"New best model found - {epoch=}")
 
                 checkpoint = {
