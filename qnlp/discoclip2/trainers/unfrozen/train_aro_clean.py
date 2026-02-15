@@ -30,12 +30,6 @@ DEVICE = get_device()
 set_seed()
 global_step = 0
 
-"""
-IMPORTANT THREAD TO PULL:
-overall loss can increase (bad) even though accuracy can be improving
-Also revisit bootstrapped models 
-"""
-
 
 class ModelSettings(BaseSettings):
     embedding_dim: int = 512
@@ -48,13 +42,13 @@ class ModelSettings(BaseSettings):
     image_weight_decay: float = 0.01
 
     epochs: int = 100
-    patience: int = 5
+    patience: int = 10
 
     temperature: float = 0.07
-    hard_neg_loss_weight: float = 1.0
+    hard_neg_loss_weight: float = 40.0
     hard_neg_margin: float = 0.2
-    hard_neg_distance_function: Literal["euclidean", "cosine"] = "euclidean"
-    hard_neg_swap: bool = False
+    hard_neg_distance_function: Literal["euclidean", "cosine"] = "cosine"
+    hard_neg_swap: bool = True
 
     # Configuration for Environment Variables
     model_config = SettingsConfigDict(
