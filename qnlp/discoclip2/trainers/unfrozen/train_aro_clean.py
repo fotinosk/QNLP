@@ -45,7 +45,7 @@ class ModelSettings(BaseSettings):
     patience: int = 10
 
     temperature: float = 0.07
-    hard_neg_loss_weight: float = 40.0
+    hard_neg_loss_weight: float = 40000.0
     hard_neg_margin: float = 0.2
     hard_neg_distance_function: Literal["euclidean", "cosine"] = "cosine"
     hard_neg_swap: bool = True
