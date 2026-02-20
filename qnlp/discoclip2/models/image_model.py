@@ -7,20 +7,22 @@ from einops import rearrange
 
 from qnlp.discoclip2.models.cp_node import CPQuadRankLayer
 
+USE_COLOR = True
 BOND_DIM = 64
-CP_RANK = 16           
+CP_RANK = 32  # increased to handle color
 DROPOUT = 0.3
 PATCH_SIZE = 4  
 IMAGE_SIZE = 64
 
-
-preprocess = v2.Compose([
-    v2.RandomResizedCrop(IMAGE_SIZE, scale=(0.8, 1.0)), # Model can't memorize fixed positions
-    v2.ColorJitter(brightness=0.2, contrast=0.2), # Model can't memorize exact color stats    
+transforms = [
+    v2.RandomResizedCrop(IMAGE_SIZE, scale=(0.8, 1.0)),
+    v2.ColorJitter(brightness=0.2, contrast=0.2),
     v2.PILToTensor(),
     v2.ToDtype(torch.float32, scale=True),
-    v2.Grayscale(),
-])
+]
+if not USE_COLOR:
+    transforms.append(v2.Grayscale())
+preprocess = v2.Compose(transforms)
 
 
 class TTNImageModel(nn.Module):
@@ -29,10 +31,11 @@ class TTNImageModel(nn.Module):
         embedding_dim: int
     ):
         super().__init__()
+        self.in_channels = 3 if USE_COLOR else 1
         self.embedding_dim = embedding_dim
         self.num_patches_side =  IMAGE_SIZE // PATCH_SIZE
         num_patches = self.num_patches_side ** 2
-        patch_dim = PATCH_SIZE * PATCH_SIZE
+        patch_dim = PATCH_SIZE * PATCH_SIZE * self.in_channels
         
         self.patch_embed = nn.Sequential(
             Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)', 

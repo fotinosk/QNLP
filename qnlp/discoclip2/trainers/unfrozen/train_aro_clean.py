@@ -20,6 +20,7 @@ from qnlp.utils.early_stopping import EarlyStopping, ModelTrainingStatus
 from qnlp.discoclip2.dataset.aro_dataloader import get_aro_dataloader
 from qnlp.discoclip2.models.einsum_model import get_einsum_model, EinsumModel
 from qnlp.discoclip2.models.image_model import TTNImageModel
+from qnlp.utils.training_notifications import send_training_finished_notification
 
 EXPERIMENT_NAME = "train_vlm_on_aro"
 ts_string = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
@@ -280,7 +281,7 @@ def train_epoch(
 
 def run_training():
     hyperparams = ModelSettings()
-    with setup_mlflow_run(EXPERIMENT_NAME, hyperparams.model_dump(), 8080):
+    with setup_mlflow_run(EXPERIMENT_NAME, hyperparams.model_dump(), 8080) as run:
 
         logger.info("Starting training with hyperparameters:")
         logger.info(hyperparams.model_dump_json(indent=2))
@@ -394,7 +395,7 @@ def run_training():
         image_model.load_state_dict(best_checkpoint["image_model_state_dict"])
         image_model = image_model.to(DEVICE)
 
-        evaluate_models(
+        test_acc = evaluate_models(
             text_model=text_model,
             image_model=image_model,
             dataloader=test_loader,
@@ -404,6 +405,11 @@ def run_training():
             epoch=hyperparams.epochs+1,
             usage="test"
         )
+        send_training_finished_notification({
+            "experiment_name": EXPERIMENT_NAME,
+            "run_name": run.info.run_name,
+            "accuracy": test_acc
+        })
 
 
 if __name__ == "__main__":
