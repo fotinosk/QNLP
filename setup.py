@@ -1,4 +1,4 @@
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
 setup(
     name="qnlp",
@@ -9,5 +9,11 @@ setup(
         "pillow",
         "tqdm",
     ],
+    extras_require={
+        "dev": [
+            "pre-commit",
+            "ruff",
+        ],
+    },
     python_requires=">=3.11",
 )

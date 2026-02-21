@@ -6,6 +6,7 @@ class CPQuadRankLayer(nn.Module):
     """
     Quadtree Layer: Merges 4 children (2x2 block) into 1 parent.
     """
+
     def __init__(self, num_nodes, in_dim, out_dim, rank, dropout_p=0.0):
         super().__init__()
         self.num_nodes = num_nodes
@@ -46,10 +47,10 @@ class CPQuadRankLayer(nn.Module):
         x_bl = x[:, :, 2, :]
         x_br = x[:, :, 3, :]
 
-        p_tl = torch.einsum('bni,nri->bnr', x_tl, self.factor_tl)
-        p_tr = torch.einsum('bni,nri->bnr', x_tr, self.factor_tr)
-        p_bl = torch.einsum('bni,nri->bnr', x_bl, self.factor_bl)
-        p_br = torch.einsum('bni,nri->bnr', x_br, self.factor_br)
+        p_tl = torch.einsum("bni,nri->bnr", x_tl, self.factor_tl)
+        p_tr = torch.einsum("bni,nri->bnr", x_tr, self.factor_tr)
+        p_bl = torch.einsum("bni,nri->bnr", x_bl, self.factor_bl)
+        p_br = torch.einsum("bni,nri->bnr", x_br, self.factor_br)
 
         merged = self.scale.unsqueeze(0) * p_tl * p_tr * p_bl * p_br
 
@@ -57,6 +58,6 @@ class CPQuadRankLayer(nn.Module):
             mask = torch.bernoulli(torch.full_like(merged, 1 - self.dropout_p))
             merged = merged * mask / (1 - self.dropout_p)
 
-        out = torch.einsum('bnr,nro->bno', merged, self.factor_out)
+        out = torch.einsum("bnr,nro->bno", merged, self.factor_out)
 
         return out + res

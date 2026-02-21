@@ -8,47 +8,47 @@ from torch.nn.functional import cosine_similarity
 from torch.utils.data import DataLoader
 from tqdm import trange
 
-from qnlp.utils.seeding import set_seed
-from qnlp.utils.logging import setup_logger
-from qnlp.discoclip2.dataset.aro_dataset import aro_tn_collate_fn, ProcessedARODataset
-from qnlp.discoclip2.models.loss import create_loss_functions
-from qnlp.discoclip2.models.lookup_embeddings import LookupEmbedding
+from qnlp.discoclip2.dataset.aro_dataset import ProcessedARODataset, aro_tn_collate_fn
 from qnlp.discoclip2.models.einsum_model import EinsumModel, get_einsum_model
-
+from qnlp.discoclip2.models.lookup_embeddings import LookupEmbedding
+from qnlp.discoclip2.models.loss import create_loss_functions
+from qnlp.utils.logging import setup_logger
+from qnlp.utils.seeding import set_seed
 
 torch.serialization.add_safe_globals([Symbol])
 
 CHECKPOINT_PATH = "checkpoints/"
 
-EMBEDDING_DIM= 512
-BOND_DIM= 10
+EMBEDDING_DIM = 512
+BOND_DIM = 10
 
 DEVICE = "mps"
 
 
 TRAIN_DATA_PATH = "data/aro/processed/combined/train.json"
-VAL_DATA_PATH   = "data/aro/processed/combined/val.json"
-TEST_DATA_PATH  = "data/aro/processed/combined/test.json"
+VAL_DATA_PATH = "data/aro/processed/combined/val.json"
+TEST_DATA_PATH = "data/aro/processed/combined/test.json"
 
 IMAGE_LOOKUP_PATH = "models/lookup_embedding_ViT-B_32.pt"
 
-SEED          = 42
-BATCH_SIZE    = 32
+SEED = 42
+BATCH_SIZE = 32
 LEARNING_RATE = 0.001
-WEIGHT_DECAY  = 0.001
-EPOCHS        = 10
-PATIENCE      = 5
+WEIGHT_DECAY = 0.001
+EPOCHS = 10
+PATIENCE = 5
 
 TEMPERATURE = 0.07
 HARD_NEG_LOSS_WEIGHT = 1.0
-HARD_NEG_MARGIN      = 0.2
-HARD_NEG_DISTANCE_FUNCTION = "euclidean" 
-HARD_NEG_SWAP        = False          
+HARD_NEG_MARGIN = 0.2
+HARD_NEG_DISTANCE_FUNCTION = "euclidean"
+HARD_NEG_SWAP = False
 
-LOG_PATH        = "runs/logs/"
+LOG_PATH = "runs/logs/"
 CHECKPOINT_PATH = "checkpoints"
 MLFLOW_EXPERIMENT = "discoclip_aro_experiment"
-MLFLOW_URI = None 
+MLFLOW_URI = None
+
 
 def train_epoch(
     model,
@@ -95,28 +95,21 @@ def train_epoch(
         true_caption_embeddings = model(true_captions)
         false_caption_embeddings = model(false_captions)
 
-        metrics["true_caption_embedding_mean_norm"] += (
-            true_caption_embeddings.norm(dim=-1).mean().item()
-        )
-        metrics["false_caption_embedding_mean_norm"] += (
-            false_caption_embeddings.norm(dim=-1).mean().item()
-        )
+        metrics["true_caption_embedding_mean_norm"] += true_caption_embeddings.norm(dim=-1).mean().item()
+        metrics["false_caption_embedding_mean_norm"] += false_caption_embeddings.norm(dim=-1).mean().item()
 
-        infonce_loss, infonce_acc = contrastive_criterion(
-            image_embeddings, true_caption_embeddings
-        )
+        infonce_loss, infonce_acc = contrastive_criterion(image_embeddings, true_caption_embeddings)
 
         pos_sim = cosine_similarity(true_caption_embeddings, image_embeddings, dim=-1)
         neg_sim = cosine_similarity(false_caption_embeddings, image_embeddings, dim=-1)
-        
+
         metrics["true_cosine_mean"] += pos_sim.mean().item()
         metrics["false_cosine_mean"] += neg_sim.mean().item()
 
         hard_neg_acc = (pos_sim > neg_sim).float().mean().item()
         hard_neg_draw = (pos_sim == neg_sim).float().mean().item()
-        hard_neg_loss = hard_neg_criterion(image_embeddings, 
-                                           true_caption_embeddings, false_caption_embeddings)
-        
+        hard_neg_loss = hard_neg_criterion(image_embeddings, true_caption_embeddings, false_caption_embeddings)
+
         loss = infonce_loss + hard_neg_loss_weight * hard_neg_loss
 
         loss.backward()
@@ -176,16 +169,10 @@ def evaluate_model(
             true_caption_embeddings = model(true_captions)
             false_caption_embeddings = model(false_captions)
 
-            metrics["true_caption_embedding_mean_norm"] += (
-                true_caption_embeddings.norm(dim=-1).mean().item()
-            )
-            metrics["false_caption_embedding_mean_norm"] += (
-                false_caption_embeddings.norm(dim=-1).mean().item()
-            )
+            metrics["true_caption_embedding_mean_norm"] += true_caption_embeddings.norm(dim=-1).mean().item()
+            metrics["false_caption_embedding_mean_norm"] += false_caption_embeddings.norm(dim=-1).mean().item()
 
-            infonce_loss, infonce_acc = contrastive_criterion(
-                image_embeddings, true_caption_embeddings
-            )
+            infonce_loss, infonce_acc = contrastive_criterion(image_embeddings, true_caption_embeddings)
 
             pos_sim = cosine_similarity(true_caption_embeddings, image_embeddings, dim=-1)
             neg_sim = cosine_similarity(false_caption_embeddings, image_embeddings, dim=-1)
@@ -195,11 +182,7 @@ def evaluate_model(
 
             hard_neg_acc = (pos_sim > neg_sim).float().mean().item()
             hard_neg_draw = (pos_sim == neg_sim).float().mean().item()
-            hard_neg_loss = hard_neg_criterion(
-                image_embeddings, 
-                true_caption_embeddings, 
-                false_caption_embeddings
-            )
+            hard_neg_loss = hard_neg_criterion(image_embeddings, true_caption_embeddings, false_caption_embeddings)
 
             loss = infonce_loss + hard_neg_loss_weight * hard_neg_loss
 
@@ -217,17 +200,15 @@ def evaluate_model(
 
 
 def train_model(parent_run=None):
-    with mlflow.start_run(parent_run_id=parent_run.info.run_id if parent_run else None,
-                          nested=True if parent_run else False) as run:
-
-        logger = setup_logger(
-            os.path.join(LOG_PATH, f"train_{run.info.run_id}.log")
-        )
+    with mlflow.start_run(
+        parent_run_id=parent_run.info.run_id if parent_run else None,
+        nested=True if parent_run else False,
+    ) as run:
+        logger = setup_logger(os.path.join(LOG_PATH, f"train_{run.info.run_id}.log"))
         logger.info(
             f"Running experiment: {MLFLOW_EXPERIMENT}, run ID: {run.info.run_id}, run name: {run.info.run_name}"
         )
-        
-        
+
         set_seed(SEED)
 
         train_ds = ProcessedARODataset(data_path=TRAIN_DATA_PATH)
@@ -258,7 +239,7 @@ def train_model(parent_run=None):
         )
 
         model = get_einsum_model([train_ds, val_ds, test_ds]).to(DEVICE)
-       
+
         number_params = sum(p.numel() for p in model.parameters())
         mlflow.log_params({"model_num_params": number_params})
 
@@ -270,11 +251,9 @@ def train_model(parent_run=None):
             temperature=TEMPERATURE,
             hard_neg_distance_function=HARD_NEG_DISTANCE_FUNCTION,
             margin=HARD_NEG_MARGIN,
-            swap=HARD_NEG_SWAP
+            swap=HARD_NEG_SWAP,
         )
-        optimizer = optim.AdamW(
-            model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
-        )
+        optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
 
         best_val_hard_neg_loss = float("inf")
 
@@ -308,9 +287,7 @@ def train_model(parent_run=None):
                 device=DEVICE,
             )
 
-            mlflow.log_metrics(
-                {f"val/{key}": value for key, value in val_metrics.items()}, step=epoch
-            )
+            mlflow.log_metrics({f"val/{key}": value for key, value in val_metrics.items()}, step=epoch)
             logger.info(
                 f"Epoch {epoch}/{EPOCHS} - "
                 f"Train Loss: {train_metrics['loss']:.4f}, "
@@ -326,23 +303,19 @@ def train_model(parent_run=None):
                     "epoch": epoch,
                     "val_metrics": val_metrics,
                 }
-                checkpoint_path = os.path.join(
-                    CHECKPOINT_PATH, f"{run.info.run_id}/best_model.pt"
-                )
+                checkpoint_path = os.path.join(CHECKPOINT_PATH, f"{run.info.run_id}/best_model.pt")
                 os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
                 torch.save(checkpoint, checkpoint_path)
                 mlflow.log_artifact(checkpoint_path)
                 logger.info(f"Saved best model checkpoint to {checkpoint_path}")
 
         # Final evaluation on test set
-        best_model_path = os.path.join(
-            CHECKPOINT_PATH, f"{run.info.run_id}/best_model.pt"
-        )
+        best_model_path = os.path.join(CHECKPOINT_PATH, f"{run.info.run_id}/best_model.pt")
         best_checkpoint = torch.load(best_model_path, map_location=DEVICE)
-        
+
         best_model = EinsumModel()
         best_model.load_state_dict(best_checkpoint["model_state_dict"])
-        best_model = best_model.to(DEVICE)        
+        best_model = best_model.to(DEVICE)
 
         test_metrics = evaluate_model(
             best_model,
@@ -353,22 +326,14 @@ def train_model(parent_run=None):
             hard_neg_loss_weight=HARD_NEG_LOSS_WEIGHT,
             device=DEVICE,
         )
-        mlflow.log_metrics(
-            {f"test/{key}": value for key, value in test_metrics.items()}
-        )
-        logger.info(
-            f"Testing on test set with best model from epoch {best_checkpoint['epoch']}"
-        )
-        logger.info(
-            f"Test Loss: {test_metrics['loss']:.4f}, "
-            f"Test Acc: {test_metrics['hard_neg_acc']:.4f}"
-        )
+        mlflow.log_metrics({f"test/{key}": value for key, value in test_metrics.items()})
+        logger.info(f"Testing on test set with best model from epoch {best_checkpoint['epoch']}")
+        logger.info(f"Test Loss: {test_metrics['loss']:.4f}, " f"Test Acc: {test_metrics['hard_neg_acc']:.4f}")
         logger.info("Training complete.")
         mlflow.log_artifact(os.path.join(LOG_PATH, f"train_{run.info.run_id}.log"))
 
 
 if __name__ == "__main__":
-
     # mlflow.set_tracking_uri(MLFLOW_URI)
     # mlflow.set_experiment(MLFLOW_EXPERIMENT)
 

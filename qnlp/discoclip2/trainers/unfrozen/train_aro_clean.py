@@ -1,29 +1,29 @@
 from datetime import datetime
-import torch
 from typing import Literal
+
 import mlflow
+import torch
+import torchmetrics
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from torch import Tensor
 from torch.nn import Module
+from torch.nn.functional import cosine_similarity
 from torchmetrics import MeanMetric
 from tqdm import trange
-from torch.nn.functional import cosine_similarity
-import torchmetrics
 
+from qnlp.discoclip2.dataset.aro_dataloader import get_aro_dataloader
+from qnlp.discoclip2.models.einsum_model import EinsumModel, get_einsum_model
+from qnlp.discoclip2.models.image_model import TTNImageModel, image_model_hyperparams
 from qnlp.discoclip2.models.loss import create_loss_functions
+from qnlp.utils.early_stopping import EarlyStopping, ModelTrainingStatus
 from qnlp.utils.logging import setup_logger
 from qnlp.utils.mlflow_utils import setup_mlflow_run
 from qnlp.utils.seeding import set_seed
-from qnlp.utils.torch_utils import get_device, create_checkpoint_path
-from qnlp.utils.early_stopping import EarlyStopping, ModelTrainingStatus
-
-from qnlp.discoclip2.dataset.aro_dataloader import get_aro_dataloader
-from qnlp.discoclip2.models.einsum_model import get_einsum_model, EinsumModel
-from qnlp.discoclip2.models.image_model import TTNImageModel, image_model_hyperparams
+from qnlp.utils.torch_utils import create_checkpoint_path, get_device
 from qnlp.utils.training_notifications import send_training_finished_notification
 
 EXPERIMENT_NAME = "train_vlm_on_aro"
-ts_string = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+ts_string = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 checkpoint_path = create_checkpoint_path(EXPERIMENT_NAME, ts_string)
 logger = setup_logger(log_name=EXPERIMENT_NAME, ts_string=ts_string)
 
@@ -53,16 +53,13 @@ class ModelSettings(BaseSettings):
 
     # Configuration for Environment Variables
     model_config = SettingsConfigDict(
-        env_prefix='ML_',           # Prefix for env vars
+        env_prefix="ML_",  # Prefix for env vars
     )
 
 
 def create_epoch_metrics(
-        num_batches: int
-) -> tuple[
-    dict[str, Tensor],
-    dict[str, MeanMetric]
-]:
+    num_batches: int,
+) -> tuple[dict[str, Tensor], dict[str, MeanMetric]]:
     epoch_avg_metrics = {
         "loss": torchmetrics.MeanMetric().to(DEVICE),
         "contrastive_loss": torchmetrics.MeanMetric().to(DEVICE),
@@ -86,37 +83,32 @@ def create_epoch_metrics(
 
 
 def calculate_composite_lost(
-        contrastive_criterion: Module,
-        hard_neg_criterion: Module,
-        true_caption_embeddings: torch.Tensor,
-        false_caption_embeddings: torch.Tensor,
-        image_embeddings: torch.Tensor,
-        hard_neg_loss_weight: float
+    contrastive_criterion: Module,
+    hard_neg_criterion: Module,
+    true_caption_embeddings: torch.Tensor,
+    false_caption_embeddings: torch.Tensor,
+    image_embeddings: torch.Tensor,
+    hard_neg_loss_weight: float,
 ) -> tuple:
-    infonce_loss, infonce_acc = contrastive_criterion(
-        image_embeddings, true_caption_embeddings
-    )
+    infonce_loss, infonce_acc = contrastive_criterion(image_embeddings, true_caption_embeddings)
 
-    hard_neg_loss = hard_neg_criterion(
-        image_embeddings,
-        true_caption_embeddings,
-        false_caption_embeddings
-    )
+    hard_neg_loss = hard_neg_criterion(image_embeddings, true_caption_embeddings, false_caption_embeddings)
 
     loss = infonce_loss + hard_neg_loss_weight * hard_neg_loss
     return hard_neg_loss, infonce_acc, infonce_loss, loss
 
 
 def calculate_and_store_metrics(
-        batch_avg_metrics: dict[str, Tensor],
-        epoch_avg_metrics: dict[str, MeanMetric],
-        false_caption_embeddings: Tensor,
-        hard_neg_loss, i: int,
-        image_embeddings: Tensor,
-        infonce_acc: Tensor,
-        infonce_loss: Tensor,
-        loss: Tensor,
-        true_caption_embeddings: Tensor
+    batch_avg_metrics: dict[str, Tensor],
+    epoch_avg_metrics: dict[str, MeanMetric],
+    false_caption_embeddings: Tensor,
+    hard_neg_loss,
+    i: int,
+    image_embeddings: Tensor,
+    infonce_acc: Tensor,
+    infonce_loss: Tensor,
+    loss: Tensor,
+    true_caption_embeddings: Tensor,
 ) -> None:
     # calculate training metrics
     pos_sim = cosine_similarity(true_caption_embeddings, image_embeddings, dim=-1)
@@ -140,14 +132,14 @@ def calculate_and_store_metrics(
 
 
 def evaluate_models(
-        text_model: torch.nn.Module,
-        image_model: torch.nn.Module,
-        dataloader: torch.utils.data.DataLoader,
-        contrastive_criterion: torch.nn.Module,
-        hard_neg_criterion: torch.nn.Module,
-        hard_neg_loss_weight: float,
-        epoch: int,
-        usage: Literal['test', 'val']
+    text_model: torch.nn.Module,
+    image_model: torch.nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    contrastive_criterion: torch.nn.Module,
+    hard_neg_criterion: torch.nn.Module,
+    hard_neg_loss_weight: float,
+    epoch: int,
+    usage: Literal["test", "val"],
 ) -> float:
     text_model.eval()
     image_model.eval()
@@ -185,18 +177,16 @@ def evaluate_models(
                 infonce_acc=infonce_acc,
                 infonce_loss=infonce_loss,
                 loss=loss,
-                true_caption_embeddings=true_caption_embeddings
+                true_caption_embeddings=true_caption_embeddings,
             )
 
-        cpu_batch_metrics = {
-            k: v.cpu().tolist() for k, v in batch_avg_metrics.items()
-        }
+        cpu_batch_metrics = {k: v.cpu().tolist() for k, v in batch_avg_metrics.items()}
 
         start_step = global_step - num_batches
         for offset in range(num_batches):
             mlflow.log_metrics(
                 {f"{usage}/batch_{k}": v[offset] for k, v in cpu_batch_metrics.items()},
-                step=start_step + offset
+                step=start_step + offset,
             )
 
         final_epoch_logs = {}
@@ -211,14 +201,14 @@ def evaluate_models(
 
 
 def train_epoch(
-        text_model: torch.nn.Module,
-        image_model: torch.nn.Module,
-        train_dataloader: torch.utils.data.DataLoader,
-        optimizer: torch.optim.Optimizer,
-        contrastive_criterion: torch.nn.Module,
-        hard_neg_criterion: torch.nn.Module,
-        hard_neg_loss_weight: float,
-        epoch: int
+    text_model: torch.nn.Module,
+    image_model: torch.nn.Module,
+    train_dataloader: torch.utils.data.DataLoader,
+    optimizer: torch.optim.Optimizer,
+    contrastive_criterion: torch.nn.Module,
+    hard_neg_criterion: torch.nn.Module,
+    hard_neg_loss_weight: float,
+    epoch: int,
 ) -> None:
     global global_step
     text_model.train()
@@ -253,20 +243,28 @@ def train_epoch(
         torch.nn.utils.clip_grad_norm_(image_model.parameters(), max_norm=1.0)
         optimizer.step()
 
-        calculate_and_store_metrics(batch_avg_metrics, epoch_avg_metrics, false_caption_embeddings, hard_neg_loss, i,
-                                    image_embeddings, infonce_acc, infonce_loss, loss, true_caption_embeddings)
+        calculate_and_store_metrics(
+            batch_avg_metrics,
+            epoch_avg_metrics,
+            false_caption_embeddings,
+            hard_neg_loss,
+            i,
+            image_embeddings,
+            infonce_acc,
+            infonce_loss,
+            loss,
+            true_caption_embeddings,
+        )
 
         global_step += 1
 
-    cpu_batch_metrics = {
-        k: v.cpu().tolist() for k, v in batch_avg_metrics.items()
-    }
+    cpu_batch_metrics = {k: v.cpu().tolist() for k, v in batch_avg_metrics.items()}
 
     start_step = global_step - num_batches
     for offset in range(num_batches):
         mlflow.log_metrics(
             {f"train/batch_{k}": v[offset] for k, v in cpu_batch_metrics.items()},
-            step=start_step + offset
+            step=start_step + offset,
         )
 
     final_epoch_logs = {}
@@ -289,19 +287,18 @@ def run_training():
         logger.info(image_model_hyperparams.model_dump_json(indent=2))
 
         # get datasets and dataloaders
-        loaders, datasets = get_aro_dataloader(
-            batch_size=hyperparams.batch_size,
-            return_images=True
-        )
+        loaders, datasets = get_aro_dataloader(batch_size=hyperparams.batch_size, return_images=True)
         train_loader, val_loader, test_loader = loaders
         train_ds, val_ds, test_ds = datasets
 
-        logger.info({
-            "message": "created datasets and dataloaders",
-            "train_loader_size": len(train_ds),
-            "val_loader_size": len(val_ds),
-            "test_loader_size": len(test_ds)
-        })
+        logger.info(
+            {
+                "message": "created datasets and dataloaders",
+                "train_loader_size": len(train_ds),
+                "val_loader_size": len(val_ds),
+                "test_loader_size": len(test_ds),
+            }
+        )
 
         # get models
         model = get_einsum_model([train_ds, val_ds, test_ds]).to(DEVICE)
@@ -312,10 +309,12 @@ def run_training():
         logger.info("Image model structure:")
         logger.info(image_model)
 
-        mlflow.log_params({
-            "text_model_total_params": sum(p.numel() for p in model.parameters()),
-            "image_model_total_params": sum(p.numel() for p in image_model.parameters())
-        })
+        mlflow.log_params(
+            {
+                "text_model_total_params": sum(p.numel() for p in model.parameters()),
+                "image_model_total_params": sum(p.numel() for p in image_model.parameters()),
+            }
+        )
 
         early_stopping = EarlyStopping(patience=hyperparams.patience, min_delta=0.0001, minimize=False)
 
@@ -324,22 +323,24 @@ def run_training():
             temperature=hyperparams.temperature,
             hard_neg_distance_function=hyperparams.hard_neg_distance_function,
             margin=hyperparams.hard_neg_margin,
-            swap=hyperparams.hard_neg_swap
+            swap=hyperparams.hard_neg_swap,
         )
 
         # get optimizer
-        optimizer = torch.optim.AdamW([
-            {
-                "params": model.parameters(),
-                "lr": hyperparams.text_learning_rate,
-                "weight_decay": hyperparams.text_weight_decay
-            },
-            {
-                "params": image_model.parameters(),
-                "lr": hyperparams.image_learning_rate,
-                "weight_decay": hyperparams.image_weight_decay
-            }
-        ])
+        optimizer = torch.optim.AdamW(
+            [
+                {
+                    "params": model.parameters(),
+                    "lr": hyperparams.text_learning_rate,
+                    "weight_decay": hyperparams.text_weight_decay,
+                },
+                {
+                    "params": image_model.parameters(),
+                    "lr": hyperparams.image_learning_rate,
+                    "weight_decay": hyperparams.image_weight_decay,
+                },
+            ]
+        )
         logger.info(optimizer)
         logger.info(f"Starting training with {hyperparams.epochs} epochs")
 
@@ -354,7 +355,7 @@ def run_training():
                 contrastive_criterion=contrastive_loss,
                 hard_neg_criterion=hard_neg_loss,
                 hard_neg_loss_weight=hyperparams.hard_neg_loss_weight,
-                epoch=epoch
+                epoch=epoch,
             )
 
             bin_acc = evaluate_models(
@@ -365,7 +366,7 @@ def run_training():
                 hard_neg_criterion=hard_neg_loss,
                 hard_neg_loss_weight=hyperparams.hard_neg_loss_weight,
                 epoch=epoch,
-                usage="val"
+                usage="val",
             )
 
             training_status = early_stopping(bin_acc)
@@ -404,14 +405,16 @@ def run_training():
             contrastive_criterion=contrastive_loss,
             hard_neg_criterion=hard_neg_loss,
             hard_neg_loss_weight=hyperparams.hard_neg_loss_weight,
-            epoch=hyperparams.epochs+1,
-            usage="test"
+            epoch=hyperparams.epochs + 1,
+            usage="test",
         )
-        send_training_finished_notification({
-            "experiment_name": EXPERIMENT_NAME,
-            "run_name": run.info.run_name,
-            "accuracy": test_acc
-        })
+        send_training_finished_notification(
+            {
+                "experiment_name": EXPERIMENT_NAME,
+                "run_name": run.info.run_name,
+                "accuracy": test_acc,
+            }
+        )
 
 
 if __name__ == "__main__":

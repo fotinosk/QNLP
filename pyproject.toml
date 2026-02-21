@@ -1,0 +1,14 @@
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+# E: pycodestyle, F: Pyflakes, I: isort
+select = ["E", "F", "I"]
+
+ignore = [
+    "E741", # Allow ambiguous variable names like 'l', 'I', or 'O'
+    "E731", # Allow assigning lambda expressions to variables
+]
+
+[tool.ruff.format]
+quote-style = "double"

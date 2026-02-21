@@ -1,9 +1,11 @@
 import enum
 
+
 class ModelTrainingStatus(enum.Enum):
     improved = 1
     no_improvement = 2
     stop = 3
+
 
 class EarlyStopping:
     def __init__(self, patience: int, min_delta: float, minimize: bool):
