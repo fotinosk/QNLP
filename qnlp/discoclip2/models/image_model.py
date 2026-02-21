@@ -9,7 +9,7 @@ from qnlp.discoclip2.models.cp_node import CPQuadRankLayer
 
 USE_COLOR = True
 BOND_DIM = 64
-CP_RANK = 32  # increased to handle color
+CP_RANK = 32
 DROPOUT = 0.3
 PATCH_SIZE = 4  
 IMAGE_SIZE = 64
@@ -44,8 +44,6 @@ class TTNImageModel(nn.Module):
         )
         self.positional_embedding = nn.Parameter(torch.randn(1, num_patches, BOND_DIM))
         
-        # Calculate Depth (Log base 4 because we reduce nodes by 4 each time)
-        # e.g., 64 patches -> 16 nodes -> 4 nodes -> 1 node (Depth 3)
         self.depth = int(math.log(num_patches, 4))
         
         print(f"QuadTree Structure: {num_patches} leaves -> Depth {self.depth}")

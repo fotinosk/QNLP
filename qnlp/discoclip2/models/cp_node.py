@@ -31,17 +31,14 @@ class CPQuadRankLayer(nn.Module):
         self._initialize()
 
     def _initialize(self):
-        # CHANGED: Switched to Xavier initialization for stable variance
         with torch.no_grad():
             for f in [self.factor_tl, self.factor_tr, self.factor_bl, self.factor_br]:
                 nn.init.xavier_uniform_(f)
             nn.init.xavier_uniform_(self.factor_out)
 
     def forward(self, x):
-        # CHANGED: Residual is now the MEAN to control magnitude
         res = self.res_proj(x.mean(dim=2))
 
-        # ADDED: Pre-Norm application
         x = self.norm(x)
 
         x_tl = x[:, :, 0, :]
