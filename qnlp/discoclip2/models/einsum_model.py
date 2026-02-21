@@ -1,10 +1,12 @@
+from typing import Any, Dict, List
+
 import torch
 import torch.nn as nn
-from typing import List, Dict, Any
-from lambeq import Symbol
 from cotengra import einsum
+from lambeq import Symbol
 
 torch.serialization.add_safe_globals([Symbol])
+
 
 def get_einsum_model(datasets: list):
     symbol_sizes = dict()
@@ -13,12 +15,13 @@ def get_einsum_model(datasets: list):
             if sym in symbol_sizes and symbol_sizes[sym] != size:
                 raise ValueError(f"Symbol {sym} has different sizes in the datasets: {symbol_sizes[sym]} and {size}")
             symbol_sizes[sym] = size
-    
+
     symbols = list(symbol_sizes.keys())
     sizes = list(symbol_sizes.values())
-            
+
     model = EinsumModel(symbols, sizes)
     return model
+
 
 class EinsumModel(nn.Module):
     def __init__(self, symbols: List[Symbol] = [], sizes: List[tuple[int, ...]] = []):
@@ -38,7 +41,7 @@ class EinsumModel(nn.Module):
 
         self.reset_parameters()
         self.sym2weight = self.compute_sym2weight()
-    
+
     def compute_sym2weight(self) -> Dict[Symbol, nn.Parameter]:
         return {sym: weight for sym, weight in zip(self.symbols, self.weights)}
 
@@ -48,7 +51,7 @@ class EinsumModel(nn.Module):
                 correction_factor = [0, 3, 2.6, 2, 1.6, 1.3][size]
             else:
                 correction_factor = 1 / (0.16 * size - 0.04)
-            return (size/3 - 1/(15 - correction_factor)) ** 0.5
+            return (size / 3 - 1 / (15 - correction_factor)) ** 0.5
 
         for sym, weight in zip(self.symbols, self.weights):
             if symbols is not None and sym not in symbols:
@@ -59,46 +62,47 @@ class EinsumModel(nn.Module):
     def set_weights(self, symbols: List[Symbol], tensors: List[torch.Tensor], freeze: bool = False):
         if len(symbols) != len(tensors):
             raise ValueError("Symbols and tensors must have the same length.")
-        
+
         if not all(s in self.symbols for s in symbols):
             raise ValueError(f"Some symbols {set(symbols) - set(self.symbols)} are not in the model's symbols list.")
-        
+
         sym2idx = {sym: idx for idx, sym in enumerate(self.symbols)}
         for sym, tensor in zip(symbols, tensors):
             idx = sym2idx[sym]
             if self.weights[idx].shape != tensor.shape:
-                raise ValueError(f"Shape mismatch for symbol '{sym}': "
-                                    f"expected {self.weights[idx].shape}, got {tensor.shape}")
+                raise ValueError(
+                    f"Shape mismatch for symbol '{sym}': " f"expected {self.weights[idx].shape}, got {tensor.shape}"
+                )
             with torch.no_grad():
                 self.weights[idx].data.copy_(tensor.data)
-    
+
     def add_symbols(self, symbols: List[Symbol], sizes: List[tuple[int, ...]]):
         if len(symbols) != len(sizes):
             raise ValueError("Symbols and sizes must have the same length.")
-        
+
         if any(sym in self.symbols for sym in symbols):
             raise ValueError(f"Some symbols {set(symbols) & set(self.symbols)} already exist in the model.")
-        
+
         for sym, size in zip(symbols, sizes):
             if sym not in self.symbols:
                 new_weight = nn.Parameter(torch.empty(size))
                 self.symbols.append(sym)
                 self.weights.append(new_weight)
                 self.sizes.append(size)
-        
+
         self.reset_parameters(symbols=symbols)
         self.sym2weight = self.compute_sym2weight()
-    
+
     def remove_symbols(self, symbols: List[Symbol]):
         sym2idx = {sym: idx for idx, sym in enumerate(self.symbols)}
         indices_to_remove = [sym2idx[sym] for sym in symbols if sym in sym2idx]
-        
+
         indices_to_remove.sort(reverse=True)
         for idx in indices_to_remove:
             del self.symbols[idx]
             del self.weights[idx]
             del self.sizes[idx]
-        
+
         self.sym2weight = self.compute_sym2weight()
 
     def _forward_single(self, input: tuple[str, List[Symbol]]) -> torch.Tensor:
@@ -125,9 +129,7 @@ class EinsumModel(nn.Module):
             loaded_sizes = state_dict.pop("sizes_list")
             self.sizes = list(loaded_sizes)
 
-        self.weights = nn.ParameterList(
-            [nn.Parameter(torch.empty(size)) for size in self.sizes]
-        )
-        
+        self.weights = nn.ParameterList([nn.Parameter(torch.empty(size)) for size in self.sizes])
+
         self.sym2weight = self.compute_sym2weight()
         return super().load_state_dict(state_dict, strict=strict)

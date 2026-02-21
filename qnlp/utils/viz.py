@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 
+
 def show_tensor(tensor):
     """
     Visualizes a PyTorch tensor with matplotlib.
@@ -15,8 +16,8 @@ def show_tensor(tensor):
     # Handle grayscale/RGB
     if img.dim() == 3 and img.size(-1) == 1:
         img = img.squeeze(-1)
-        plt.imshow(img, cmap='gray')
+        plt.imshow(img, cmap="gray")
     else:
         plt.imshow(img.clamp(0, 1))
-    plt.axis('off')
+    plt.axis("off")
     plt.show()

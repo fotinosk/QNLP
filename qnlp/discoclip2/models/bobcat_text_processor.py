@@ -1,5 +1,5 @@
 """
-Convert a sentence into an einsum expression and a list of tensor ids. 
+Convert a sentence into an einsum expression and a list of tensor ids.
 The pipeline involves the following steps:
 1. Tokenize the sentence.
 2. Lemmatize the tokens.
@@ -10,25 +10,33 @@ The pipeline involves the following steps:
 Before training, we need to gather the symbols and their shapes from the training data.
 The symbols will be used to initialize the tensors in the model.
 """
+
 import copy
-from typing import Optional
 from itertools import count
+from typing import Optional
 
 import opt_einsum as oe
-from lambeq import CCGTree, TreeReader, TensorAnsatz
-from lambeq import BobcatParser, TensorAnsatz, TreeReaderMode, Rewriter
-from lambeq.backend.tensor import Diagram, Swap, Cup, Cap, Spider
-
+from lambeq import (
+    BobcatParser,
+    CCGTree,
+    Rewriter,
+    TensorAnsatz,
+    TreeReader,
+    TreeReaderMode,
+)
+from lambeq.backend.tensor import Cap, Cup, Diagram, Spider, Swap
 from nltk import pos_tag
-from nltk.tokenize.treebank import TreebankWordTokenizer
-from nltk.stem import WordNetLemmatizer
 from nltk.corpus import wordnet
+from nltk.stem import WordNetLemmatizer
+from nltk.tokenize.treebank import TreebankWordTokenizer
+
 
 class Tokenizer:
     """
     A simple tokenizer and lemmatizer using NLTK's Treebank
     tokenizer and WordNet lemmatizer.
     """
+
     def __init__(self):
         self.word_tokenizer = TreebankWordTokenizer()
         self.lemmatizer = WordNetLemmatizer()
@@ -36,23 +44,20 @@ class Tokenizer:
     def tokenize(self, sentence):
         tokens = self.word_tokenizer.tokenize(sentence)
         return tokens
-    
+
     def lemmatize(self, tokens):
         pos_tags = pos_tag(tokens)
-        lemmas = [
-            self.lemmatizer.lemmatize(token.lower(), pos=self._to_wordnet_pos(tag))
-            for token, tag in pos_tags
-        ]
+        lemmas = [self.lemmatizer.lemmatize(token.lower(), pos=self._to_wordnet_pos(tag)) for token, tag in pos_tags]
         return lemmas
 
     def _to_wordnet_pos(self, treebank_tag):
-        if treebank_tag.startswith('J'):
+        if treebank_tag.startswith("J"):
             return wordnet.ADJ
-        elif treebank_tag.startswith('V'):
+        elif treebank_tag.startswith("V"):
             return wordnet.VERB
-        elif treebank_tag.startswith('N'):
+        elif treebank_tag.startswith("N"):
             return wordnet.NOUN
-        elif treebank_tag.startswith('R'):
+        elif treebank_tag.startswith("R"):
             return wordnet.ADV
         else:
             return wordnet.NOUN
@@ -72,7 +77,7 @@ def union_find(merges: list[tuple[int, int]]):
     an edge to its representative.
     """
     parent = {i: i for merge in merges for i in merge}
-    
+
     def find(x):
         if parent[x] != x:
             parent[x] = find(parent[x])
@@ -105,7 +110,7 @@ def tn_to_einsum(diag: Diagram, interleaved: bool = False):
 
     merges = []
     tensors = []
-    tensor_edges = [] 
+    tensor_edges = []
     size_dict = {}
 
     def get_new_index(size):
@@ -125,27 +130,27 @@ def tn_to_einsum(diag: Diagram, interleaved: bool = False):
 
         elif isinstance(box, Cup):
             merges.append((scan[len(l)], scan[len(l) + 1]))
-            scan = scan[:len(l)] + scan[len(l) + 2:]
+            scan = scan[: len(l)] + scan[len(l) + 2 :]
 
         elif isinstance(box, Cap):
             new_edge = get_new_index(box.left.dim[0])
-            scan = scan[:len(l)] + [new_edge, new_edge] + scan[len(l):]
+            scan = scan[: len(l)] + [new_edge, new_edge] + scan[len(l) :]
 
         elif isinstance(box, Spider):
             new_edge = get_new_index(box.type.dim[0])
             merges.extend((scan[len(l) + i], new_edge) for i in range(len(box.dom)))
             output_edges = [new_edge for _ in range(len(box.cod))]
-            scan = scan[:len(l)] + output_edges + scan[len(l) + len(box.dom):]
+            scan = scan[: len(l)] + output_edges + scan[len(l) + len(box.dom) :]
         else:
-            input_edges = scan[len(l):len(l) + len(box.dom)]
+            input_edges = scan[len(l) : len(l) + len(box.dom)]
             output_edges = [get_new_index(size) for size in box.cod.dim]
             tensors.append((box.data, box.dom.dim + box.cod.dim))
             tensor_edges.append(input_edges + output_edges)
-            scan = scan[:len(l)] + output_edges + scan[len(l) + len(box.dom):]
+            scan = scan[: len(l)] + output_edges + scan[len(l) + len(box.dom) :]
     outputs = scan
 
-    # Merge edges 
-    repr = union_find(merges) 
+    # Merge edges
+    repr = union_find(merges)
     tensor_edges = [[repr.get(edge, edge) for edge in edges] for edges in tensor_edges]
     inputs = [repr.get(edge, edge) for edge in inputs]
     outputs = [repr.get(edge, edge) for edge in outputs]
@@ -153,13 +158,14 @@ def tn_to_einsum(diag: Diagram, interleaved: bool = False):
 
     dangling = inputs + outputs
     if len(set(dangling)) != len(dangling):
-        raise ValueError("Duplicate dangling indices found in the diagram. "
-                         "This is not supported by the current implementation.")
-  
+        raise ValueError(
+            "Duplicate dangling indices found in the diagram. " "This is not supported by the current implementation."
+        )
+
     if not interleaved:
-        subs = [''.join(oe.get_symbol(i) for i in indices) for indices in tensor_edges]
-        output_subs = ''.join(oe.get_symbol(i) for i in dangling)
-        einsum_string = ','.join(subs) + '->' + output_subs
+        subs = ["".join(oe.get_symbol(i) for i in indices) for indices in tensor_edges]
+        output_subs = "".join(oe.get_symbol(i) for i in dangling)
+        einsum_string = ",".join(subs) + "->" + output_subs
         return einsum_string, tensors
     else:
         data = []
@@ -168,13 +174,16 @@ def tn_to_einsum(diag: Diagram, interleaved: bool = False):
             data.append(indices)
         data.append(dangling)
         return data
-        
+
 
 class BobcatTextProcessor:
-
-    def __init__(self, ccg_parser: BobcatParser, ansatz: TensorAnsatz,
-                 rewriter: Optional[Rewriter] = None,
-                 tree_reader_mode: Optional[TreeReaderMode] = None):
+    def __init__(
+        self,
+        ccg_parser: BobcatParser,
+        ansatz: TensorAnsatz,
+        rewriter: Optional[Rewriter] = None,
+        tree_reader_mode: Optional[TreeReaderMode] = None,
+    ):
         """
         Initialize the BobcatProcessor with a CCG parser and an ansatz.
         Args:
@@ -188,44 +197,58 @@ class BobcatTextProcessor:
         self.tokenizer = Tokenizer()
         self.rewriter = rewriter
         self.tree_reader_mode = tree_reader_mode
-    
-    def sentences2trees(self, sentences: list[str], 
-                        suppress_exceptions: bool = False,
-                        return_details: bool = False):
+
+    def sentences2trees(
+        self,
+        sentences: list[str],
+        suppress_exceptions: bool = False,
+        return_details: bool = False,
+    ):
         """
         Convert a list of sentences into a list of CCG trees.
         """
         tokens = [self.tokenizer.tokenize(sent) for sent in sentences]
         lemmas = [self.tokenizer.lemmatize(tokens) for tokens in tokens]
 
-        trees = self.ccg_parser.sentences2trees(tokens, tokenised=True, 
-                                                suppress_exceptions=suppress_exceptions, verbose="suppress")
-        lemma_trees = [
-            self.lemmatize_tree(tree, lemma) if tree else None 
-            for tree, lemma in zip(trees, lemmas)
-        ]
+        trees = self.ccg_parser.sentences2trees(
+            tokens,
+            tokenised=True,
+            suppress_exceptions=suppress_exceptions,
+            verbose="suppress",
+        )
+        lemma_trees = [self.lemmatize_tree(tree, lemma) if tree else None for tree, lemma in zip(trees, lemmas)]
 
         if return_details:
-            return {'tokens': tokens,
-                    'lemmas': lemmas,
-                    'trees': trees,
-                    'lemma_trees': lemma_trees}
+            return {
+                "tokens": tokens,
+                "lemmas": lemmas,
+                "trees": trees,
+                "lemma_trees": lemma_trees,
+            }
         else:
             # del tokens, lemmas, trees  # Free memory
-            return {'lemma_trees': lemma_trees}
+            return {"lemma_trees": lemma_trees}
 
-    def parse(self, sentences: list[str], suppress_exceptions: bool = False,
-              return_details: bool = False):
+    def parse(
+        self,
+        sentences: list[str],
+        suppress_exceptions: bool = False,
+        return_details: bool = False,
+    ):
         """
         Parse a list of sentences into a tensor network diagram.
         """
-        results = self.sentences2trees(sentences, suppress_exceptions=suppress_exceptions,
-                                       return_details=return_details)
+        results = self.sentences2trees(
+            sentences,
+            suppress_exceptions=suppress_exceptions,
+            return_details=return_details,
+        )
 
-        lemma_trees = results['lemma_trees']
+        lemma_trees = results["lemma_trees"]
         if self.tree_reader_mode is not None:
-            diagrams = [TreeReader.tree2diagram(tree, mode=self.tree_reader_mode) 
-                        if tree else None for tree in lemma_trees]
+            diagrams = [
+                TreeReader.tree2diagram(tree, mode=self.tree_reader_mode) if tree else None for tree in lemma_trees
+            ]
         else:
             diagrams = [tree.to_diagram() if tree else None for tree in lemma_trees]
 
@@ -240,19 +263,19 @@ class BobcatTextProcessor:
 
         # Create a new results dictionary with only what we need
         filtered_results = {}
-        filtered_results['einsum_inputs'] = einsum_inputs
-        filtered_results['sentences'] = sentences
-        
+        filtered_results["einsum_inputs"] = einsum_inputs
+        filtered_results["sentences"] = sentences
+
         if return_details:
-            filtered_results['lemma_trees'] = lemma_trees
-            filtered_results['diagrams'] = diagrams
-            filtered_results['rewritten_diagrams'] = rewritten_diagrams
-            filtered_results['circuits'] = circuits
+            filtered_results["lemma_trees"] = lemma_trees
+            filtered_results["diagrams"] = diagrams
+            filtered_results["rewritten_diagrams"] = rewritten_diagrams
+            filtered_results["circuits"] = circuits
             # Copy any other fields from the original results dictionary
             for key in results:
-                if key != 'lemma_trees':  # Already added this above
+                if key != "lemma_trees":  # Already added this above
                     filtered_results[key] = results[key]
-        
+
         # Explicitly delete all large objects if not returning them
         del results
         del einsum_inputs
@@ -260,7 +283,7 @@ class BobcatTextProcessor:
         del rewritten_diagrams
         del circuits
         del lemma_trees  # Free memory
-        
+
         return filtered_results
 
     def lemmatize_tree(self, tree: CCGTree, lemmas: list):
@@ -274,6 +297,7 @@ class BobcatTextProcessor:
         """
         # tree = CCGTree.from_json(tree.to_json())
         tree = copy.deepcopy(tree)
+
         def traverse(node: CCGTree, lemma_iter):
             if node.is_leaf:
                 node._text = next(lemma_iter)
@@ -283,9 +307,16 @@ class BobcatTextProcessor:
 
         lemma_iter = iter(lemmas)
         traverse(tree, lemma_iter)
-        return tree 
-    
-    def __call__(self, sentences: list[str], suppress_exceptions: bool = False,
-            return_details: bool = False):
-        return self.parse(sentences, suppress_exceptions=suppress_exceptions,
-                            return_details=return_details)
+        return tree
+
+    def __call__(
+        self,
+        sentences: list[str],
+        suppress_exceptions: bool = False,
+        return_details: bool = False,
+    ):
+        return self.parse(
+            sentences,
+            suppress_exceptions=suppress_exceptions,
+            return_details=return_details,
+        )

@@ -1,15 +1,22 @@
 """Inhomogeneous tensor network image model
 Each patch gets a different CP layer
 """
+
 import math
+
 import torch
+from einops import rearrange
+from einops.layers.torch import Rearrange
 from torch import nn
 
-from einops.layers.torch import Rearrange
-from einops import rearrange
-
 from qnlp.discoclip2.models.cp_node import CPQuadRankLayer
-from qnlp.discoclip2.models.image_model import IMAGE_SIZE, PATCH_SIZE, BOND_DIM, DROPOUT, CP_RANK
+from qnlp.discoclip2.models.image_model import (
+    BOND_DIM,
+    CP_RANK,
+    DROPOUT,
+    IMAGE_SIZE,
+    PATCH_SIZE,
+)
 
 
 class InhomogeneousTTNImageModel(nn.Module):
@@ -21,9 +28,8 @@ class InhomogeneousTTNImageModel(nn.Module):
         patch_dim = PATCH_SIZE * PATCH_SIZE
 
         self.patch_embed = nn.Sequential(
-            Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)',
-                      p1=PATCH_SIZE, p2=PATCH_SIZE),
-            nn.Linear(patch_dim, BOND_DIM)
+            Rearrange("b c (h p1) (w p2) -> b (h w) (p1 p2 c)", p1=PATCH_SIZE, p2=PATCH_SIZE),
+            nn.Linear(patch_dim, BOND_DIM),
         )
         self.positional_embedding = nn.Parameter(torch.randn(1, self.num_patches, BOND_DIM))
 
@@ -44,7 +50,7 @@ class InhomogeneousTTNImageModel(nn.Module):
                     in_dim=BOND_DIM,
                     out_dim=BOND_DIM,
                     rank=CP_RANK,
-                    dropout_p=DROPOUT
+                    dropout_p=DROPOUT,
                 )
                 layer_nodes.append(node)
             self.layers.append(layer_nodes)
@@ -59,8 +65,8 @@ class InhomogeneousTTNImageModel(nn.Module):
 
         current_grid_dim = IMAGE_SIZE // PATCH_SIZE
         for layer_nodes in self.layers:
-            x = rearrange(x, 'b (h w) c -> b c h w', h=current_grid_dim)
-            x = rearrange(x, 'b c (h h2) (w w2) -> b (h w) (h2 w2) c', h2=2, w2=2)
+            x = rearrange(x, "b (h w) c -> b c h w", h=current_grid_dim)
+            x = rearrange(x, "b c (h h2) (w w2) -> b (h w) (h2 w2) c", h2=2, w2=2)
             node_inputs = torch.chunk(x, len(layer_nodes), dim=1)
             level_outputs = []
             for node_data, node_module in zip(node_inputs, layer_nodes):
