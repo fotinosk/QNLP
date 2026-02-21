@@ -4,23 +4,31 @@ from torch import nn
 from torchvision.transforms import v2
 from einops.layers.torch import Rearrange
 from einops import rearrange
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from qnlp.discoclip2.models.cp_node import CPQuadRankLayer
 
-USE_COLOR = True
-BOND_DIM = 64
-CP_RANK = 32
-DROPOUT = 0.3
-PATCH_SIZE = 4  
-IMAGE_SIZE = 64
+
+class ImageModelSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="IMAGE_MODEL_"
+    )
+    use_color: bool = True
+    bond_dim: int = 64
+    cp_rank: int = 32
+    dropout: float = 0.3
+    patch_size: int = 4
+    image_size: int = 64
+
+image_model_hyperparams = ImageModelSettings()
 
 transforms = [
-    v2.RandomResizedCrop(IMAGE_SIZE, scale=(0.8, 1.0)),
+    v2.RandomResizedCrop(image_model_hyperparams.image_size, scale=(0.8, 1.0)),
     v2.ColorJitter(brightness=0.2, contrast=0.2),
     v2.PILToTensor(),
     v2.ToDtype(torch.float32, scale=True),
 ]
-if not USE_COLOR:
+if not image_model_hyperparams.use_color:
     transforms.append(v2.Grayscale())
 preprocess = v2.Compose(transforms)
 
@@ -31,18 +39,18 @@ class TTNImageModel(nn.Module):
         embedding_dim: int
     ):
         super().__init__()
-        self.in_channels = 3 if USE_COLOR else 1
+        self.in_channels = 3 if image_model_hyperparams.use_color else 1
         self.embedding_dim = embedding_dim
-        self.num_patches_side =  IMAGE_SIZE // PATCH_SIZE
+        self.num_patches_side =  image_model_hyperparams.image_size // image_model_hyperparams.patch_size
         num_patches = self.num_patches_side ** 2
-        patch_dim = PATCH_SIZE * PATCH_SIZE * self.in_channels
+        patch_dim = image_model_hyperparams.patch_size * image_model_hyperparams.patch_size * self.in_channels
         
         self.patch_embed = nn.Sequential(
             Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)', 
-                    p1=PATCH_SIZE, p2=PATCH_SIZE),
-            nn.Linear(patch_dim, BOND_DIM)
+                    p1=image_model_hyperparams.patch_size, p2=image_model_hyperparams.patch_size),
+            nn.Linear(patch_dim, image_model_hyperparams.bond_dim)
         )
-        self.positional_embedding = nn.Parameter(torch.randn(1, num_patches, BOND_DIM))
+        self.positional_embedding = nn.Parameter(torch.randn(1, num_patches, image_model_hyperparams.bond_dim))
         
         self.depth = int(math.log(num_patches, 4))
         
@@ -51,15 +59,15 @@ class TTNImageModel(nn.Module):
         self.layers = nn.ModuleList()
         current_nodes = num_patches // 4 # First layer outputs this many nodes
 
-        in_dim = BOND_DIM
+        in_dim = image_model_hyperparams.bond_dim
         
         for _ in range(self.depth):
             layer = CPQuadRankLayer(
                 num_nodes=current_nodes,
                 in_dim=in_dim,
                 out_dim=in_dim * 2,
-                rank=CP_RANK,
-                dropout_p=DROPOUT
+                rank=image_model_hyperparams.cp_rank,
+                dropout_p=image_model_hyperparams.dropout
             )
             self.layers.append(layer)
             current_nodes //= 4

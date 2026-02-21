@@ -19,7 +19,7 @@ from qnlp.utils.early_stopping import EarlyStopping, ModelTrainingStatus
 
 from qnlp.discoclip2.dataset.aro_dataloader import get_aro_dataloader
 from qnlp.discoclip2.models.einsum_model import get_einsum_model, EinsumModel
-from qnlp.discoclip2.models.image_model import TTNImageModel
+from qnlp.discoclip2.models.image_model import TTNImageModel, image_model_hyperparams
 from qnlp.utils.training_notifications import send_training_finished_notification
 
 EXPERIMENT_NAME = "train_vlm_on_aro"
@@ -282,9 +282,11 @@ def train_epoch(
 def run_training():
     hyperparams = ModelSettings()
     with setup_mlflow_run(EXPERIMENT_NAME, hyperparams.model_dump(), 8080) as run:
-
+        logger.info(f"Starting run: {run.info.run_name}")
         logger.info("Starting training with hyperparameters:")
         logger.info(hyperparams.model_dump_json(indent=2))
+        logger.info("Image model hyperparameters:")
+        logger.info(image_model_hyperparams.model_dump_json(indent=2))
 
         # get datasets and dataloaders
         loaders, datasets = get_aro_dataloader(
