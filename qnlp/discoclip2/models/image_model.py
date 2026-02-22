@@ -51,6 +51,7 @@ class TTNImageModel(nn.Module):
             nn.Linear(patch_dim, image_model_hyperparams.bond_dim),
         )
         self.positional_embedding = nn.Parameter(torch.randn(1, num_patches, image_model_hyperparams.bond_dim))
+        self.positional_embedding_scale = nn.Parameter(torch.tensor(0.02))
 
         self.depth = int(math.log(num_patches, 4))
 
@@ -78,7 +79,7 @@ class TTNImageModel(nn.Module):
 
     def forward(self, x):
         x = self.patch_embed(x)
-        x = x + self.positional_embedding
+        x = x + (self.positional_embedding * self.positional_embedding_scale)
 
         current_grid_dim = self.num_patches_side
 
