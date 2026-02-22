@@ -6,7 +6,8 @@ class CPQuadRankLayer(nn.Module):
     """
     Optimized Quadtree Layer with Internal Factor Normalization.
     """
-    def __init__(self, num_nodes, in_dim, out_dim, rank, dropout_p=0.0, use_residual=True):
+
+    def __init__(self, num_nodes, in_dim, out_dim, rank, dropout_p=0.0, use_residual=True, gain_factor=1.0):
         super().__init__()
         self.num_nodes = num_nodes
         self.rank = rank
@@ -20,9 +21,9 @@ class CPQuadRankLayer(nn.Module):
         self.factor_br = nn.Parameter(torch.empty(num_nodes, rank, in_dim))
 
         self.factor_out = nn.Parameter(torch.empty(num_nodes, rank, out_dim))
-        
+
         # Learnable gain per node to replace static scaling
-        self.gain = nn.Parameter(torch.ones(num_nodes, 1))
+        self.gain = nn.Parameter(torch.full((num_nodes, 1), gain_factor))
 
         if use_residual:
             self.res_proj = nn.Linear(in_dim, out_dim, bias=False) if in_dim != out_dim else nn.Identity()
@@ -32,8 +33,8 @@ class CPQuadRankLayer(nn.Module):
     def _initialize(self):
         with torch.no_grad():
             for f in [self.factor_tl, self.factor_tr, self.factor_bl, self.factor_br]:
-                nn.init.xavier_uniform_(f)
-            nn.init.xavier_uniform_(self.factor_out)
+                nn.init.orthogonal_(f)
+            nn.init.orthogonal_(self.factor_out)
 
     def _rms_norm(self, t, eps=1e-6):
         # Normalizes across the Bond/Rank dimension to keep energy at 1.0
@@ -42,7 +43,7 @@ class CPQuadRankLayer(nn.Module):
 
     def forward(self, x):
         # x shape: [batch, nodes, 4_children, in_dim]
-        
+
         # 1. Project to Rank space (Internal Legs)
         p_tl = torch.einsum("bni, nri -> bnr", x[:, :, 0, :], self.factor_tl)
         p_tr = torch.einsum("bni, nri -> bnr", x[:, :, 1, :], self.factor_tr)
@@ -60,7 +61,7 @@ class CPQuadRankLayer(nn.Module):
         # 4. Dropout and Output Projection
         if self.training and self.dropout_p > 0:
             merged = nn.functional.dropout(merged, p=self.dropout_p)
-            
+
         out = torch.einsum("bnr, nro -> bno", merged, self.factor_out)
 
         # 5. Residual (Optional for early layers)

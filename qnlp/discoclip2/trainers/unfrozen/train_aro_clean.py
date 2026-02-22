@@ -41,8 +41,8 @@ class ModelSettings(BaseSettings):
     text_learning_rate: float = 0.001
     text_weight_decay: float = 0.001
 
-    image_learning_rate: float = 0.0001
-    image_weight_decay: float = 0.01
+    image_learning_rate: float = 0.00005
+    image_weight_decay: float = 0.05
 
     epochs: int = 100
     patience: int = 10
