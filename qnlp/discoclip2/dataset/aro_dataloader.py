@@ -10,15 +10,13 @@ IMAGES_PATH = "data/aro/raw/images/"
 
 def get_aro_dataloader(batch_size: int, return_images: bool = True):
     train_ds = ProcessedARODataset(
-        data_path=TRAIN_DATA_PATH,
-        image_dir_path=IMAGES_PATH,
-        return_images=return_images,
+        data_path=TRAIN_DATA_PATH, image_dir_path=IMAGES_PATH, return_images=return_images, is_train=True
     )
-    val_ds = ProcessedARODataset(data_path=VAL_DATA_PATH, image_dir_path=IMAGES_PATH, return_images=return_images)
+    val_ds = ProcessedARODataset(
+        data_path=VAL_DATA_PATH, image_dir_path=IMAGES_PATH, return_images=return_images, is_train=False
+    )
     test_ds = ProcessedARODataset(
-        data_path=TEST_DATA_PATH,
-        image_dir_path=IMAGES_PATH,
-        return_images=return_images,
+        data_path=TEST_DATA_PATH, image_dir_path=IMAGES_PATH, return_images=return_images, is_train=False
     )
 
     train_loader = DataLoader(

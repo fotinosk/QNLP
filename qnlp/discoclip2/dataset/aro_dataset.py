@@ -8,7 +8,7 @@ from PIL import Image
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset
 
-from qnlp.discoclip2.models.image_model import preprocess
+from qnlp.discoclip2.models.image_model import preprocess, val_preprocess
 
 
 def create_train_val_test_split(
@@ -101,13 +101,11 @@ def aro_tn_collate_fn(batch):
 
 class ProcessedARODataset(Dataset):
     def __init__(
-        self,
-        data_path: str,
-        image_dir_path: str | None = None,
-        return_images: bool = False,
+        self, data_path: str, image_dir_path: str | None = None, return_images: bool = False, is_train: bool = False
     ):
         self.return_images = return_images
         self.image_path = image_dir_path
+        self.process_image = preprocess if is_train else val_preprocess
 
         raw_dataset = pd.read_json(data_path)
         dir_data_path, file_name = data_path.rsplit("/", 1)
@@ -148,7 +146,7 @@ class ProcessedARODataset(Dataset):
             img_path = f"{self.image_path}/{img_name}"
 
             # Using a context manager or just Image.open
-            image = preprocess(Image.open(img_path).convert("RGB"))
+            image = self.process_image(Image.open(img_path).convert("RGB"))
         else:
             image = img_name
 
