@@ -23,3 +23,10 @@ def setup_logger(log_path="./runs/logs", log_name="train_logger", ts_string: str
     fh.setFormatter(formatter)
     logger.addHandler(fh)
     return logger
+
+
+def get_log_file_path(logger):
+    for handler in logger.handlers:
+        if isinstance(handler, logging.FileHandler):
+            return handler.baseFilename
+    return None

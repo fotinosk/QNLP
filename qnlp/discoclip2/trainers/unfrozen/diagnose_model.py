@@ -117,5 +117,5 @@ def run_post_mortem(checkpoint_path: str):
 
 
 if __name__ == "__main__":
-    PATH = "runs/checkpoints/train_vlm_on_aro/imported_model/best_model.pt"
+    PATH = "runs/checkpoints/train_vlm_on_aro/2026-02-21_19-05-45/best_model.pt"
     run_post_mortem(PATH)
