@@ -55,8 +55,9 @@ class CPQuadRankLayer(nn.Module):
         p_tl, p_tr, p_bl, p_br = map(self._rms_norm, [p_tl, p_tr, p_bl, p_br])
 
         # 3. Multilinear Product with Gain
-        merged = p_tl * p_tr * p_bl * p_br
-        merged = merged * self.gain.unsqueeze(0)
+        prod_path = p_tl * p_tr * p_bl * p_br
+        sum_path = (p_tl + p_tr + p_bl + p_br) * 0.25
+        merged = (prod_path + sum_path) * self.gain.unsqueeze(0)
 
         # 4. Dropout and Output Projection
         if self.training and self.dropout_p > 0:

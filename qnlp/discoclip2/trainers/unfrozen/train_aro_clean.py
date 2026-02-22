@@ -45,10 +45,11 @@ class ModelSettings(BaseSettings):
     image_weight_decay: float = 0.05
 
     epochs: int = 100
-    patience: int = 10
+    patience: int = 5
 
     temperature: float = 0.07
-    hard_neg_loss_weight: float = 40000.0
+    hard_neg_loss_weight: float = 1.0
+    div_loss_weight: float = 50.0
     hard_neg_margin: float = 0.2
     hard_neg_distance_function: Literal["euclidean", "cosine"] = "cosine"
     hard_neg_swap: bool = True
@@ -64,40 +65,45 @@ def create_epoch_metrics(
 ) -> tuple[dict[str, Tensor], dict[str, MeanMetric]]:
     epoch_avg_metrics = {
         "loss": torchmetrics.MeanMetric().to(DEVICE),
-        "contrastive_loss": torchmetrics.MeanMetric().to(DEVICE),
-        "contrastive_acc": torchmetrics.MeanMetric().to(DEVICE),
         "hard_neg_loss": torchmetrics.MeanMetric().to(DEVICE),
         "hard_neg_acc": torchmetrics.MeanMetric().to(DEVICE),
         "true_cosine_mean": torchmetrics.MeanMetric().to(DEVICE),
         "false_cosine_mean": torchmetrics.MeanMetric().to(DEVICE),
+        "div_loss": torchmetrics.MeanMetric().to(DEVICE),
     }
     # avoid running .item() in the training loop
     batch_avg_metrics = {
         "loss": torch.zeros(num_batches, device=DEVICE),
-        "contrastive_loss": torch.zeros(num_batches, device=DEVICE),
-        "contrastive_acc": torch.zeros(num_batches, device=DEVICE),
         "hard_neg_loss": torch.zeros(num_batches, device=DEVICE),
         "hard_neg_acc": torch.zeros(num_batches, device=DEVICE),
         "true_cosine_mean": torch.zeros(num_batches, device=DEVICE),
         "false_cosine_mean": torch.zeros(num_batches, device=DEVICE),
+        "div_loss": torch.zeros(num_batches, device=DEVICE),
     }
     return batch_avg_metrics, epoch_avg_metrics
 
 
 def calculate_composite_lost(
-    contrastive_criterion: Module,
     hard_neg_criterion: Module,
     true_caption_embeddings: torch.Tensor,
     false_caption_embeddings: torch.Tensor,
     image_embeddings: torch.Tensor,
     hard_neg_loss_weight: float,
+    div_weight: float,
 ) -> tuple:
-    infonce_loss, infonce_acc = contrastive_criterion(image_embeddings, true_caption_embeddings)
-
     hard_neg_loss = hard_neg_criterion(image_embeddings, true_caption_embeddings, false_caption_embeddings)
 
-    loss = infonce_loss + hard_neg_loss_weight * hard_neg_loss
-    return hard_neg_loss, infonce_acc, infonce_loss, loss
+    N = image_embeddings.shape[0]
+    if N > 1:
+        z = image_embeddings - image_embeddings.mean(dim=0)
+        cov = (z.T @ z) / (N - 1)
+        eye = torch.eye(cov.shape[0], device=image_embeddings.device)
+        div_loss = torch.mean((cov - eye) ** 2)
+    else:
+        div_loss = 0.0
+
+    loss = (hard_neg_loss_weight * hard_neg_loss) + (div_loss * div_weight)
+    return hard_neg_loss, div_loss, loss
 
 
 def calculate_and_store_metrics(
@@ -107,10 +113,9 @@ def calculate_and_store_metrics(
     hard_neg_loss,
     i: int,
     image_embeddings: Tensor,
-    infonce_acc: Tensor,
-    infonce_loss: Tensor,
     loss: Tensor,
     true_caption_embeddings: Tensor,
+    div_loss: Tensor,
 ) -> None:
     # calculate training metrics
     pos_sim = cosine_similarity(true_caption_embeddings, image_embeddings, dim=-1)
@@ -122,12 +127,11 @@ def calculate_and_store_metrics(
     hard_neg_acc = (pos_sim > neg_sim).float().mean()
 
     batch_avg_metrics["loss"][i] = loss.detach()
-    batch_avg_metrics["contrastive_loss"][i] = infonce_loss.detach()
-    batch_avg_metrics["contrastive_acc"][i] = infonce_acc.detach()
     batch_avg_metrics["hard_neg_loss"][i] = hard_neg_loss.detach()
     batch_avg_metrics["hard_neg_acc"][i] = hard_neg_acc.detach()
     batch_avg_metrics["true_cosine_mean"][i] = true_cosine_mean.detach()
     batch_avg_metrics["false_cosine_mean"][i] = false_cosine_mean.detach()
+    batch_avg_metrics["div_loss"][i] = div_loss.detach()
 
     for key in epoch_avg_metrics:
         epoch_avg_metrics[key].update(batch_avg_metrics[key][i])
@@ -137,9 +141,9 @@ def evaluate_models(
     text_model: torch.nn.Module,
     image_model: torch.nn.Module,
     dataloader: torch.utils.data.DataLoader,
-    contrastive_criterion: torch.nn.Module,
     hard_neg_criterion: torch.nn.Module,
     hard_neg_loss_weight: float,
+    div_weight: float,
     epoch: int,
     usage: Literal["test", "val"],
 ) -> float:
@@ -160,13 +164,13 @@ def evaluate_models(
             true_caption_embeddings = text_model(true_captions)
             false_caption_embeddings = text_model(false_captions)
 
-            hard_neg_loss, infonce_acc, infonce_loss, loss = calculate_composite_lost(
-                contrastive_criterion=contrastive_criterion,
+            hard_neg_loss, div_loss, loss = calculate_composite_lost(
                 hard_neg_criterion=hard_neg_criterion,
                 true_caption_embeddings=true_caption_embeddings,
                 false_caption_embeddings=false_caption_embeddings,
                 image_embeddings=image_embeddings,
                 hard_neg_loss_weight=hard_neg_loss_weight,
+                div_weight=div_weight,
             )
 
             calculate_and_store_metrics(
@@ -176,10 +180,9 @@ def evaluate_models(
                 hard_neg_loss=hard_neg_loss,
                 i=i,
                 image_embeddings=image_embeddings,
-                infonce_acc=infonce_acc,
-                infonce_loss=infonce_loss,
                 loss=loss,
                 true_caption_embeddings=true_caption_embeddings,
+                div_loss=div_loss,
             )
 
         cpu_batch_metrics = {k: v.cpu().tolist() for k, v in batch_avg_metrics.items()}
@@ -207,9 +210,9 @@ def train_epoch(
     image_model: torch.nn.Module,
     train_dataloader: torch.utils.data.DataLoader,
     optimizer: torch.optim.Optimizer,
-    contrastive_criterion: torch.nn.Module,
     hard_neg_criterion: torch.nn.Module,
     hard_neg_loss_weight: float,
+    div_weight: float,
     epoch: int,
 ) -> None:
     global global_step
@@ -217,7 +220,6 @@ def train_epoch(
     image_model.train()
 
     num_batches = len(train_dataloader)
-    # Initialize metrics
     batch_avg_metrics, epoch_avg_metrics = create_epoch_metrics(num_batches)
 
     for i, batch in enumerate(train_dataloader):
@@ -231,13 +233,13 @@ def train_epoch(
         true_caption_embeddings = text_model(true_captions)
         false_caption_embeddings = text_model(false_captions)
 
-        hard_neg_loss, infonce_acc, infonce_loss, loss = calculate_composite_lost(
-            contrastive_criterion=contrastive_criterion,
+        hard_neg_loss, div_loss, loss = calculate_composite_lost(
             hard_neg_criterion=hard_neg_criterion,
             true_caption_embeddings=true_caption_embeddings,
             false_caption_embeddings=false_caption_embeddings,
             image_embeddings=image_embeddings,
             hard_neg_loss_weight=hard_neg_loss_weight,
+            div_weight=div_weight,
         )
 
         loss.backward()
@@ -252,10 +254,9 @@ def train_epoch(
             hard_neg_loss,
             i,
             image_embeddings,
-            infonce_acc,
-            infonce_loss,
             loss,
             true_caption_embeddings,
+            div_loss,
         )
 
         global_step += 1
@@ -324,7 +325,7 @@ def run_training():
         early_stopping = EarlyStopping(patience=hyperparams.patience, min_delta=0.0001, minimize=False)
 
         # get loss functions
-        contrastive_loss, hard_neg_loss = create_loss_functions(
+        _, hard_neg_loss = create_loss_functions(
             temperature=hyperparams.temperature,
             hard_neg_distance_function=hyperparams.hard_neg_distance_function,
             margin=hyperparams.hard_neg_margin,
@@ -357,9 +358,9 @@ def run_training():
                 image_model=image_model,
                 train_dataloader=train_loader,
                 optimizer=optimizer,
-                contrastive_criterion=contrastive_loss,
                 hard_neg_criterion=hard_neg_loss,
                 hard_neg_loss_weight=hyperparams.hard_neg_loss_weight,
+                div_weight=hyperparams.div_loss_weight,
                 epoch=epoch,
             )
 
@@ -367,9 +368,9 @@ def run_training():
                 text_model=model,
                 image_model=image_model,
                 dataloader=val_loader,
-                contrastive_criterion=contrastive_loss,
                 hard_neg_criterion=hard_neg_loss,
                 hard_neg_loss_weight=hyperparams.hard_neg_loss_weight,
+                div_weight=hyperparams.div_loss_weight,
                 epoch=epoch,
                 usage="val",
             )
@@ -407,9 +408,9 @@ def run_training():
             text_model=text_model,
             image_model=image_model,
             dataloader=test_loader,
-            contrastive_criterion=contrastive_loss,
             hard_neg_criterion=hard_neg_loss,
             hard_neg_loss_weight=hyperparams.hard_neg_loss_weight,
+            div_weight=hyperparams.div_loss_weight,
             epoch=hyperparams.epochs + 1,
             usage="test",
         )
