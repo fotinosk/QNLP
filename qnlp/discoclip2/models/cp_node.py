@@ -4,30 +4,28 @@ from torch import nn
 
 class CPQuadRankLayer(nn.Module):
     """
-    Quadtree Layer: Merges 4 children (2x2 block) into 1 parent.
+    Optimized Quadtree Layer with Internal Factor Normalization.
     """
-
-    def __init__(self, num_nodes, in_dim, out_dim, rank, dropout_p=0.0):
+    def __init__(self, num_nodes, in_dim, out_dim, rank, dropout_p=0.0, use_residual=True):
         super().__init__()
         self.num_nodes = num_nodes
         self.rank = rank
         self.dropout_p = dropout_p
+        self.use_residual = use_residual
 
-        # ADDED: Pre-Norm for gradient stability
-        self.norm = nn.LayerNorm(in_dim)
-
+        # Factor weights: [Nodes, Rank, Input_Dim]
         self.factor_tl = nn.Parameter(torch.empty(num_nodes, rank, in_dim))
         self.factor_tr = nn.Parameter(torch.empty(num_nodes, rank, in_dim))
         self.factor_bl = nn.Parameter(torch.empty(num_nodes, rank, in_dim))
         self.factor_br = nn.Parameter(torch.empty(num_nodes, rank, in_dim))
 
         self.factor_out = nn.Parameter(torch.empty(num_nodes, rank, out_dim))
-        self.scale = nn.Parameter(torch.ones(num_nodes, rank) * (1.0 / rank))
+        
+        # Learnable gain per node to replace static scaling
+        self.gain = nn.Parameter(torch.ones(num_nodes, 1))
 
-        if in_dim != out_dim:
-            self.res_proj = nn.Linear(in_dim, out_dim, bias=False)
-        else:
-            self.res_proj = nn.Identity()
+        if use_residual:
+            self.res_proj = nn.Linear(in_dim, out_dim, bias=False) if in_dim != out_dim else nn.Identity()
 
         self._initialize()
 
@@ -37,27 +35,35 @@ class CPQuadRankLayer(nn.Module):
                 nn.init.xavier_uniform_(f)
             nn.init.xavier_uniform_(self.factor_out)
 
+    def _rms_norm(self, t, eps=1e-6):
+        # Normalizes across the Bond/Rank dimension to keep energy at 1.0
+        rms = torch.sqrt(torch.mean(t**2, dim=-1, keepdim=True) + eps)
+        return t / rms
+
     def forward(self, x):
-        res = self.res_proj(x.mean(dim=2))
+        # x shape: [batch, nodes, 4_children, in_dim]
+        
+        # 1. Project to Rank space (Internal Legs)
+        p_tl = torch.einsum("bni, nri -> bnr", x[:, :, 0, :], self.factor_tl)
+        p_tr = torch.einsum("bni, nri -> bnr", x[:, :, 1, :], self.factor_tr)
+        p_bl = torch.einsum("bni, nri -> bnr", x[:, :, 2, :], self.factor_bl)
+        p_br = torch.einsum("bni, nri -> bnr", x[:, :, 3, :], self.factor_br)
 
-        x = self.norm(x)
+        # 2. FIX #2: INTERNAL FACTOR RMS NORM
+        # Prevents the "Vanishing Product" between layers
+        p_tl, p_tr, p_bl, p_br = map(self._rms_norm, [p_tl, p_tr, p_bl, p_br])
 
-        x_tl = x[:, :, 0, :]
-        x_tr = x[:, :, 1, :]
-        x_bl = x[:, :, 2, :]
-        x_br = x[:, :, 3, :]
+        # 3. Multilinear Product with Gain
+        merged = p_tl * p_tr * p_bl * p_br
+        merged = merged * self.gain.unsqueeze(0)
 
-        p_tl = torch.einsum("bni,nri->bnr", x_tl, self.factor_tl)
-        p_tr = torch.einsum("bni,nri->bnr", x_tr, self.factor_tr)
-        p_bl = torch.einsum("bni,nri->bnr", x_bl, self.factor_bl)
-        p_br = torch.einsum("bni,nri->bnr", x_br, self.factor_br)
-
-        merged = self.scale.unsqueeze(0) * p_tl * p_tr * p_bl * p_br
-
+        # 4. Dropout and Output Projection
         if self.training and self.dropout_p > 0:
-            mask = torch.bernoulli(torch.full_like(merged, 1 - self.dropout_p))
-            merged = merged * mask / (1 - self.dropout_p)
+            merged = nn.functional.dropout(merged, p=self.dropout_p)
+            
+        out = torch.einsum("bnr, nro -> bno", merged, self.factor_out)
 
-        out = torch.einsum("bnr,nro->bno", merged, self.factor_out)
-
-        return out + res
+        # 5. Residual (Optional for early layers)
+        if self.use_residual:
+            return out + self.res_proj(x.mean(dim=2))
+        return out
