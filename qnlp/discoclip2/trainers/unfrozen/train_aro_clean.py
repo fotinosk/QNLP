@@ -45,7 +45,7 @@ class ModelSettings(BaseSettings):
     image_weight_decay: float = 0.05
 
     epochs: int = 100
-    patience: int = 10
+    patience: int = 100
 
     temperature: float = 0.07
     hard_neg_loss_weight: float = 40000.0
@@ -309,8 +309,6 @@ def run_training():
         model = get_einsum_model([train_ds, val_ds, test_ds]).to(DEVICE)
         image_model = TTNImageModel(hyperparams.embedding_dim).to(DEVICE)
 
-        logger.info("Text model structure:")
-        logger.info(model)
         logger.info("Image model structure:")
         logger.info(image_model)
 
@@ -424,7 +422,7 @@ def run_training():
             name=f"{run.info.run_name}-model",
             python_model=VLM_Wrapper(hyperparams.embedding_dim),
             artifacts={"best_model": checkpoint_path},
-            infer_code_paths=True,
+            code_paths=["qnlp/discoclip2/models/cp_node.py", "qnlp/discoclip2/models/image_model.py"],
         )
 
         mlflow.log_artifact(log_file_path)
