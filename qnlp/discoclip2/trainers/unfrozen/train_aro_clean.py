@@ -328,6 +328,10 @@ def run_training():
         image_model.load_state_dict(best_checkpoint["image_model_state_dict"])
         image_model = image_model.to(DEVICE)
 
+        # compile models
+        text_model = torch.compile(text_model)
+        image_model = torch.compile(image_model)
+
         test_acc = evaluate_models(
             text_model=text_model,
             image_model=image_model,

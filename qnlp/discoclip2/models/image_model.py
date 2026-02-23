@@ -106,7 +106,7 @@ class TTNImageModel(nn.Module):
         b, c, h, w = x.shape
         p1, p2 = self.patch_size, self.patch_size
         patches = x.reshape(b, c, h // p1, p1, w // p2, p2)
-        patches = patches.permute(0, 2, 4, 1, 3, 5).reshape(b, -1, c, p1 * p2)
+        patches = patches.permute(0, 2, 4, 1, 3, 5).reshape(b, -1, c, p1 * p2).contiguous()
 
         # Entangle Color and Pixels
         c_feat = torch.einsum("bncp, ck -> bnk", patches, self.color_factor)
