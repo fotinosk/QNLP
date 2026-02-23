@@ -56,16 +56,13 @@ class CPQuadRankLayer(nn.Module):
 
         # 3. Multilinear Product with Gain
         prod_path = p_tl * p_tr * p_bl * p_br
-        sum_path = (p_tl + p_tr + p_bl + p_br) * 0.25
-        merged = (prod_path + sum_path) * self.gain.unsqueeze(0)
+        merged = prod_path * self.gain.unsqueeze(0)
 
-        # 4. Dropout and Output Projection
         if self.training and self.dropout_p > 0:
             merged = nn.functional.dropout(merged, p=self.dropout_p)
 
         out = torch.einsum("bnr, nro -> bno", merged, self.factor_out)
 
-        # 5. Residual (Optional for early layers)
         if self.use_residual:
             return out + self.res_proj(x.mean(dim=2))
         return out

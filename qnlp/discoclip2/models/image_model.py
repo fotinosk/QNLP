@@ -1,4 +1,5 @@
 import math
+from typing import Any
 
 import torch
 from einops import rearrange
@@ -21,10 +22,9 @@ class ImageModelSettings(BaseSettings):
 
 image_model_hyperparams = ImageModelSettings()
 
-transforms = [
-    v2.RandomCrop(image_model_hyperparams.image_size, padding=4, padding_mode="reflect"),
+transforms: list[Any] = [
+    v2.RandomCrop(image_model_hyperparams.image_size, padding=4, padding_mode="edge"),
     v2.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
-    v2.RandomHorizontalFlip(p=0.5),
     v2.PILToTensor(),
     v2.ToDtype(torch.float32, scale=True),
 ]
@@ -34,14 +34,14 @@ transforms.append(v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.
 preprocess = v2.Compose(transforms)
 
 
-val_transforms = [
+val_transforms: list[Any] = [
     v2.Resize((image_model_hyperparams.image_size, image_model_hyperparams.image_size)),
     v2.PILToTensor(),
     v2.ToDtype(torch.float32, scale=True),
 ]
 if not image_model_hyperparams.use_color:
     val_transforms.append(v2.Grayscale())
-transforms.append(v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
+val_transforms.append(v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
 val_preprocess = v2.Compose(val_transforms)
 
 
@@ -56,12 +56,10 @@ class TTNImageModel(nn.Module):
         num_patches_side = image_model_hyperparams.image_size // self.patch_size
         num_patches = num_patches_side**2
 
-        # FIX #3: BILINEAR PATCH EMBEDDING
-        # Separates Color (What) and Space (Where) to boost initial Variance
         self.color_factor = nn.Parameter(torch.empty(self.in_channels, self.bond_dim))
         self.pixel_factor = nn.Parameter(torch.empty(self.patch_size**2, self.bond_dim))
-        nn.init.xavier_uniform_(self.color_factor)
-        nn.init.xavier_uniform_(self.pixel_factor)
+        nn.init.orthogonal_(self.color_factor)
+        nn.init.orthogonal_(self.pixel_factor)
 
         # FIX #1: GATED POSITIONAL EMBEDDING
         # Prevents position from drowning out image signal (SNR Fix)
@@ -78,7 +76,6 @@ class TTNImageModel(nn.Module):
 
         for i in range(self.depth):
             # Pruning: Remove residuals from Layer 0 & 1 to force feature learning
-            use_res = True if i > 1 else False
             gain = gains[i]
 
             self.layers.append(
@@ -88,7 +85,7 @@ class TTNImageModel(nn.Module):
                     out_dim=in_dim * 2,
                     rank=image_model_hyperparams.cp_rank,
                     dropout_p=image_model_hyperparams.dropout,
-                    use_residual=use_res,
+                    use_residual=True,
                     gain_factor=gain,
                 )
             )
