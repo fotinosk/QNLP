@@ -8,6 +8,8 @@ def get_device():
     Returns the best available device: mps, cuda, or cpu.
     """
     if torch.backends.mps.is_available():
+        os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+        os.environ["PYTORCH_MPS_DISABLE"] = "0"
         return torch.device("mps")
     elif torch.cuda.is_available():
         return torch.device("cuda")

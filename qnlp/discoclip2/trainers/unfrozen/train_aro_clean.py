@@ -5,7 +5,6 @@ import mlflow
 import torch
 import torchmetrics
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from torch import Tensor
 from torch.nn import Module
 from torch.nn.functional import cosine_similarity
 from torchmetrics import MeanMetric
@@ -31,7 +30,6 @@ log_file_path = get_log_file_path(logger)
 
 DEVICE = get_device()
 set_seed()
-global_step = 0
 
 
 class ModelSettings(BaseSettings):
@@ -59,9 +57,7 @@ class ModelSettings(BaseSettings):
     )
 
 
-def create_epoch_metrics(
-    num_batches: int,
-) -> tuple[dict[str, Tensor], dict[str, MeanMetric]]:
+def create_epoch_metrics() -> dict[str, MeanMetric]:
     epoch_avg_metrics = {
         "loss": torchmetrics.MeanMetric().to(DEVICE),
         "contrastive_loss": torchmetrics.MeanMetric().to(DEVICE),
@@ -71,17 +67,7 @@ def create_epoch_metrics(
         "true_cosine_mean": torchmetrics.MeanMetric().to(DEVICE),
         "false_cosine_mean": torchmetrics.MeanMetric().to(DEVICE),
     }
-    # avoid running .item() in the training loop
-    batch_avg_metrics = {
-        "loss": torch.zeros(num_batches, device=DEVICE),
-        "contrastive_loss": torch.zeros(num_batches, device=DEVICE),
-        "contrastive_acc": torch.zeros(num_batches, device=DEVICE),
-        "hard_neg_loss": torch.zeros(num_batches, device=DEVICE),
-        "hard_neg_acc": torch.zeros(num_batches, device=DEVICE),
-        "true_cosine_mean": torch.zeros(num_batches, device=DEVICE),
-        "false_cosine_mean": torch.zeros(num_batches, device=DEVICE),
-    }
-    return batch_avg_metrics, epoch_avg_metrics
+    return epoch_avg_metrics
 
 
 def calculate_composite_lost(
@@ -100,39 +86,6 @@ def calculate_composite_lost(
     return hard_neg_loss, infonce_acc, infonce_loss, loss
 
 
-def calculate_and_store_metrics(
-    batch_avg_metrics: dict[str, Tensor],
-    epoch_avg_metrics: dict[str, MeanMetric],
-    false_caption_embeddings: Tensor,
-    hard_neg_loss,
-    i: int,
-    image_embeddings: Tensor,
-    infonce_acc: Tensor,
-    infonce_loss: Tensor,
-    loss: Tensor,
-    true_caption_embeddings: Tensor,
-) -> None:
-    # calculate training metrics
-    pos_sim = cosine_similarity(true_caption_embeddings, image_embeddings, dim=-1)
-    neg_sim = cosine_similarity(false_caption_embeddings, image_embeddings, dim=-1)
-
-    true_cosine_mean = pos_sim.mean()
-    false_cosine_mean = neg_sim.mean()
-
-    hard_neg_acc = (pos_sim > neg_sim).float().mean()
-
-    batch_avg_metrics["loss"][i] = loss.detach()
-    batch_avg_metrics["contrastive_loss"][i] = infonce_loss.detach()
-    batch_avg_metrics["contrastive_acc"][i] = infonce_acc.detach()
-    batch_avg_metrics["hard_neg_loss"][i] = hard_neg_loss.detach()
-    batch_avg_metrics["hard_neg_acc"][i] = hard_neg_acc.detach()
-    batch_avg_metrics["true_cosine_mean"][i] = true_cosine_mean.detach()
-    batch_avg_metrics["false_cosine_mean"][i] = false_cosine_mean.detach()
-
-    for key in epoch_avg_metrics:
-        epoch_avg_metrics[key].update(batch_avg_metrics[key][i])
-
-
 def evaluate_models(
     text_model: torch.nn.Module,
     image_model: torch.nn.Module,
@@ -146,9 +99,8 @@ def evaluate_models(
     text_model.eval()
     image_model.eval()
 
-    num_batches = len(dataloader)
     # Initialize metrics
-    batch_avg_metrics, epoch_avg_metrics = create_epoch_metrics(num_batches)
+    epoch_avg_metrics = create_epoch_metrics()
 
     with torch.no_grad():
         for i, batch in enumerate(dataloader):
@@ -169,27 +121,16 @@ def evaluate_models(
                 hard_neg_loss_weight=hard_neg_loss_weight,
             )
 
-            calculate_and_store_metrics(
-                batch_avg_metrics=batch_avg_metrics,
-                epoch_avg_metrics=epoch_avg_metrics,
-                false_caption_embeddings=false_caption_embeddings,
-                hard_neg_loss=hard_neg_loss,
-                i=i,
-                image_embeddings=image_embeddings,
-                infonce_acc=infonce_acc,
-                infonce_loss=infonce_loss,
-                loss=loss,
-                true_caption_embeddings=true_caption_embeddings,
-            )
+            pos_sim = cosine_similarity(true_caption_embeddings, image_embeddings, dim=-1)
+            neg_sim = cosine_similarity(false_caption_embeddings, image_embeddings, dim=-1)
 
-        cpu_batch_metrics = {k: v.cpu().tolist() for k, v in batch_avg_metrics.items()}
-
-        start_step = global_step - num_batches
-        for offset in range(num_batches):
-            mlflow.log_metrics(
-                {f"{usage}/batch_{k}": v[offset] for k, v in cpu_batch_metrics.items()},
-                step=start_step + offset,
-            )
+            epoch_avg_metrics["loss"].update(loss)
+            epoch_avg_metrics["contrastive_loss"].update(infonce_loss)
+            epoch_avg_metrics["contrastive_acc"].update(infonce_acc)
+            epoch_avg_metrics["hard_neg_loss"].update(hard_neg_loss)
+            epoch_avg_metrics["hard_neg_acc"].update((pos_sim > neg_sim).float().mean())
+            epoch_avg_metrics["true_cosine_mean"].update(pos_sim.mean())
+            epoch_avg_metrics["false_cosine_mean"].update(neg_sim.mean())
 
         final_epoch_logs = {}
         logger.info(f"\n--- {usage.upper()} Epoch {epoch} Results ---")
@@ -212,15 +153,13 @@ def train_epoch(
     hard_neg_loss_weight: float,
     epoch: int,
 ) -> None:
-    global global_step
     text_model.train()
     image_model.train()
 
-    num_batches = len(train_dataloader)
     # Initialize metrics
-    batch_avg_metrics, epoch_avg_metrics = create_epoch_metrics(num_batches)
+    epoch_avg_metrics = create_epoch_metrics()
 
-    for i, batch in enumerate(train_dataloader):
+    for batch in train_dataloader:
         optimizer.zero_grad()
 
         images = batch["images"].to(DEVICE)
@@ -245,29 +184,17 @@ def train_epoch(
         torch.nn.utils.clip_grad_norm_(image_model.parameters(), max_norm=1.0)
         optimizer.step()
 
-        calculate_and_store_metrics(
-            batch_avg_metrics,
-            epoch_avg_metrics,
-            false_caption_embeddings,
-            hard_neg_loss,
-            i,
-            image_embeddings,
-            infonce_acc,
-            infonce_loss,
-            loss,
-            true_caption_embeddings,
-        )
+        with torch.no_grad():
+            pos_sim = cosine_similarity(true_caption_embeddings, image_embeddings, dim=-1)
+            neg_sim = cosine_similarity(false_caption_embeddings, image_embeddings, dim=-1)
 
-        global_step += 1
-
-    cpu_batch_metrics = {k: v.cpu().tolist() for k, v in batch_avg_metrics.items()}
-
-    start_step = global_step - num_batches
-    for offset in range(num_batches):
-        mlflow.log_metrics(
-            {f"train/batch_{k}": v[offset] for k, v in cpu_batch_metrics.items()},
-            step=start_step + offset,
-        )
+            epoch_avg_metrics["loss"].update(loss)
+            epoch_avg_metrics["contrastive_loss"].update(infonce_loss)
+            epoch_avg_metrics["contrastive_acc"].update(infonce_acc)
+            epoch_avg_metrics["hard_neg_loss"].update(hard_neg_loss)
+            epoch_avg_metrics["hard_neg_acc"].update((pos_sim > neg_sim).float().mean())
+            epoch_avg_metrics["true_cosine_mean"].update(pos_sim.mean())
+            epoch_avg_metrics["false_cosine_mean"].update(neg_sim.mean())
 
     final_epoch_logs = {}
     logger.info(f"\n--- Epoch {epoch} Results ---")

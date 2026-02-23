@@ -100,7 +100,13 @@ class TTNImageModel(nn.Module):
     def forward(self, x):
         # 1. Bilinear Patch Mapping
         # [b, c, (h p1), (w p2)] -> [b, n, c, p]
-        patches = rearrange(x, "b c (h p1) (w p2) -> b (h w) c (p1 p2)", p1=self.patch_size, p2=self.patch_size)
+
+        # patches = rearrange(x, "b c (h p1) (w p2) -> b (h w) c (p1 p2)", p1=self.patch_size, p2=self.patch_size)
+        # More verbose but guaranteed MPS support
+        b, c, h, w = x.shape
+        p1, p2 = self.patch_size, self.patch_size
+        patches = x.reshape(b, c, h // p1, p1, w // p2, p2)
+        patches = patches.permute(0, 2, 4, 1, 3, 5).reshape(b, -1, c, p1 * p2)
 
         # Entangle Color and Pixels
         c_feat = torch.einsum("bncp, ck -> bnk", patches, self.color_factor)
