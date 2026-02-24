@@ -9,9 +9,24 @@ from torchvision.transforms import v2
 from qnlp.discoclip2.models.cp_node import CPQuadRankLayer
 
 
+def rgb_to_hsv_tensor(img):
+    r, g, b = img[0], img[1], img[2]
+    maxc, _ = torch.max(img, dim=0)
+    minc, _ = torch.min(img, dim=0)
+    v = maxc
+    deltac = maxc - minc
+    s = deltac / (maxc + 1e-7)
+    h = torch.zeros_like(maxc)
+    mask = deltac != 0
+    h[mask & (maxc == r)] = (((g - b) / deltac) % 6)[mask & (maxc == r)]
+    h[mask & (maxc == g)] = (((b - r) / deltac) + 2)[mask & (maxc == g)]
+    h[mask & (maxc == b)] = (((r - g) / deltac) + 4)[mask & (maxc == b)]
+    h = h / 6.0
+    return torch.stack([h, s, v], dim=0)
+
+
 class ImageModelSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="IMAGE_MODEL_")
-    use_color: bool = True
     bond_dim: int = 64
     cp_rank: int = 32
     dropout: float = 0.3
@@ -21,34 +36,33 @@ class ImageModelSettings(BaseSettings):
 
 image_model_hyperparams = ImageModelSettings()
 
-transforms = [
-    v2.RandomCrop(image_model_hyperparams.image_size, padding=4, padding_mode="reflect"),
-    v2.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
-    v2.RandomHorizontalFlip(p=0.5),
-    v2.PILToTensor(),
-    v2.ToDtype(torch.float32, scale=True),
-]
-if not image_model_hyperparams.use_color:
-    transforms.append(v2.Grayscale())
-transforms.append(v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
-preprocess = v2.Compose(transforms)
+preprocess = v2.Compose(
+    [
+        v2.RandomCrop(image_model_hyperparams.image_size, padding=4, padding_mode="reflect"),
+        v2.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
+        v2.RandomHorizontalFlip(p=0.5),
+        v2.PILToTensor(),
+        v2.ToDtype(torch.float32, scale=True),
+        v2.Lambda(lambda img: rgb_to_hsv_tensor(img)),
+        v2.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+    ]
+)
 
-
-val_transforms = [
-    v2.Resize((image_model_hyperparams.image_size, image_model_hyperparams.image_size)),
-    v2.PILToTensor(),
-    v2.ToDtype(torch.float32, scale=True),
-]
-if not image_model_hyperparams.use_color:
-    val_transforms.append(v2.Grayscale())
-transforms.append(v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
-val_preprocess = v2.Compose(val_transforms)
+val_preprocess = v2.Compose(
+    [
+        v2.Resize((image_model_hyperparams.image_size, image_model_hyperparams.image_size)),
+        v2.PILToTensor(),
+        v2.ToDtype(torch.float32, scale=True),
+        v2.Lambda(lambda img: rgb_to_hsv_tensor(img)),
+        v2.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+    ]
+)
 
 
 class TTNImageModel(nn.Module):
     def __init__(self, embedding_dim: int):
         super().__init__()
-        self.in_channels = 3 if image_model_hyperparams.use_color else 1
+        self.in_channels = 3
         self.embedding_dim = embedding_dim
         self.bond_dim = image_model_hyperparams.bond_dim
         self.patch_size = image_model_hyperparams.patch_size
