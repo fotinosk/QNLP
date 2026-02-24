@@ -21,34 +21,31 @@ class ImageModelSettings(BaseSettings):
 
 image_model_hyperparams = ImageModelSettings()
 
-transforms = [
-    v2.RandomCrop(image_model_hyperparams.image_size, padding=4, padding_mode="reflect"),
-    v2.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
-    v2.RandomHorizontalFlip(p=0.5),
-    v2.PILToTensor(),
-    v2.ToDtype(torch.float32, scale=True),
-]
-if not image_model_hyperparams.use_color:
-    transforms.append(v2.Grayscale())
-transforms.append(v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
-preprocess = v2.Compose(transforms)
+preprocess = v2.Compose(
+    [
+        v2.RandomCrop(image_model_hyperparams.image_size, padding=4, padding_mode="reflect"),
+        v2.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
+        v2.RandomHorizontalFlip(p=0.5),
+        v2.PILToTensor(),
+        v2.ToDtype(torch.float32, scale=True),
+        v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ]
+)
 
-
-val_transforms = [
-    v2.Resize((image_model_hyperparams.image_size, image_model_hyperparams.image_size)),
-    v2.PILToTensor(),
-    v2.ToDtype(torch.float32, scale=True),
-]
-if not image_model_hyperparams.use_color:
-    val_transforms.append(v2.Grayscale())
-transforms.append(v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
-val_preprocess = v2.Compose(val_transforms)
+val_preprocess = v2.Compose(
+    [
+        v2.Resize((image_model_hyperparams.image_size, image_model_hyperparams.image_size)),
+        v2.PILToTensor(),
+        v2.ToDtype(torch.float32, scale=True),
+        v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ]
+)
 
 
 class TTNImageModel(nn.Module):
     def __init__(self, embedding_dim: int):
         super().__init__()
-        self.in_channels = 3 if image_model_hyperparams.use_color else 1
+        self.in_channels = 3
         self.embedding_dim = embedding_dim
         self.bond_dim = image_model_hyperparams.bond_dim
         self.patch_size = image_model_hyperparams.patch_size
@@ -56,15 +53,11 @@ class TTNImageModel(nn.Module):
         num_patches_side = image_model_hyperparams.image_size // self.patch_size
         num_patches = num_patches_side**2
 
-        # FIX #3: BILINEAR PATCH EMBEDDING
-        # Separates Color (What) and Space (Where) to boost initial Variance
         self.color_factor = nn.Parameter(torch.empty(self.in_channels, self.bond_dim))
         self.pixel_factor = nn.Parameter(torch.empty(self.patch_size**2, self.bond_dim))
         nn.init.xavier_uniform_(self.color_factor)
         nn.init.xavier_uniform_(self.pixel_factor)
 
-        # FIX #1: GATED POSITIONAL EMBEDDING
-        # Prevents position from drowning out image signal (SNR Fix)
         self.positional_embedding = nn.Parameter(torch.randn(1, num_patches, self.bond_dim))
         self.pos_scale = nn.Parameter(torch.tensor(0.05))  # Initialize to 5% of signal
 
@@ -77,7 +70,6 @@ class TTNImageModel(nn.Module):
         gains = [2.0, 1.5, 1.0, 1.0]
 
         for i in range(self.depth):
-            # Pruning: Remove residuals from Layer 0 & 1 to force feature learning
             use_res = True if i > 1 else False
             gain = gains[i]
 
