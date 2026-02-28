@@ -9,8 +9,9 @@ import psutil
 from qnlp.discoclip2.trainers.frozen.train_aro import (
     BOND_DIM,
     EMBEDDING_DIM,
-    TRAIN_DATA_PATH,
 )
+
+DATA_PATH = "data/aro/processed/visual_genome_attribution/test.json"
 
 # Global variables for worker processes
 _processor = None
@@ -132,4 +133,4 @@ def preprocess_aro(data_path: str, max_line_to_process: int = 4000):
 
 
 if __name__ == "__main__":
-    preprocess_aro(TRAIN_DATA_PATH)
+    preprocess_aro(DATA_PATH)
