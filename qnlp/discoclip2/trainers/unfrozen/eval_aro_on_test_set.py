@@ -1,20 +1,17 @@
 from datetime import datetime
-import torch
 
+import torch
 from torch.utils.data import DataLoader
 
 from qnlp.discoclip2.dataset.aro_dataset import ProcessedARODataset, aro_tn_collate_fn
-
 from qnlp.discoclip2.models.einsum_model import EinsumModel
 from qnlp.discoclip2.models.image_model import TTNImageModel
 from qnlp.discoclip2.models.loss import create_loss_functions
+from qnlp.discoclip2.trainers.unfrozen.train_aro_clean import ModelSettings, evaluate_models
 from qnlp.utils.logging import get_log_file_path, setup_logger
 from qnlp.utils.mlflow_utils import setup_mlflow_run
 from qnlp.utils.seeding import set_seed
 from qnlp.utils.torch_utils import get_device
-from qnlp.discoclip2.trainers.unfrozen.train_aro_clean import ModelSettings, evaluate_models
-
-
 
 EXPERIMENT_NAME = "test_vlm_on_aro_attr"
 ts_string = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -42,9 +39,7 @@ if __name__ == "__main__":
     image_model.load_state_dict(best_checkpoint["image_model_state_dict"])
     image_model = image_model.to(DEVICE)
 
-    test_ds = ProcessedARODataset(
-        data_path=DATA_PATH, image_dir_path=IMAGES_PATH, return_images=True, is_train=False
-    )
+    test_ds = ProcessedARODataset(data_path=DATA_PATH, image_dir_path=IMAGES_PATH, return_images=True, is_train=False)
 
     test_loader = DataLoader(
         test_ds,
