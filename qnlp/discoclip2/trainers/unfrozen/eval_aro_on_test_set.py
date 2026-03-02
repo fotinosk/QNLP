@@ -13,7 +13,8 @@ from qnlp.utils.mlflow_utils import setup_mlflow_run
 from qnlp.utils.seeding import set_seed
 from qnlp.utils.torch_utils import get_device
 
-EXPERIMENT_NAME = "test_vlm_on_aro_attr"
+EXPERIMENT_NAME = "test_vlm_on_aro_relation"
+# EXPERIMENT_NAME = "test_vlm_on_aro_attr"
 ts_string = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 logger = setup_logger(log_name=EXPERIMENT_NAME, ts_string=ts_string)
 log_file_path = get_log_file_path(logger)
@@ -23,7 +24,8 @@ hyperparams = ModelSettings()
 DEVICE = get_device()
 set_seed()
 
-DATA_PATH = "data/aro/processed/visual_genome_attribution/test.json"
+DATA_PATH = "data/aro/processed/visual_genome_relation/test.json"
+# DATA_PATH = "data/aro/processed/visual_genome_attribution/test.json"
 IMAGES_PATH = "data/aro/raw/images/"
 MODEL_PATH = "runs/checkpoints/train_vlm_on_aro/2026-02-23_20-02-49/best_model.pt"
 
@@ -56,7 +58,7 @@ if __name__ == "__main__":
     )
 
     with setup_mlflow_run(EXPERIMENT_NAME, hyperparams.model_dump(), 8080) as run:
-        acc = test_acc = evaluate_models(
+        test_acc = evaluate_models(
             text_model=text_model,
             image_model=image_model,
             dataloader=test_loader,
@@ -66,4 +68,4 @@ if __name__ == "__main__":
             epoch=hyperparams.epochs + 1,
             usage="test",
         )
-        logger.info(f"Final acc on test set: {acc}")
+        logger.info(f"Final acc on test set: {test_acc}")

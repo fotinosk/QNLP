@@ -11,7 +11,7 @@ from qnlp.discoclip2.trainers.frozen.train_aro import (
     EMBEDDING_DIM,
 )
 
-DATA_PATH = "data/aro/processed/visual_genome_attribution/test.json"
+DATA_PATH = "data/aro/processed/visual_genome_relation/test.json"
 
 # Global variables for worker processes
 _processor = None
