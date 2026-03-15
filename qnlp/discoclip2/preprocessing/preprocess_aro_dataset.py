@@ -11,7 +11,7 @@ from qnlp.discoclip2.trainers.frozen.train_aro import (
     EMBEDDING_DIM,
 )
 
-DATA_PATH = "data/aro/processed/visual_genome_relation/test.json"
+DATA_PATH = "data/svo/processed/train.csv"
 
 # Global variables for worker processes
 _processor = None
@@ -76,12 +76,16 @@ def process_batch_standalone(batch_data):
 
 
 def preprocess_aro(data_path: str, max_line_to_process: int = 4000):
-    dataset = pd.read_json(data_path)
+    # dataset = pd.read_json(data_path)
     # filter out bad sentences
-    dataset = dataset[
-        (~dataset["true_caption"].str.contains("pasture")) & (~dataset["false_caption"].str.contains("pasture"))
-    ]
-    captions = set(dataset["true_caption"].unique().tolist() + dataset["false_caption"].unique().tolist())
+
+    # dataset = dataset[
+    #     (~dataset["true_caption"].str.contains("pasture")) & (~dataset["false_caption"].str.contains("pasture"))
+    # ]
+    # captions = set(dataset["true_caption"].unique().tolist() + dataset["false_caption"].unique().tolist())
+
+    dataset = pd.read_csv(data_path)
+    captions = dataset["corrected_sentence"].unique().tolist()
 
     output_path = f"{data_path.split('.')[0]}_processed_{EMBEDDING_DIM}.jsonl"
     print(output_path)
