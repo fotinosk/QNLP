@@ -163,3 +163,47 @@ class QuantumImageEmbedder(nn.Module):
         final_out = self.classical_head(quantum_batch_out)
 
         return nn.functional.normalize(final_out, p=2, dim=-1)
+
+
+if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+
+    # 1. Create dummy PyTorch tensors with the exact shapes your circuit expects.
+    # We multiply by pi to simulate realistic rotation angles.
+    dummy_inputs = torch.rand(NUM_PATCHES, 4, 3) * torch.pi  # Shape: (16, 4, 3)
+    dummy_pos_weights = torch.rand(NUM_PATCHES, 2) * torch.pi  # Shape: (16, 2)
+    dummy_layer_1_weights = torch.rand(20, 3) * torch.pi  # Shape: (20, 3)
+    dummy_layer_2_weights = torch.rand(16, 3) * torch.pi  # Shape: (16, 3)
+
+    print("Generating graphical plot...")
+    qml.drawer.use_style("black_white")
+
+    # We draw the QNode by calling draw_mpl and passing the dummy arguments
+    fig, ax = qml.draw_mpl(qttn_forward, decimals=2)(
+        dummy_inputs, dummy_pos_weights, dummy_layer_1_weights, dummy_layer_2_weights
+    )
+
+    plt.title("80-Qubit QTTN Image Embedder")
+    # Since 80 qubits is very tall, you will need to maximize the window and zoom in
+    plt.show()
+
+    # ==========================================
+    # Text File Export
+    # ==========================================
+    # print("Exporting circuit to text file...")
+    #
+    # # qml.draw() generates a text-based string representation of the circuit
+    # circuit_text = qml.draw(qttn_forward, decimals=2)(
+    #     dummy_inputs,
+    #     dummy_pos_weights,
+    #     dummy_layer_1_weights,
+    #     dummy_layer_2_weights
+    # )
+    #
+    # # Save it to a file with utf-8 encoding to preserve the box-drawing characters
+    # filename = "qttn_80_qubit_circuit.txt"
+    # with open(filename, "w", encoding="utf-8") as f:
+    #     f.write(circuit_text)
+    #
+    # print(f"Success! Circuit saved to {filename}.")
+    # print("Tip: Open the text file in VS Code or Notepad++ and turn off 'Word Wrap' to view it perfectly.")
