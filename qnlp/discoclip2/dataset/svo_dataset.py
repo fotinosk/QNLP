@@ -1,3 +1,4 @@
+import os
 from typing import Callable, List, Tuple
 
 import pandas as pd
@@ -13,12 +14,12 @@ def svo_tn_collate_fn(batch):
     sentences = []
 
     for el in batch:
-        pos_images.append(el["pos_images"])
-        neg_images.append(el["neg_images"])
-        sentences.append(el["sentences"])
+        pos_images.append(el["pos_image"])
+        neg_images.append(el["neg_image"])
+        sentences.append(el["sentence"])
     return {
         "pos_images": torch.stack(pos_images),
-        "neg_images": neg_images,
+        "neg_images": torch.stack(neg_images),
         "sentences": sentences,
     }
 
@@ -32,8 +33,14 @@ class ProcessedSVODataset(Dataset):
         dir_data_path, file_name = data_path.rsplit("/", 1)
         file_name = file_name.split(".")[0]
         processed_file_name = f"{dir_data_path}/{file_name}_processed_512.jsonl"
+        valid_images = [int(x.strip(".jpg")) for x in os.listdir(image_dir_path)]
+
         self.processed_dataset = pd.read_json(processed_file_name, lines=True)
         self.dataset = raw_dataset
+
+        self.dataset = self.dataset[
+            self.dataset["pos_image_id"].isin(valid_images) & self.dataset["neg_image_id"].isin(valid_images)
+        ]
 
         self.text_map = {}
         for _, row in self.processed_dataset.iterrows():
@@ -56,8 +63,8 @@ class ProcessedSVODataset(Dataset):
         return len(self.dataset)
 
     def __getitem__(self, idx):
-        pos_image_path = f"{self.image_path}/{self.pos_images[idx]}"
-        neg_image_path = f"{self.image_path}/{self.neg_images[idx]}"
+        pos_image_path = f"{self.image_path}/{self.pos_images[idx]}.jpg"
+        neg_image_path = f"{self.image_path}/{self.neg_images[idx]}.jpg"
 
         return {
             "pos_image": self.process_image(Image.open(pos_image_path).convert("RGB")),
@@ -69,3 +76,19 @@ class ProcessedSVODataset(Dataset):
     def remove_shape(einsum_input) -> Tuple[str, List[Symbol]]:
         einsum_expr, symbol_size_list = einsum_input
         return (einsum_expr, [Symbol(**sym) for sym, _ in symbol_size_list])
+
+
+if __name__ == "__main__":
+    from torchvision.transforms.v2 import functional as F
+
+    from qnlp.discoclip2.models.image_model import val_preprocess
+
+    ds = ProcessedSVODataset(
+        data_path="data/svo/processed/test.csv",
+        image_dir_path="data/svo/raw/images",
+        image_processing_fn=val_preprocess,
+    )
+    item = ds.__getitem__(100)
+    print(item["sentence"])
+    F.to_pil_image(item["pos_image"]).show()
+    F.to_pil_image(item["neg_image"]).show()

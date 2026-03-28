@@ -1,5 +1,5 @@
 import os
-from typing import List, Tuple
+from typing import Callable, List, Tuple
 
 import pandas as pd
 import torch
@@ -7,8 +7,6 @@ from lambeq.backend.symbol import Symbol
 from PIL import Image
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset
-
-from qnlp.discoclip2.models.image_model import preprocess, val_preprocess
 
 
 def create_train_val_test_split(
@@ -101,11 +99,15 @@ def aro_tn_collate_fn(batch):
 
 class ProcessedARODataset(Dataset):
     def __init__(
-        self, data_path: str, image_dir_path: str | None = None, return_images: bool = False, is_train: bool = False
+        self,
+        data_path: str,
+        image_dir_path: str | None = None,
+        return_images: bool = False,
+        image_processing_fn: Callable = lambda x: x,
     ):
         self.return_images = return_images
         self.image_path = image_dir_path
-        self.process_image = preprocess if is_train else val_preprocess
+        self.process_image = image_processing_fn
 
         raw_dataset = pd.read_json(data_path)
         dir_data_path, file_name = data_path.rsplit("/", 1)
@@ -162,3 +164,8 @@ class ProcessedARODataset(Dataset):
     def remove_shape(einsum_input) -> Tuple[str, List[Symbol]]:
         einsum_expr, symbol_size_list = einsum_input
         return (einsum_expr, [Symbol(**sym) for sym, _ in symbol_size_list])
+
+
+if __name__ == "__main__":
+    ds = ProcessedARODataset(data_path="data/aro/processed/combined/test.json", image_dir_path="data/aro/raw/images")
+    print(ds.__getitem__(100))

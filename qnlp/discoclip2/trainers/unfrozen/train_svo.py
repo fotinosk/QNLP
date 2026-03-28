@@ -12,8 +12,9 @@ from torchmetrics import MeanMetric
 from tqdm import trange
 
 from qnlp.discoclip2.dataset.svo_dataloader import get_svo_dataloader
+from qnlp.discoclip2.image_transforms.svo import create_svo_image_transforms
 from qnlp.discoclip2.models.einsum_model import EinsumModel, get_einsum_model
-from qnlp.discoclip2.models.image_model import TTNImageModel, image_model_hyperparams, preprocess, val_preprocess
+from qnlp.discoclip2.models.image_model import TTNImageModel, image_model_hyperparams
 from qnlp.discoclip2.models.loss import create_loss_functions
 from qnlp.discoclip2.trainers.unfrozen.vlm_model_wrapper import VLM_Wrapper
 from qnlp.utils.early_stopping import EarlyStopping, ModelTrainingStatus
@@ -48,7 +49,7 @@ class ModelSettings(BaseSettings):
     patience: int = 10
 
     temperature: float = 0.07
-    hard_neg_loss_weight: float = 40000.0
+    hard_neg_loss_weight: float = 20.0
     hard_neg_margin: float = 0.2
     hard_neg_distance_function: Literal["euclidean", "cosine"] = "cosine"
     hard_neg_swap: bool = True
@@ -290,6 +291,8 @@ def run_training():
 
         mlflow.log_params(hyperparams.model_dump())
         mlflow.log_params(image_model_hyperparams.model_dump())
+
+        preprocess, val_preprocess = create_svo_image_transforms(image_model_hyperparams.image_size)
 
         loaders, datasets = get_svo_dataloader(
             batch_size=hyperparams.batch_size, train_process_function=preprocess, val_process_function=val_preprocess
