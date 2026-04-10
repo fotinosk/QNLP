@@ -2,6 +2,7 @@ import concurrent.futures
 import gc
 import json
 from dataclasses import asdict
+from pathlib import Path
 
 import pandas as pd
 import psutil
@@ -11,7 +12,7 @@ from qnlp.discoclip2.trainers.frozen.train_aro import (
     EMBEDDING_DIM,
 )
 
-DATA_PATH = "data/svo/processed/train.csv"
+DATA_PATH = "data/winoground/processed/val.json"
 
 # Global variables for worker processes
 _processor = None
@@ -76,19 +77,20 @@ def process_batch_standalone(batch_data):
 
 
 def preprocess_aro(data_path: str, max_line_to_process: int = 4000):
-    # dataset = pd.read_json(data_path)
-    # filter out bad sentences
+    dataset = pd.read_json(data_path)
 
+    # filter out bad sentences
     # dataset = dataset[
     #     (~dataset["true_caption"].str.contains("pasture")) & (~dataset["false_caption"].str.contains("pasture"))
     # ]
-    # captions = set(dataset["true_caption"].unique().tolist() + dataset["false_caption"].unique().tolist())
 
-    dataset = pd.read_csv(data_path)
-    captions = dataset["corrected_sentence"].unique().tolist()
+    captions = set(dataset["true_caption"].unique().tolist() + dataset["false_caption"].unique().tolist())
 
-    output_path = f"{data_path.split('.')[0]}_processed_{EMBEDDING_DIM}.jsonl"
-    print(output_path)
+    # dataset = pd.read_csv(data_path)
+    # captions = dataset["corrected_sentence"].unique().tolist()
+
+    output_path = Path(f"{data_path.split('.')[0]}_processed_{EMBEDDING_DIM}.jsonl")
+    output_path.touch(exist_ok=True)
     processed_dataset = pd.read_json(output_path, lines=True)
     if not processed_dataset.empty:
         processed_captions = set(processed_dataset["caption"].unique())
@@ -128,8 +130,8 @@ def preprocess_aro(data_path: str, max_line_to_process: int = 4000):
 
                 f.flush()  # Force write to disk
                 print(
-                    f"Batch {i+1}/{len(chunks)} written to disk. "
-                    f"(RAM: {psutil.Process().memory_info().rss/(1024**2):.0f}MB)"
+                    f"Batch {i + 1}/{len(chunks)} written to disk. "
+                    f"(RAM: {psutil.Process().memory_info().rss / (1024**2):.0f}MB)"
                 )
 
                 # Explicit trigger for the main process

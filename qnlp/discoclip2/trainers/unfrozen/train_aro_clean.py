@@ -24,7 +24,7 @@ from qnlp.utils.seeding import set_seed
 from qnlp.utils.torch_utils import create_checkpoint_path, get_device
 from qnlp.utils.training_notifications import send_training_finished_notification
 
-EXPERIMENT_NAME = "train_vlm_on_aro"
+EXPERIMENT_NAME = "train_vlm_on_aro_and_wino"
 ts_string = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 checkpoint_path = create_checkpoint_path(EXPERIMENT_NAME, ts_string)
 logger = setup_logger(log_name=EXPERIMENT_NAME, ts_string=ts_string)

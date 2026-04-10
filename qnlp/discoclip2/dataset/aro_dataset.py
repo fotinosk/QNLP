@@ -101,12 +101,11 @@ class ProcessedARODataset(Dataset):
     def __init__(
         self,
         data_path: str,
-        image_dir_path: str | None = None,
         return_images: bool = False,
         image_processing_fn: Callable = lambda x: x,
     ):
+        # TODO: remove when ndim > 1
         self.return_images = return_images
-        self.image_path = image_dir_path
         self.process_image = image_processing_fn
 
         raw_dataset = pd.read_json(data_path)
@@ -145,10 +144,8 @@ class ProcessedARODataset(Dataset):
     def __getitem__(self, idx):
         img_name = self.image_paths[idx]
         if self.return_images:
-            img_path = f"{self.image_path}/{img_name}"
-
             # Using a context manager or just Image.open
-            image = self.process_image(Image.open(img_path).convert("RGB"))
+            image = self.process_image(Image.open(img_name).convert("RGB"))
         else:
             image = img_name
 
@@ -167,5 +164,5 @@ class ProcessedARODataset(Dataset):
 
 
 if __name__ == "__main__":
-    ds = ProcessedARODataset(data_path="data/aro/processed/combined/test.json", image_dir_path="data/aro/raw/images")
+    ds = ProcessedARODataset(data_path="data/aro/processed/combined/test.json")
     print(ds.__getitem__(100))

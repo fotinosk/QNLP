@@ -1,0 +1,1202 @@
+[
+    {
+        "image_id": "3",
+        "true_caption": "the taller person hugs the shorter person",
+        "false_caption": "the shorter person hugs the taller person",
+        "image_path": "data/winoground/raw/images/2.jpg"
+    },
+    {
+        "image_id": "7",
+        "true_caption": "a person watches an animal",
+        "false_caption": "an animal watches a person",
+        "image_path": "data/winoground/raw/images/6.jpg"
+    },
+    {
+        "image_id": "11",
+        "true_caption": "a bird eats a snake",
+        "false_caption": "a snake eats a bird",
+        "image_path": "data/winoground/raw/images/10.jpg"
+    },
+    {
+        "image_id": "15",
+        "true_caption": "a bottle is in water",
+        "false_caption": "water is in a bottle",
+        "image_path": "data/winoground/raw/images/14.jpg"
+    },
+    {
+        "image_id": "19",
+        "true_caption": "people fall on the leaves",
+        "false_caption": "the leaves fall on people",
+        "image_path": "data/winoground/raw/images/18.jpg"
+    },
+    {
+        "image_id": "23",
+        "true_caption": "there is a table below someone",
+        "false_caption": "there is someone below a table",
+        "image_path": "data/winoground/raw/images/22.jpg"
+    },
+    {
+        "image_id": "27",
+        "true_caption": "a caterpillar with some plants",
+        "false_caption": "a plant with some caterpillars",
+        "image_path": "data/winoground/raw/images/26.jpg"
+    },
+    {
+        "image_id": "31",
+        "true_caption": "there are more skiers than snowboarders",
+        "false_caption": "there are more snowboarders than skiers",
+        "image_path": "data/winoground/raw/images/30.jpg"
+    },
+    {
+        "image_id": "35",
+        "true_caption": "there are more ladybugs than flowers",
+        "false_caption": "there are more flowers than ladybugs",
+        "image_path": "data/winoground/raw/images/34.jpg"
+    },
+    {
+        "image_id": "39",
+        "true_caption": "there is more dirt than empty space in the jar",
+        "false_caption": "there is more empty space than dirt in the jar",
+        "image_path": "data/winoground/raw/images/38.jpg"
+    },
+    {
+        "image_id": "43",
+        "true_caption": "a person sits and a dog stands",
+        "false_caption": "a person stands and a dog sits",
+        "image_path": "data/winoground/raw/images/42.jpg"
+    },
+    {
+        "image_id": "47",
+        "true_caption": "the person in the middle is floating and some others are standing",
+        "false_caption": "the person in the middle is standing and some others are floating",
+        "image_path": "data/winoground/raw/images/46.jpg"
+    },
+    {
+        "image_id": "51",
+        "true_caption": "the person with the white collared shirt waters the plant while the other holds it",
+        "false_caption": "the person with the white collared shirt holds the plant while the other waters it",
+        "image_path": "data/winoground/raw/images/50.jpg"
+    },
+    {
+        "image_id": "55",
+        "true_caption": "the person with the ponytail packs stuff and other buys it",
+        "false_caption": "the person with the ponytail buys stuff and other packs it",
+        "image_path": "data/winoground/raw/images/54.jpg"
+    },
+    {
+        "image_id": "59",
+        "true_caption": "a brown dog is on a white couch",
+        "false_caption": "a white dog is on a brown couch",
+        "image_path": "data/winoground/raw/images/58.jpg"
+    },
+    {
+        "image_id": "63",
+        "true_caption": "The red book is above the yellow book and below the blue book",
+        "false_caption": "The yellow book is above the blue book and below the red book",
+        "image_path": "data/winoground/raw/images/62.jpg"
+    },
+    {
+        "image_id": "67",
+        "true_caption": "the square table has a round base",
+        "false_caption": "the round table has a square base",
+        "image_path": "data/winoground/raw/images/66.jpg"
+    },
+    {
+        "image_id": "71",
+        "true_caption": "a circular sign is above a rectangular sign",
+        "false_caption": "a rectangular sign is above a circular sign",
+        "image_path": "data/winoground/raw/images/70.jpg"
+    },
+    {
+        "image_id": "75",
+        "true_caption": "soft shoes are on a smooth floor",
+        "false_caption": "smooth shoes are on a soft floor",
+        "image_path": "data/winoground/raw/images/74.jpg"
+    },
+    {
+        "image_id": "79",
+        "true_caption": "the hurt person is on the left and the helpful person is on the right",
+        "false_caption": "the helpful person is on the left and the hurt person is on the right",
+        "image_path": "data/winoground/raw/images/78.jpg"
+    },
+    {
+        "image_id": "83",
+        "true_caption": "the orange lollipop is sad and the red lollipop is surprised",
+        "false_caption": "the orange lollipop is surprised and the red lollipop is sad",
+        "image_path": "data/winoground/raw/images/82.jpg"
+    },
+    {
+        "image_id": "87",
+        "true_caption": "a big cat is next to a small dog",
+        "false_caption": "a small cat is next to a big dog",
+        "image_path": "data/winoground/raw/images/86.jpg"
+    },
+    {
+        "image_id": "91",
+        "true_caption": "a cold drink on a hot day",
+        "false_caption": "a hot drink on a cold day",
+        "image_path": "data/winoground/raw/images/90.jpg"
+    },
+    {
+        "image_id": "95",
+        "true_caption": "the sailboat sails close but the beach is far away",
+        "false_caption": "the sailboat sails far away but the beach is close",
+        "image_path": "data/winoground/raw/images/94.jpg"
+    },
+    {
+        "image_id": "99",
+        "true_caption": "it wears a hat but the person doesn't",
+        "false_caption": "the person wears a hat but it doesn't",
+        "image_path": "data/winoground/raw/images/98.jpg"
+    },
+    {
+        "image_id": "103",
+        "true_caption": "a person is in the water and close to the sand",
+        "false_caption": "a person is close to the water and in the sand",
+        "image_path": "data/winoground/raw/images/102.jpg"
+    },
+    {
+        "image_id": "107",
+        "true_caption": "driving off the road and on the unpaved terrain",
+        "false_caption": "driving on the road and off the unpaved terrain",
+        "image_path": "data/winoground/raw/images/106.jpg"
+    },
+    {
+        "image_id": "111",
+        "true_caption": "the green one can fit inside the blue one and the blue one can fit outside the green one",
+        "false_caption": "the green one can fit outside the blue one and the blue one can fit inside the green one",
+        "image_path": "data/winoground/raw/images/110.jpg"
+    },
+    {
+        "image_id": "115",
+        "true_caption": "someone bakes the dough before the dough is eaten",
+        "false_caption": "the dough is eaten before someone bakes the dough",
+        "image_path": "data/winoground/raw/images/114.jpg"
+    },
+    {
+        "image_id": "119",
+        "true_caption": "there are three bananas and two apples",
+        "false_caption": "there are two bananas and three apples",
+        "image_path": "data/winoground/raw/images/118.jpg"
+    },
+    {
+        "image_id": "123",
+        "true_caption": "there are three people and two windows",
+        "false_caption": "there are two people and three windows",
+        "image_path": "data/winoground/raw/images/122.jpg"
+    },
+    {
+        "image_id": "127",
+        "true_caption": "no people wear blue shirts and six people wear white shirts",
+        "false_caption": "six people wear blue shirts and no people wear white shirts",
+        "image_path": "data/winoground/raw/images/126.jpg"
+    },
+    {
+        "image_id": "131",
+        "true_caption": "the animal's eyes are bigger than the person's",
+        "false_caption": "the person's eyes are bigger than the animal's",
+        "image_path": "data/winoground/raw/images/130.jpg"
+    },
+    {
+        "image_id": "135",
+        "true_caption": "the person in a brown coat looks back and the person in a black coat looks forward",
+        "false_caption": "the person in a black coat looks back and the person in a brown coat looks forward",
+        "image_path": "data/winoground/raw/images/134.jpg"
+    },
+    {
+        "image_id": "139",
+        "true_caption": "almost everyone is in a boat and one is swimming",
+        "false_caption": "one is in a boat and almost everyone is swimming",
+        "image_path": "data/winoground/raw/images/138.jpg"
+    },
+    {
+        "image_id": "143",
+        "true_caption": "the person wearing neutral colors poses and the person wearing brighter colors takes a picture",
+        "false_caption": "the person wearing brighter colors poses and the person wearing neutral colors takes a picture",
+        "image_path": "data/winoground/raw/images/142.jpg"
+    },
+    {
+        "image_id": "147",
+        "true_caption": "watching the present",
+        "false_caption": "presenting the watch",
+        "image_path": "data/winoground/raw/images/146.jpg"
+    },
+    {
+        "image_id": "151",
+        "true_caption": "the kid with the magnifying glass looks at them",
+        "false_caption": "the kid looks at them with the magnifying glass",
+        "image_path": "data/winoground/raw/images/150.jpg"
+    },
+    {
+        "image_id": "155",
+        "true_caption": "the people with shoes are touching each other",
+        "false_caption": "the people are touching each other with shoes",
+        "image_path": "data/winoground/raw/images/154.jpg"
+    },
+    {
+        "image_id": "159",
+        "true_caption": "the person that is on the table is eating the food",
+        "false_caption": "the person is eating the food that is on the table",
+        "image_path": "data/winoground/raw/images/158.jpg"
+    },
+    {
+        "image_id": "163",
+        "true_caption": "they hold a suitcase handle with their left hand and they hold a passport with their right hand",
+        "false_caption": "they hold a passport with their left hand and they hold a suitcase handle with their right hand",
+        "image_path": "data/winoground/raw/images/162.jpg"
+    },
+    {
+        "image_id": "167",
+        "true_caption": "a diagram showing movement from right to left",
+        "false_caption": "a diagram showing movement from left to right",
+        "image_path": "data/winoground/raw/images/166.jpg"
+    },
+    {
+        "image_id": "171",
+        "true_caption": "the person who is wearing a crown is kissing a frog",
+        "false_caption": "the person is kissing a frog who is wearing a crown",
+        "image_path": "data/winoground/raw/images/170.jpg"
+    },
+    {
+        "image_id": "175",
+        "true_caption": "The uncaged bird has an opened cage door",
+        "false_caption": "The caged bird has an unopened cage door",
+        "image_path": "data/winoground/raw/images/174.jpg"
+    },
+    {
+        "image_id": "179",
+        "true_caption": "the person in pink was close to not winning",
+        "false_caption": "the person in pink was not close to winning",
+        "image_path": "data/winoground/raw/images/178.jpg"
+    },
+    {
+        "image_id": "183",
+        "true_caption": "clothing on lines",
+        "false_caption": "lines on clothing",
+        "image_path": "data/winoground/raw/images/182.jpg"
+    },
+    {
+        "image_id": "187",
+        "true_caption": "two boats and one direction down the stream",
+        "false_caption": "one boat and two directions down the stream",
+        "image_path": "data/winoground/raw/images/186.jpg"
+    },
+    {
+        "image_id": "191",
+        "true_caption": "handing a hammer",
+        "false_caption": "hammering a hand",
+        "image_path": "data/winoground/raw/images/190.jpg"
+    },
+    {
+        "image_id": "195",
+        "true_caption": "they are using no bait but still got fish",
+        "false_caption": "they are using bait but still got no fish",
+        "image_path": "data/winoground/raw/images/194.jpg"
+    },
+    {
+        "image_id": "199",
+        "true_caption": "the dog wears as a hat what someone would normally bite",
+        "false_caption": "the dog bites what someone would normally wear as a hat",
+        "image_path": "data/winoground/raw/images/198.jpg"
+    },
+    {
+        "image_id": "203",
+        "true_caption": "fake mustache and real hair on head",
+        "false_caption": "real mustache and fake hair on head",
+        "image_path": "data/winoground/raw/images/202.jpg"
+    },
+    {
+        "image_id": "207",
+        "true_caption": "the lion is loud and the lionness is quiet",
+        "false_caption": "the lion is quiet and the lionness is loud",
+        "image_path": "data/winoground/raw/images/206.jpg"
+    },
+    {
+        "image_id": "211",
+        "true_caption": "light colored dog with dark colored cat",
+        "false_caption": "dark colored dog with light colored cat",
+        "image_path": "data/winoground/raw/images/210.jpg"
+    },
+    {
+        "image_id": "215",
+        "true_caption": "black socks and orange shoes",
+        "false_caption": "orange socks and black shoes",
+        "image_path": "data/winoground/raw/images/214.jpg"
+    },
+    {
+        "image_id": "219",
+        "true_caption": "blue pants and green top",
+        "false_caption": "green pants and blue top",
+        "image_path": "data/winoground/raw/images/218.jpg"
+    },
+    {
+        "image_id": "223",
+        "true_caption": "there are more silver coins than gold coins",
+        "false_caption": "there are more gold coins than silver coins",
+        "image_path": "data/winoground/raw/images/222.jpg"
+    },
+    {
+        "image_id": "227",
+        "true_caption": "black dog wearing a brown sweater",
+        "false_caption": "brown dog wearing a black sweater",
+        "image_path": "data/winoground/raw/images/226.jpg"
+    },
+    {
+        "image_id": "231",
+        "true_caption": "person in white is reading the orange book",
+        "false_caption": "person in orange is reading the white book",
+        "image_path": "data/winoground/raw/images/230.jpg"
+    },
+    {
+        "image_id": "235",
+        "true_caption": "the circular mirror is on the left and the rectangular mirror is on the right",
+        "false_caption": "the rectangular mirror is on the left and the circular mirror is on the right",
+        "image_path": "data/winoground/raw/images/234.jpg"
+    },
+    {
+        "image_id": "239",
+        "true_caption": "the dress on the left is long and the dress on the right is short",
+        "false_caption": "the dress on the left is short and the dress on the right is long",
+        "image_path": "data/winoground/raw/images/238.jpg"
+    },
+    {
+        "image_id": "243",
+        "true_caption": "the pool has no people and the area around it has a lot of people",
+        "false_caption": "the pool has a lot of people and the area around it has no people",
+        "image_path": "data/winoground/raw/images/242.jpg"
+    },
+    {
+        "image_id": "247",
+        "true_caption": "the train is moving fast while the person is still",
+        "false_caption": "the train is still while the person is moving fast",
+        "image_path": "data/winoground/raw/images/246.jpg"
+    },
+    {
+        "image_id": "251",
+        "true_caption": "concrete floors with wood walls",
+        "false_caption": "wood floors with concrete walls",
+        "image_path": "data/winoground/raw/images/250.jpg"
+    },
+    {
+        "image_id": "255",
+        "true_caption": "there's a metal bottle with a plastic lid",
+        "false_caption": "there's a plastic bottle with a metal lid",
+        "image_path": "data/winoground/raw/images/254.jpg"
+    },
+    {
+        "image_id": "259",
+        "true_caption": "the car is sitting upside down while the person is standing rightside up",
+        "false_caption": "the car is sitting rightside up while the person is standing upside down",
+        "image_path": "data/winoground/raw/images/258.jpg"
+    },
+    {
+        "image_id": "263",
+        "true_caption": "milk cow",
+        "false_caption": "cow milk",
+        "image_path": "data/winoground/raw/images/262.jpg"
+    },
+    {
+        "image_id": "267",
+        "true_caption": "there is a split banana",
+        "false_caption": "there is a banana split",
+        "image_path": "data/winoground/raw/images/266.jpg"
+    },
+    {
+        "image_id": "271",
+        "true_caption": "three white and two brown eggs",
+        "false_caption": "two white and three brown eggs",
+        "image_path": "data/winoground/raw/images/270.jpg"
+    },
+    {
+        "image_id": "275",
+        "true_caption": "the dog's paw is on the cat's face",
+        "false_caption": "the cat's paw is on the dog's face",
+        "image_path": "data/winoground/raw/images/274.jpg"
+    },
+    {
+        "image_id": "279",
+        "true_caption": "the dog is in the driver's seat and the person is in the passenger's seat",
+        "false_caption": "the dog is in the passenger's seat and the person is in the driver's seat",
+        "image_path": "data/winoground/raw/images/278.jpg"
+    },
+    {
+        "image_id": "283",
+        "true_caption": "there are more computers than people",
+        "false_caption": "there are more people than computers",
+        "image_path": "data/winoground/raw/images/282.jpg"
+    },
+    {
+        "image_id": "287",
+        "true_caption": "there are more hats than people",
+        "false_caption": "there are more people than hats",
+        "image_path": "data/winoground/raw/images/286.jpg"
+    },
+    {
+        "image_id": "291",
+        "true_caption": "there is more red wine than white wine",
+        "false_caption": "there is more white wine than red wine",
+        "image_path": "data/winoground/raw/images/290.jpg"
+    },
+    {
+        "image_id": "295",
+        "true_caption": "there's more cereal in the bowl than milk",
+        "false_caption": "there's more milk in the bowl than cereal",
+        "image_path": "data/winoground/raw/images/294.jpg"
+    },
+    {
+        "image_id": "299",
+        "true_caption": "boat house",
+        "false_caption": "house boat",
+        "image_path": "data/winoground/raw/images/298.jpg"
+    },
+    {
+        "image_id": "303",
+        "true_caption": "dress the display",
+        "false_caption": "display the dress",
+        "image_path": "data/winoground/raw/images/302.jpg"
+    },
+    {
+        "image_id": "307",
+        "true_caption": "books holding up a person",
+        "false_caption": "a person holding up books",
+        "image_path": "data/winoground/raw/images/306.jpg"
+    },
+    {
+        "image_id": "311",
+        "true_caption": "some plants surrounding a lightbulb",
+        "false_caption": "a lightbulb surrounding some plants",
+        "image_path": "data/winoground/raw/images/310.jpg"
+    },
+    {
+        "image_id": "315",
+        "true_caption": "the flowers are taller than the people",
+        "false_caption": "the people are taller than the flowers",
+        "image_path": "data/winoground/raw/images/314.jpg"
+    },
+    {
+        "image_id": "319",
+        "true_caption": "a person is casting a shadow beside a ball",
+        "false_caption": "a ball is casting a shadow beside a person",
+        "image_path": "data/winoground/raw/images/318.jpg"
+    },
+    {
+        "image_id": "323",
+        "true_caption": "the child is throwing the adult the ball",
+        "false_caption": "the adult is throwing the child the ball",
+        "image_path": "data/winoground/raw/images/322.jpg"
+    },
+    {
+        "image_id": "327",
+        "true_caption": "some green on the ball",
+        "false_caption": "the ball on some green",
+        "image_path": "data/winoground/raw/images/326.jpg"
+    },
+    {
+        "image_id": "331",
+        "true_caption": "there's a phone on a map",
+        "false_caption": "there's a map on a phone",
+        "image_path": "data/winoground/raw/images/330.jpg"
+    },
+    {
+        "image_id": "335",
+        "true_caption": "an adult is flexing beside a child",
+        "false_caption": "a child is flexing beside an adult",
+        "image_path": "data/winoground/raw/images/334.jpg"
+    },
+    {
+        "image_id": "339",
+        "true_caption": "a cat is underneath a red blanket",
+        "false_caption": "a red blanket is underneath a cat",
+        "image_path": "data/winoground/raw/images/338.jpg"
+    },
+    {
+        "image_id": "343",
+        "true_caption": "the person is underneath the car",
+        "false_caption": "the car is underneath the person",
+        "image_path": "data/winoground/raw/images/342.jpg"
+    },
+    {
+        "image_id": "347",
+        "true_caption": "an apple is on a target",
+        "false_caption": "a target is on an apple",
+        "image_path": "data/winoground/raw/images/346.jpg"
+    },
+    {
+        "image_id": "351",
+        "true_caption": "parent pointing at child",
+        "false_caption": "child pointing at parent",
+        "image_path": "data/winoground/raw/images/350.jpg"
+    },
+    {
+        "image_id": "355",
+        "true_caption": "ice being dumped on top of fish",
+        "false_caption": "fish being dumped on top of ice",
+        "image_path": "data/winoground/raw/images/354.jpg"
+    },
+    {
+        "image_id": "359",
+        "true_caption": "there's a dog in a mask and a person beside it",
+        "false_caption": "there's a dog and a person in a mask beside it",
+        "image_path": "data/winoground/raw/images/358.jpg"
+    },
+    {
+        "image_id": "363",
+        "true_caption": "the person on the left has their arms up and the person on the right has their arms down",
+        "false_caption": "the person on the right has their arms up and the person on the left has their arms down",
+        "image_path": "data/winoground/raw/images/362.jpg"
+    },
+    {
+        "image_id": "367",
+        "true_caption": "the orange on the left is moldy while the orange on the right is fresh",
+        "false_caption": "the orange on the right is moldy while the orange on the left is fresh",
+        "image_path": "data/winoground/raw/images/366.jpg"
+    },
+    {
+        "image_id": "371",
+        "true_caption": "the glasses on the right are fuller than the glasses on the left",
+        "false_caption": "the glasses on the left are fuller than the glasses on the right",
+        "image_path": "data/winoground/raw/images/370.jpg"
+    },
+    {
+        "image_id": "375",
+        "true_caption": "there's more foam on the left than on the right",
+        "false_caption": "there's more foam on the right than on the left",
+        "image_path": "data/winoground/raw/images/374.jpg"
+    },
+    {
+        "image_id": "379",
+        "true_caption": "they worked out then they drank water",
+        "false_caption": "they drank water then they worked out",
+        "image_path": "data/winoground/raw/images/378.jpg"
+    },
+    {
+        "image_id": "383",
+        "true_caption": "the coffee is poured before it is ground",
+        "false_caption": "it is ground before the coffee is poured",
+        "image_path": "data/winoground/raw/images/382.jpg"
+    },
+    {
+        "image_id": "387",
+        "true_caption": "the banana is peeled then it is sliced",
+        "false_caption": "the banana is sliced then it is peeled",
+        "image_path": "data/winoground/raw/images/386.jpg"
+    },
+    {
+        "image_id": "391",
+        "true_caption": "the person is jumping while the cat is sitting",
+        "false_caption": "the person is sitting while the cat is jumping",
+        "image_path": "data/winoground/raw/images/390.jpg"
+    },
+    {
+        "image_id": "395",
+        "true_caption": "some people are standing but more are sitting",
+        "false_caption": "some people are sitting but more are standing",
+        "image_path": "data/winoground/raw/images/394.jpg"
+    },
+    {
+        "image_id": "399",
+        "true_caption": "painting gray walls white",
+        "false_caption": "painting white walls gray",
+        "image_path": "data/winoground/raw/images/398.jpg"
+    },
+    {
+        "image_id": "403",
+        "true_caption": "a person wearing a bear mask in blue on the left hand side of a person wearing a panda mask with glasses in pink",
+        "false_caption": "a person wearing a panda mask with glasses in blue on the left hand side of a person wearing a bear mask in pink",
+        "image_path": "data/winoground/raw/images/402.jpg"
+    },
+    {
+        "image_id": "407",
+        "true_caption": "left is red and right is blue",
+        "false_caption": "left is blue and right is red",
+        "image_path": "data/winoground/raw/images/406.jpg"
+    },
+    {
+        "image_id": "411",
+        "true_caption": "four lions, no tigers",
+        "false_caption": "no lions, four tigers",
+        "image_path": "data/winoground/raw/images/410.jpg"
+    },
+    {
+        "image_id": "415",
+        "true_caption": "an older person blocking a younger person",
+        "false_caption": "a younger person blocking an older person",
+        "image_path": "data/winoground/raw/images/414.jpg"
+    },
+    {
+        "image_id": "419",
+        "true_caption": "the cube is smaller than the shape whose lateral faces meet at a vertex",
+        "false_caption": "the shape whose lateral faces meet at a vertex is smaller than the cube",
+        "image_path": "data/winoground/raw/images/418.jpg"
+    },
+    {
+        "image_id": "423",
+        "true_caption": "there are more apples than pears",
+        "false_caption": "there are more pears than apples",
+        "image_path": "data/winoground/raw/images/422.jpg"
+    },
+    {
+        "image_id": "427",
+        "true_caption": "more water than oil",
+        "false_caption": "more oil than water",
+        "image_path": "data/winoground/raw/images/426.jpg"
+    },
+    {
+        "image_id": "431",
+        "true_caption": "a person with long hair eating a meat-based product while a person with short hair snacks on some fries",
+        "false_caption": "a person with short hair eating a meat-based product while a person with long hair snacks on some fries",
+        "image_path": "data/winoground/raw/images/430.jpg"
+    },
+    {
+        "image_id": "435",
+        "true_caption": "the one in front is faster than the other one",
+        "false_caption": "the other one is faster than the one in front",
+        "image_path": "data/winoground/raw/images/434.jpg"
+    },
+    {
+        "image_id": "439",
+        "true_caption": "It starts with \"A\" and ends with \"Z\"",
+        "false_caption": "It starts with \"Z\" and ends with \"A\"",
+        "image_path": "data/winoground/raw/images/438.jpg"
+    },
+    {
+        "image_id": "443",
+        "true_caption": "the brave in the face of fear",
+        "false_caption": "fear in the face of the brave",
+        "image_path": "data/winoground/raw/images/442.jpg"
+    },
+    {
+        "image_id": "447",
+        "true_caption": "the one in the middle is taller than the ones on the side are",
+        "false_caption": "the ones on the side are taller than the one in the middle is",
+        "image_path": "data/winoground/raw/images/446.jpg"
+    },
+    {
+        "image_id": "451",
+        "true_caption": "the red car is behind the blue car",
+        "false_caption": "the blue car is behind the red car",
+        "image_path": "data/winoground/raw/images/450.jpg"
+    },
+    {
+        "image_id": "455",
+        "true_caption": "an object that rolls is on some wood",
+        "false_caption": "some wood is on an object that rolls",
+        "image_path": "data/winoground/raw/images/454.jpg"
+    },
+    {
+        "image_id": "459",
+        "true_caption": "a normal person wishing they were a superhero",
+        "false_caption": "a superhero wishing they were a normal person",
+        "image_path": "data/winoground/raw/images/458.jpg"
+    },
+    {
+        "image_id": "463",
+        "true_caption": "a person with long hair behind a person with a beard",
+        "false_caption": "a person with a beard behind a person with long hair",
+        "image_path": "data/winoground/raw/images/462.jpg"
+    },
+    {
+        "image_id": "467",
+        "true_caption": "a human being on a device that intercepts the sun's rays",
+        "false_caption": "a device that intercepts the sun's rays on a human being",
+        "image_path": "data/winoground/raw/images/466.jpg"
+    },
+    {
+        "image_id": "471",
+        "true_caption": "a person is in the tube",
+        "false_caption": "a tube is in the person",
+        "image_path": "data/winoground/raw/images/470.jpg"
+    },
+    {
+        "image_id": "475",
+        "true_caption": "person overboard",
+        "false_caption": "person over board",
+        "image_path": "data/winoground/raw/images/474.jpg"
+    },
+    {
+        "image_id": "479",
+        "true_caption": "the object at the top left is purple and the one at the bottom right of the group is red",
+        "false_caption": "the object at the bottom right is purple and the one at the top left of the group is red",
+        "image_path": "data/winoground/raw/images/478.jpg"
+    },
+    {
+        "image_id": "483",
+        "true_caption": "seat numbers increasing from left to right",
+        "false_caption": "seat numbers increasing from right to left",
+        "image_path": "data/winoground/raw/images/482.jpg"
+    },
+    {
+        "image_id": "487",
+        "true_caption": "more hair on the person's face than on their head",
+        "false_caption": "more hair on the person's head than on their face",
+        "image_path": "data/winoground/raw/images/486.jpg"
+    },
+    {
+        "image_id": "491",
+        "true_caption": "food on their eyes",
+        "false_caption": "eyes on their food",
+        "image_path": "data/winoground/raw/images/490.jpg"
+    },
+    {
+        "image_id": "495",
+        "true_caption": "a person on top of the world",
+        "false_caption": "the world on top of a person",
+        "image_path": "data/winoground/raw/images/494.jpg"
+    },
+    {
+        "image_id": "499",
+        "true_caption": "first the cream, then the jam",
+        "false_caption": "first the jam, then the cream",
+        "image_path": "data/winoground/raw/images/498.jpg"
+    },
+    {
+        "image_id": "503",
+        "true_caption": "an inflatable flamingo on a person",
+        "false_caption": "a person on an inflatable flamingo",
+        "image_path": "data/winoground/raw/images/502.jpg"
+    },
+    {
+        "image_id": "507",
+        "true_caption": "a large pink inflatable flamingo along with some other lilos on the water including one that is mostly white",
+        "false_caption": "a large white inflatable flamingo along with some other lilos on the water including one that is mostly pink",
+        "image_path": "data/winoground/raw/images/506.jpg"
+    },
+    {
+        "image_id": "511",
+        "true_caption": "the confident doctor's stethoscope is around their neck, and their jacket is over their name tag",
+        "false_caption": "the confident doctor's stethoscope is around their neck, and their name tag is over their jacket",
+        "image_path": "data/winoground/raw/images/510.jpg"
+    },
+    {
+        "image_id": "515",
+        "true_caption": "an adult is reading to their young child",
+        "false_caption": "their young child is reading to an adult",
+        "image_path": "data/winoground/raw/images/514.jpg"
+    },
+    {
+        "image_id": "519",
+        "true_caption": "Young person playing baseball with a green bat and blue ball",
+        "false_caption": "Young person playing baseball with a blue bat and green ball",
+        "image_path": "data/winoground/raw/images/518.jpg"
+    },
+    {
+        "image_id": "523",
+        "true_caption": "wearing a red jacket over blue",
+        "false_caption": "wearing a blue jacket over red",
+        "image_path": "data/winoground/raw/images/522.jpg"
+    },
+    {
+        "image_id": "527",
+        "true_caption": "unfortunate poor people",
+        "false_caption": "poor unfortunate people",
+        "image_path": "data/winoground/raw/images/526.jpg"
+    },
+    {
+        "image_id": "531",
+        "true_caption": "there are more pineapples than boxes",
+        "false_caption": "there are more boxes than pineapples",
+        "image_path": "data/winoground/raw/images/530.jpg"
+    },
+    {
+        "image_id": "535",
+        "true_caption": "the first vowel is E and the last consonant is N",
+        "false_caption": "the last vowel is E and the first consonant is N",
+        "image_path": "data/winoground/raw/images/534.jpg"
+    },
+    {
+        "image_id": "539",
+        "true_caption": "the text is black on white",
+        "false_caption": "the text is white on black",
+        "image_path": "data/winoground/raw/images/538.jpg"
+    },
+    {
+        "image_id": "543",
+        "true_caption": "the person with facial hair cycles and the other person runs",
+        "false_caption": "the person with facial hair runs and the other person cycles",
+        "image_path": "data/winoground/raw/images/542.jpg"
+    },
+    {
+        "image_id": "547",
+        "true_caption": "a person in a blue coat with a brown-ish coffee cup",
+        "false_caption": "a person in a brown-ish coat with a blue coffee cup",
+        "image_path": "data/winoground/raw/images/546.jpg"
+    },
+    {
+        "image_id": "551",
+        "true_caption": "star of death",
+        "false_caption": "death of star",
+        "image_path": "data/winoground/raw/images/550.jpg"
+    },
+    {
+        "image_id": "555",
+        "true_caption": "the one on the left is happy and the other is sad",
+        "false_caption": "the one on the left is sad and the other is happy",
+        "image_path": "data/winoground/raw/images/554.jpg"
+    },
+    {
+        "image_id": "559",
+        "true_caption": "the person on the left is crying sadly while the one on the right is smiling happily",
+        "false_caption": "the person on the left is smiling happily while the one on the right is crying sadly",
+        "image_path": "data/winoground/raw/images/558.jpg"
+    },
+    {
+        "image_id": "563",
+        "true_caption": "hot rubber and cool metal",
+        "false_caption": "cool rubber and hot metal",
+        "image_path": "data/winoground/raw/images/562.jpg"
+    },
+    {
+        "image_id": "567",
+        "true_caption": "rough outside but smooth inside",
+        "false_caption": "smooth outside but rough inside",
+        "image_path": "data/winoground/raw/images/566.jpg"
+    },
+    {
+        "image_id": "571",
+        "true_caption": "there are more humans than balls",
+        "false_caption": "there are more balls than humans",
+        "image_path": "data/winoground/raw/images/570.jpg"
+    },
+    {
+        "image_id": "575",
+        "true_caption": "a group of three people with longer hair and two with short hair in a business context",
+        "false_caption": "a group of two people with longer hair and three with short hair in a business context",
+        "image_path": "data/winoground/raw/images/574.jpg"
+    },
+    {
+        "image_id": "579",
+        "true_caption": "the circle is above the cross",
+        "false_caption": "the cross is above the circle",
+        "image_path": "data/winoground/raw/images/578.jpg"
+    },
+    {
+        "image_id": "583",
+        "true_caption": "physical therapist inspecting blue elastic therapeutic kinesio tape over pink",
+        "false_caption": "physical therapist inspecting pink elastic therapeutic kinesio tape over blue",
+        "image_path": "data/winoground/raw/images/582.jpg"
+    },
+    {
+        "image_id": "587",
+        "true_caption": "the blue balloon is being lifted by the weight",
+        "false_caption": "the weight is being lifted by the blue balloon",
+        "image_path": "data/winoground/raw/images/586.jpg"
+    },
+    {
+        "image_id": "591",
+        "true_caption": "the melting white food is cold while the brown is warm",
+        "false_caption": "the melting white food is warm while the brown is cold",
+        "image_path": "data/winoground/raw/images/590.jpg"
+    },
+    {
+        "image_id": "595",
+        "true_caption": "the pet on the right is white and the one on the left is not",
+        "false_caption": "the pet on the left is white and the one on the right is not",
+        "image_path": "data/winoground/raw/images/594.jpg"
+    },
+    {
+        "image_id": "599",
+        "true_caption": "the larger ball is heavier and the smaller one is lighter",
+        "false_caption": "the larger ball is lighter and the smaller one is heavier",
+        "image_path": "data/winoground/raw/images/598.jpg"
+    },
+    {
+        "image_id": "603",
+        "true_caption": "a dog is on a blanket with spots",
+        "false_caption": "a blanket is on a dog with spots",
+        "image_path": "data/winoground/raw/images/602.jpg"
+    },
+    {
+        "image_id": "607",
+        "true_caption": "The cold-blooded animal isn't happy in warm water",
+        "false_caption": "The warm-blooded animal isn't happy in cold water",
+        "image_path": "data/winoground/raw/images/606.jpg"
+    },
+    {
+        "image_id": "611",
+        "true_caption": "visiting animals at home can be fun",
+        "false_caption": "animals visiting at home can be fun",
+        "image_path": "data/winoground/raw/images/610.jpg"
+    },
+    {
+        "image_id": "615",
+        "true_caption": "the person is too big for the small door",
+        "false_caption": "the door is too small for the big person",
+        "image_path": "data/winoground/raw/images/614.jpg"
+    },
+    {
+        "image_id": "619",
+        "true_caption": "the plant is eating the bug",
+        "false_caption": "the bug is eating the plant",
+        "image_path": "data/winoground/raw/images/618.jpg"
+    },
+    {
+        "image_id": "623",
+        "true_caption": "the green leaves will soon be red as the seasons change",
+        "false_caption": "the red leaves will soon be green as the seasons change",
+        "image_path": "data/winoground/raw/images/622.jpg"
+    },
+    {
+        "image_id": "627",
+        "true_caption": "the moon prevents the sun's rays from falling on the earth",
+        "false_caption": "the earth prevents the sun's rays from falling on the moon",
+        "image_path": "data/winoground/raw/images/626.jpg"
+    },
+    {
+        "image_id": "631",
+        "true_caption": "the person is too big for the pants",
+        "false_caption": "the pants is too big for the person",
+        "image_path": "data/winoground/raw/images/630.jpg"
+    },
+    {
+        "image_id": "635",
+        "true_caption": "one cheerlearder supporting multiple cheerleaders",
+        "false_caption": "multiple cheerleaders supporting one cheerlearder",
+        "image_path": "data/winoground/raw/images/634.jpg"
+    },
+    {
+        "image_id": "639",
+        "true_caption": "human head on pet",
+        "false_caption": "pet head on human",
+        "image_path": "data/winoground/raw/images/638.jpg"
+    },
+    {
+        "image_id": "643",
+        "true_caption": "someone babys a pet",
+        "false_caption": "someone pets a baby",
+        "image_path": "data/winoground/raw/images/642.jpg"
+    },
+    {
+        "image_id": "647",
+        "true_caption": "gold for pan",
+        "false_caption": "pan for gold",
+        "image_path": "data/winoground/raw/images/646.jpg"
+    },
+    {
+        "image_id": "651",
+        "true_caption": "the businessperson's down fall",
+        "false_caption": "the businessperson's fall down",
+        "image_path": "data/winoground/raw/images/650.jpg"
+    },
+    {
+        "image_id": "655",
+        "true_caption": "manning a ship",
+        "false_caption": "shiping a mann",
+        "image_path": "data/winoground/raw/images/654.jpg"
+    },
+    {
+        "image_id": "659",
+        "true_caption": "a person without glasses pushes a person with glasses sitting in a box",
+        "false_caption": "a person with glasses pushes a person without glasses sitting in a box",
+        "image_path": "data/winoground/raw/images/658.jpg"
+    },
+    {
+        "image_id": "663",
+        "true_caption": "soon this animal not with a tail will have one",
+        "false_caption": "soon this animal with a tail will not have one",
+        "image_path": "data/winoground/raw/images/662.jpg"
+    },
+    {
+        "image_id": "667",
+        "true_caption": "fishing for compliments",
+        "false_caption": "compliments for fishing",
+        "image_path": "data/winoground/raw/images/666.jpg"
+    },
+    {
+        "image_id": "671",
+        "true_caption": "a person wearing black shoes cleaning a bookshelf with an orange duster while a person wearing green shoes drinks wine from an orange glass and relaxes",
+        "false_caption": "a person wearing green shoes cleaning a bookshelf with an orange duster while a person wearing black shoes drinks wine from an orange glass and relaxes",
+        "image_path": "data/winoground/raw/images/670.jpg"
+    },
+    {
+        "image_id": "675",
+        "true_caption": "yellow duck shoes on",
+        "false_caption": "yellow duck on shoes",
+        "image_path": "data/winoground/raw/images/674.jpg"
+    },
+    {
+        "image_id": "679",
+        "true_caption": "a bird cooking a person",
+        "false_caption": "a person cooking a bird",
+        "image_path": "data/winoground/raw/images/678.jpg"
+    },
+    {
+        "image_id": "683",
+        "true_caption": "a person wearing yellow with their feet in the air and a person wearing stripes",
+        "false_caption": "a person wearing stripes with their feet in the air and a person wearing yellow",
+        "image_path": "data/winoground/raw/images/682.jpg"
+    },
+    {
+        "image_id": "687",
+        "true_caption": "together hammering something",
+        "false_caption": "hammering something together",
+        "image_path": "data/winoground/raw/images/686.jpg"
+    },
+    {
+        "image_id": "691",
+        "true_caption": "a worker in a yellow hat uses a drill to the left of where the opening in the wall is",
+        "false_caption": "the opening in the wall is to the left of where a worker in a yellow hat uses a drill",
+        "image_path": "data/winoground/raw/images/690.jpg"
+    },
+    {
+        "image_id": "695",
+        "true_caption": "A right hand pulls a glove onto a left hand",
+        "false_caption": "A left hand pulls a glove onto a right hand",
+        "image_path": "data/winoground/raw/images/694.jpg"
+    },
+    {
+        "image_id": "699",
+        "true_caption": "A person whispering into a dog's ear",
+        "false_caption": "A dog whispering into a person's ear",
+        "image_path": "data/winoground/raw/images/698.jpg"
+    },
+    {
+        "image_id": "703",
+        "true_caption": "walking someone cut lines into green plants",
+        "false_caption": "someone walking lines cut into green plants",
+        "image_path": "data/winoground/raw/images/702.jpg"
+    },
+    {
+        "image_id": "707",
+        "true_caption": "A child riding a bike and an adult",
+        "false_caption": "A child and an adult riding a bike",
+        "image_path": "data/winoground/raw/images/706.jpg"
+    },
+    {
+        "image_id": "711",
+        "true_caption": "An adult wearing purple lying next to a child",
+        "false_caption": "An adult lying next to a child wearing purple",
+        "image_path": "data/winoground/raw/images/710.jpg"
+    },
+    {
+        "image_id": "715",
+        "true_caption": "a person with long braids is exercising in front of a person without braids",
+        "false_caption": "a person without braids is exercising in front of a person with long braids",
+        "image_path": "data/winoground/raw/images/714.jpg"
+    },
+    {
+        "image_id": "719",
+        "true_caption": "butchering white meat while wearing yellow but not red",
+        "false_caption": "butchering red meat while wearing white but not yellow",
+        "image_path": "data/winoground/raw/images/718.jpg"
+    },
+    {
+        "image_id": "723",
+        "true_caption": "on halloween, a child dressed as an insect is to the right of a child dressed as a mammal",
+        "false_caption": "on halloween, a child dressed as a mammal is to the right of a child dressed as an insect",
+        "image_path": "data/winoground/raw/images/722.jpg"
+    },
+    {
+        "image_id": "727",
+        "true_caption": "a tree is partially inside a parked car",
+        "false_caption": "a parked car is partially inside a tree",
+        "image_path": "data/winoground/raw/images/726.jpg"
+    },
+    {
+        "image_id": "731",
+        "true_caption": "an athlete running on water",
+        "false_caption": "water running on an athlete",
+        "image_path": "data/winoground/raw/images/730.jpg"
+    },
+    {
+        "image_id": "735",
+        "true_caption": "the glasses full of water are above the person's head and leg",
+        "false_caption": "the person's head and leg are above the glasses full of water",
+        "image_path": "data/winoground/raw/images/734.jpg"
+    },
+    {
+        "image_id": "739",
+        "true_caption": "a deer's nose is resting on a child's hand",
+        "false_caption": "a child's hand is resting on a deer's nose",
+        "image_path": "data/winoground/raw/images/738.jpg"
+    },
+    {
+        "image_id": "743",
+        "true_caption": "an animal giving a person food",
+        "false_caption": "a person giving an animal food",
+        "image_path": "data/winoground/raw/images/742.jpg"
+    },
+    {
+        "image_id": "747",
+        "true_caption": "a car going into a hollow tube",
+        "false_caption": "a hollow tube going into a car",
+        "image_path": "data/winoground/raw/images/746.jpg"
+    },
+    {
+        "image_id": "751",
+        "true_caption": "living things drinking",
+        "false_caption": "drinking living things",
+        "image_path": "data/winoground/raw/images/750.jpg"
+    },
+    {
+        "image_id": "755",
+        "true_caption": "a person spraying water on someone else and a person on a bike",
+        "false_caption": "a person spraying water on a person on a bike and someone else",
+        "image_path": "data/winoground/raw/images/754.jpg"
+    },
+    {
+        "image_id": "759",
+        "true_caption": "a person carrying more than one flotation device",
+        "false_caption": "more than one flotation device carrying a person",
+        "image_path": "data/winoground/raw/images/758.jpg"
+    },
+    {
+        "image_id": "763",
+        "true_caption": "gears for moving something",
+        "false_caption": "moving gears for something",
+        "image_path": "data/winoground/raw/images/762.jpg"
+    },
+    {
+        "image_id": "767",
+        "true_caption": "a toy herbivore stands on top of at least one toy carnivore",
+        "false_caption": "at least one toy herbivore stands on top of a toy carnivore",
+        "image_path": "data/winoground/raw/images/766.jpg"
+    },
+    {
+        "image_id": "771",
+        "true_caption": "a person smiles at another person wearing a checked shirt who is hitting a ping pong ball",
+        "false_caption": "a person wearing a checked shirt smiles at another person who is hitting a ping pong ball",
+        "image_path": "data/winoground/raw/images/770.jpg"
+    },
+    {
+        "image_id": "775",
+        "true_caption": "There are not pink flowers below the bird with yellow head feathers",
+        "false_caption": "There are pink flowers not below the bird with yellow head feathers",
+        "image_path": "data/winoground/raw/images/774.jpg"
+    },
+    {
+        "image_id": "779",
+        "true_caption": "water is on and under a vessel",
+        "false_caption": "a vessel is on and under water",
+        "image_path": "data/winoground/raw/images/778.jpg"
+    },
+    {
+        "image_id": "783",
+        "true_caption": "The worker wears something striped over a white undershirt with a collar",
+        "false_caption": "The worker wears something white over a striped undershirt with a collar",
+        "image_path": "data/winoground/raw/images/782.jpg"
+    },
+    {
+        "image_id": "787",
+        "true_caption": "head in the clouds",
+        "false_caption": "clouds in the head",
+        "image_path": "data/winoground/raw/images/786.jpg"
+    },
+    {
+        "image_id": "791",
+        "true_caption": "They have sunglasses over their hair",
+        "false_caption": "They have hair over their sunglasses",
+        "image_path": "data/winoground/raw/images/790.jpg"
+    },
+    {
+        "image_id": "795",
+        "true_caption": "a large living thing in front of a large non-living thing",
+        "false_caption": "a large non-living thing in front of a large living thing",
+        "image_path": "data/winoground/raw/images/794.jpg"
+    },
+    {
+        "image_id": "799",
+        "true_caption": "someone is overdoing it",
+        "false_caption": "someone is doing it over",
+        "image_path": "data/winoground/raw/images/798.jpg"
+    }
+]
