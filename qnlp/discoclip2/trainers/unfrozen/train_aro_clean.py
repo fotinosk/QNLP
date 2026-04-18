@@ -12,6 +12,7 @@ from torchmetrics import MeanMetric
 from tqdm import trange
 
 from qnlp.discoclip2.dataset.aro_dataloader import get_aro_dataloader
+from qnlp.discoclip2.image_transforms.aro import create_aro_image_transforms
 from qnlp.discoclip2.models.einsum_model import EinsumModel, get_einsum_model
 from qnlp.discoclip2.models.image_model import TTNImageModel, image_model_hyperparams
 from qnlp.discoclip2.models.loss import create_loss_functions
@@ -23,7 +24,7 @@ from qnlp.utils.seeding import set_seed
 from qnlp.utils.torch_utils import create_checkpoint_path, get_device
 from qnlp.utils.training_notifications import send_training_finished_notification
 
-EXPERIMENT_NAME = "train_vlm_on_aro"
+EXPERIMENT_NAME = "train_vlm_on_aro_and_wino"
 ts_string = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 checkpoint_path = create_checkpoint_path(EXPERIMENT_NAME, ts_string)
 logger = setup_logger(log_name=EXPERIMENT_NAME, ts_string=ts_string)
@@ -292,7 +293,14 @@ def run_training():
         mlflow.log_params(image_model_hyperparams.model_dump())
 
         # get datasets and dataloaders
-        loaders, datasets = get_aro_dataloader(batch_size=hyperparams.batch_size, return_images=True)
+        preprocess, val_preprocess = create_aro_image_transforms(image_model_hyperparams.image_size)
+
+        loaders, datasets = get_aro_dataloader(
+            batch_size=hyperparams.batch_size,
+            return_images=True,
+            train_process_function=preprocess,
+            val_process_function=val_preprocess,
+        )
         train_loader, val_loader, test_loader = loaders
         train_ds, val_ds, test_ds = datasets
 

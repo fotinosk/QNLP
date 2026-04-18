@@ -71,7 +71,7 @@ class EinsumModel(nn.Module):
             idx = sym2idx[sym]
             if self.weights[idx].shape != tensor.shape:
                 raise ValueError(
-                    f"Shape mismatch for symbol '{sym}': " f"expected {self.weights[idx].shape}, got {tensor.shape}"
+                    f"Shape mismatch for symbol '{sym}': expected {self.weights[idx].shape}, got {tensor.shape}"
                 )
             with torch.no_grad():
                 self.weights[idx].data.copy_(tensor.data)
@@ -108,7 +108,6 @@ class EinsumModel(nn.Module):
     def _forward_single(self, input: tuple[str, List[Symbol]]) -> torch.Tensor:
         einsum_expr, symbols = input
 
-        # return einsum(einsum_expr, *[self.sym2weight[sym] for sym in symbols])
         x = einsum(einsum_expr, *[self.sym2weight[sym] for sym in symbols])
         return nn.functional.normalize(x, dim=-1)
 

@@ -4,7 +4,6 @@ import torch
 from einops import rearrange
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from torch import nn
-from torchvision.transforms import v2
 
 from qnlp.discoclip2.models.cp_node import CPQuadRankLayer
 
@@ -20,29 +19,6 @@ class ImageModelSettings(BaseSettings):
 
 
 image_model_hyperparams = ImageModelSettings()
-
-transforms = [
-    v2.RandomCrop(image_model_hyperparams.image_size, padding=4, padding_mode="reflect"),
-    v2.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
-    v2.RandomHorizontalFlip(p=0.5),
-    v2.PILToTensor(),
-    v2.ToDtype(torch.float32, scale=True),
-]
-if not image_model_hyperparams.use_color:
-    transforms.append(v2.Grayscale())
-transforms.append(v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
-preprocess = v2.Compose(transforms)
-
-
-val_transforms = [
-    v2.Resize((image_model_hyperparams.image_size, image_model_hyperparams.image_size)),
-    v2.PILToTensor(),
-    v2.ToDtype(torch.float32, scale=True),
-]
-if not image_model_hyperparams.use_color:
-    val_transforms.append(v2.Grayscale())
-transforms.append(v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
-val_preprocess = v2.Compose(val_transforms)
 
 
 class TTNImageModel(nn.Module):

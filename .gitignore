@@ -25,3 +25,4 @@ fil-result/
 mlflow_experiments/*
 .idea
 mlartifacts
+.zed
