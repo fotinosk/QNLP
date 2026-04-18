@@ -1,0 +1,73 @@
+from datetime import datetime
+
+import torch
+from torch.utils.data import DataLoader
+
+from qnlp.discoviz.dataset.aro_dataset import ProcessedARODataset, aro_tn_collate_fn
+from qnlp.discoviz.image_transforms.aro import create_aro_image_transforms
+from qnlp.discoviz.models.einsum_model import EinsumModel
+from qnlp.discoviz.models.image_model import TTNImageModel, image_model_hyperparams
+from qnlp.discoviz.models.loss import create_loss_functions
+from qnlp.discoviz.trainers.unfrozen.train_aro_clean import ModelSettings, evaluate_models
+from qnlp.utils.logging import get_log_file_path, setup_logger
+from qnlp.utils.mlflow_utils import setup_mlflow_run
+from qnlp.utils.seeding import set_seed
+from qnlp.utils.torch_utils import get_device
+
+EXPERIMENT_NAME = "test_aro_on_winoground"
+ts_string = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+logger = setup_logger(log_name=EXPERIMENT_NAME, ts_string=ts_string)
+log_file_path = get_log_file_path(logger)
+hyperparams = ModelSettings()
+
+
+DEVICE = get_device()
+set_seed()
+
+DATA_PATH = "data/winoground/processed/test.json"
+# MODEL_PATH = "runs/checkpoints/train_vlm_on_aro/2026-02-23_20-02-49/best_model.pt"
+MODEL_PATH = "runs/checkpoints/train_vlm_on_aro_and_wino/2026-04-10_16-54-25/best_model.pt"
+
+
+if __name__ == "__main__":
+    best_checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
+
+    text_model = EinsumModel()
+    text_model.load_state_dict(best_checkpoint["text_model_state_dict"])
+    text_model = text_model.to(DEVICE)
+
+    image_model = TTNImageModel(hyperparams.embedding_dim)
+    image_model.load_state_dict(best_checkpoint["image_model_state_dict"])
+    image_model = image_model.to(DEVICE)
+
+    preprocess, val_preprocess = create_aro_image_transforms(image_model_hyperparams.image_size)
+
+    test_ds = ProcessedARODataset(data_path=DATA_PATH, return_images=True, image_processing_fn=val_preprocess)
+
+    test_loader = DataLoader(
+        test_ds,
+        batch_size=hyperparams.batch_size,
+        shuffle=False,
+        collate_fn=aro_tn_collate_fn,
+    )
+    print(len(test_ds))
+
+    contrastive_loss, hard_neg_loss = create_loss_functions(
+        temperature=hyperparams.temperature,
+        hard_neg_distance_function=hyperparams.hard_neg_distance_function,
+        margin=hyperparams.hard_neg_margin,
+        swap=hyperparams.hard_neg_swap,
+    )
+
+    with setup_mlflow_run(EXPERIMENT_NAME, hyperparams.model_dump(), 8080) as run:
+        test_acc = evaluate_models(
+            text_model=text_model,
+            image_model=image_model,
+            dataloader=test_loader,
+            contrastive_criterion=contrastive_loss,
+            hard_neg_criterion=hard_neg_loss,
+            hard_neg_loss_weight=hyperparams.hard_neg_loss_weight,
+            epoch=hyperparams.epochs + 1,
+            usage="test",
+        )
+        logger.info(f"Final acc on test set: {test_acc}")
