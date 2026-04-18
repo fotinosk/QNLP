@@ -4,8 +4,9 @@ import torch
 from torch.utils.data import DataLoader
 
 from qnlp.discoclip2.dataset.aro_dataset import ProcessedARODataset, aro_tn_collate_fn
+from qnlp.discoclip2.image_transforms.aro import create_aro_image_transforms
 from qnlp.discoclip2.models.einsum_model import EinsumModel
-from qnlp.discoclip2.models.image_model import TTNImageModel
+from qnlp.discoclip2.models.image_model import TTNImageModel, image_model_hyperparams
 from qnlp.discoclip2.models.loss import create_loss_functions
 from qnlp.discoclip2.trainers.unfrozen.train_aro_clean import ModelSettings, evaluate_models
 from qnlp.utils.logging import get_log_file_path, setup_logger
@@ -24,10 +25,11 @@ hyperparams = ModelSettings()
 DEVICE = get_device()
 set_seed()
 
-DATA_PATH = "data/aro/processed/visual_genome_relation/test.json"
+# DATA_PATH = "data/aro/processed/visual_genome_relation/test.json"
+DATA_PATH = "data/aro_and_wino/processed/test.json"
 # DATA_PATH = "data/aro/processed/visual_genome_attribution/test.json"
-IMAGES_PATH = "data/aro/raw/images/"
-MODEL_PATH = "runs/checkpoints/train_vlm_on_aro/2026-02-23_20-02-49/best_model.pt"
+# MODEL_PATH = "runs/checkpoints/train_vlm_on_aro/2026-02-23_20-02-49/best_model.pt"
+MODEL_PATH = "runs/checkpoints/train_vlm_on_aro_and_wino/2026-04-10_16-54-25/best_model.pt"
 
 
 if __name__ == "__main__":
@@ -41,7 +43,9 @@ if __name__ == "__main__":
     image_model.load_state_dict(best_checkpoint["image_model_state_dict"])
     image_model = image_model.to(DEVICE)
 
-    test_ds = ProcessedARODataset(data_path=DATA_PATH, image_dir_path=IMAGES_PATH, return_images=True, is_train=False)
+    preprocess, val_preprocess = create_aro_image_transforms(image_model_hyperparams.image_size)
+
+    test_ds = ProcessedARODataset(data_path=DATA_PATH, return_images=True, image_processing_fn=val_preprocess)
 
     test_loader = DataLoader(
         test_ds,

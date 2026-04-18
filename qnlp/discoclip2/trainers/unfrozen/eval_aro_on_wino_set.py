@@ -25,8 +25,8 @@ DEVICE = get_device()
 set_seed()
 
 DATA_PATH = "data/winoground/processed/test.json"
-IMAGES_PATH = "data/winoground/raw/images/"
-MODEL_PATH = "runs/checkpoints/train_vlm_on_aro/2026-02-23_20-02-49/best_model.pt"
+# MODEL_PATH = "runs/checkpoints/train_vlm_on_aro/2026-02-23_20-02-49/best_model.pt"
+MODEL_PATH = "runs/checkpoints/train_vlm_on_aro_and_wino/2026-04-10_16-54-25/best_model.pt"
 
 
 if __name__ == "__main__":
@@ -42,9 +42,7 @@ if __name__ == "__main__":
 
     preprocess, val_preprocess = create_aro_image_transforms(image_model_hyperparams.image_size)
 
-    test_ds = ProcessedARODataset(
-        data_path=DATA_PATH, image_dir_path=IMAGES_PATH, return_images=True, image_processing_fn=val_preprocess
-    )
+    test_ds = ProcessedARODataset(data_path=DATA_PATH, return_images=True, image_processing_fn=val_preprocess)
 
     test_loader = DataLoader(
         test_ds,
@@ -52,6 +50,7 @@ if __name__ == "__main__":
         shuffle=False,
         collate_fn=aro_tn_collate_fn,
     )
+    print(len(test_ds))
 
     contrastive_loss, hard_neg_loss = create_loss_functions(
         temperature=hyperparams.temperature,
