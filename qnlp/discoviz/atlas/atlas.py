@@ -122,6 +122,11 @@ class Atlas:
             image_storage_path=self.image_path,
         )
 
+        # Generate unique sample_ids based on atlas name and cursor location
+        n_rows = len(processed)
+        sample_ids = [f"{self.name}_{i}" for i in range(self.cursor_location, self.cursor_location + n_rows)]
+        processed = processed.with_columns(pl.Series("sample_id", sample_ids))
+
         if self.manifest.is_empty():
             self.manifest = processed
         else:
@@ -136,8 +141,8 @@ class Atlas:
 
 
 if __name__ == "__main__":
-    # coco_atlas = Atlas.create_atlas(
-    #     name="coco", source_path_or_url="hf://datasets/Multimodal-Fatima/COCO_captions_train/data/train-*-of-*.parquet"
-    # )
-    coco_atlas = Atlas.load_atlas(atlas_metadata_location="data/atlases/coco/metadata.json")
+    coco_atlas = Atlas.create_atlas(
+        name="coco", source_path_or_url="hf://datasets/Multimodal-Fatima/COCO_captions_train/data/train-*-of-*.parquet"
+    )
+    # coco_atlas = Atlas.load_atlas(atlas_metadata_location="data/atlases/coco/metadata.json")
     coco_atlas.ingest_data_from_remote(100)
