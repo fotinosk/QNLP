@@ -4,7 +4,7 @@ from typing import Self
 
 import polars as pl
 
-from qnlp.discoviz.atlas.hf_utils import fetch_hf_batch_lazily, save_images_and_clear_df
+from qnlp.core.data_engine.atlas.hf_utils import fetch_hf_batch_lazily, save_images_and_clear_df
 
 ATLAS_DIR = Path.cwd() / Path("data/atlases")
 

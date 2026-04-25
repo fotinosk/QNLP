@@ -3,7 +3,7 @@ from typing import List
 
 import polars as pl
 
-from qnlp.discoviz.processing.steps import PipelineStep
+from qnlp.core.data_engine.processing.steps import PipelineStep
 
 
 class Pipeline:
