@@ -27,3 +27,4 @@ mlflow_experiments/*
 mlartifacts
 .zed
 data/atlases/*
+llm/

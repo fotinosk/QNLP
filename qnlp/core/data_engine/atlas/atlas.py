@@ -4,9 +4,10 @@ from typing import Self
 
 import polars as pl
 
-from qnlp.discoviz.atlas.hf_utils import fetch_hf_batch_lazily, save_images_and_clear_df
+from qnlp.constants import constants
+from qnlp.core.data_engine.atlas.hf_utils import fetch_hf_batch_lazily, save_images_and_clear_df
 
-ATLAS_DIR = Path.cwd() / Path("data/atlases")
+ATLAS_DIR = Path.cwd() / constants.atlases_path
 
 
 class Atlas:
@@ -122,6 +123,11 @@ class Atlas:
             image_storage_path=self.image_path,
         )
 
+        # Generate unique sample_ids based on atlas name and cursor location
+        n_rows = len(processed)
+        sample_ids = [f"{self.name}_{i}" for i in range(self.cursor_location, self.cursor_location + n_rows)]
+        processed = processed.with_columns(pl.Series("sample_id", sample_ids))
+
         if self.manifest.is_empty():
             self.manifest = processed
         else:
@@ -133,11 +139,3 @@ class Atlas:
 
         self._save_metadata()
         print(f"Successfully ingested {len(processed)} records. Cursor at {self.cursor_location}.")
-
-
-if __name__ == "__main__":
-    # coco_atlas = Atlas.create_atlas(
-    #     name="coco", source_path_or_url="hf://datasets/Multimodal-Fatima/COCO_captions_train/data/train-*-of-*.parquet"
-    # )
-    coco_atlas = Atlas.load_atlas(atlas_metadata_location="data/atlases/coco/metadata.json")
-    coco_atlas.ingest_data_from_remote(100)
