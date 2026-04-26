@@ -1,31 +1,49 @@
 import datetime
 import logging
-import os
+import sys
+from pathlib import Path
 
 
-def setup_logger(log_path="./runs/logs", log_name="train_logger", ts_string: str | None = None):
+def setup_logger(
+    log_path: str | Path = "./runs/logs",
+    log_name: str = "train_logger",
+    ts_string: str | None = None,
+    console: bool = True,
+    level: int = logging.INFO,
+) -> logging.Logger:
     logger = logging.getLogger(log_name)
-    logger.setLevel(logging.INFO)
+    logger.setLevel(level)
+    logger.propagate = False  # Prevent duplicate logs if root logger is configured
 
     if logger.hasHandlers():
         logger.handlers.clear()
 
     if not ts_string:
         ts_string = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    full_log_path = os.path.join(log_path, f"{log_name}_{ts_string}.log")
 
-    os.makedirs(os.path.dirname(full_log_path), exist_ok=True)
+    log_dir = Path(log_path)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    full_log_path = log_dir / f"{log_name}_{ts_string}.log"
+
+    formatter = logging.Formatter("%(asctime)s | %(levelname)-8s | %(name)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
     # File handler
-    fh = logging.FileHandler(full_log_path)
-    fh.setLevel(logging.INFO)
-    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    fh = logging.FileHandler(full_log_path, encoding="utf-8")
+    fh.setLevel(level)
     fh.setFormatter(formatter)
     logger.addHandler(fh)
+
+    # Console handler
+    if console:
+        ch = logging.StreamHandler(sys.stdout)
+        ch.setLevel(level)
+        ch.setFormatter(formatter)
+        logger.addHandler(ch)
+
     return logger
 
 
-def get_log_file_path(logger):
+def get_log_file_path(logger: logging.Logger) -> str | None:
     for handler in logger.handlers:
         if isinstance(handler, logging.FileHandler):
             return handler.baseFilename
