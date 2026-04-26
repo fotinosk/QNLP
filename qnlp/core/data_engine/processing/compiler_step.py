@@ -9,9 +9,11 @@ from typing import Optional
 import lmdb
 import polars as pl
 
-from qnlp.core.data_engine.processing.steps import PipelineStep
+from qnlp.core.data_engine.processing.pipeline import PipelineStep
+from qnlp.utils.logging import setup_logger
 
 _worker_processor = None
+logger = setup_logger("ccg_parser")
 
 
 def _worker_init(bond_dim: int, embedding_dim: int, device: str, rules: list[str]):
@@ -77,9 +79,8 @@ class CCGCompilerStep(PipelineStep):
         embedding_dim: int = 50,
         device: str = "mps",
         max_workers: int = 2,
-        worker_batch_size: int = 10,
+        worker_batch_size: int = 1000,
         max_tasks_per_child: int = 5,
-        rules: Optional[list[str]] = None,
     ):
         self.lmdb_path = Path(lmdb_path)
         self.text_column = text_column
@@ -89,7 +90,7 @@ class CCGCompilerStep(PipelineStep):
         self.max_workers = max_workers
         self.worker_batch_size = worker_batch_size
         self.max_tasks_per_child = max_tasks_per_child
-        self.rules = rules or [
+        self.rules = [
             "auxiliary",
             "connector",
             "determiner",
@@ -114,10 +115,12 @@ class CCGCompilerStep(PipelineStep):
         return self._pool
 
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
+        logger.info(f"Starting CCGCompilerStep for chunk of size {len(df)}")
         if self.text_column not in df.columns:
             raise ValueError(f"Column '{self.text_column}' not found in DataFrame.")
 
         # 1. Hash texts for deduplication & LMDB keys
+        logger.debug("Hashing text column for deduplication...")
         df = df.with_columns(
             pl.col(self.text_column)
             .map_elements(
@@ -134,6 +137,7 @@ class CCGCompilerStep(PipelineStep):
         # 2. Check LMDB cache to skip already-compiled sentences
         unseen_mask = [True] * len(hashes)
         if self.lmdb_path.exists():
+            logger.debug(f"Checking LMDB cache at {self.lmdb_path} for existing hashes...")
             env = lmdb.open(str(self.lmdb_path), max_readers=128, readonly=True, lock=False)
             with env.begin() as txn:
                 for i, h in enumerate(hashes):
@@ -144,9 +148,16 @@ class CCGCompilerStep(PipelineStep):
         unseen_indices = [i for i, m in enumerate(unseen_mask) if m]
         unseen_texts = [texts[i] for i in unseen_indices]
 
+        cached_count = len(texts) - len(unseen_texts)
+        logger.info(f"Cache check complete: {cached_count} already compiled, {len(unseen_texts)} need compilation.")
+
         # 3. Compile only unseen texts using recycled worker pool
         compiled_map: dict[str, bytes] = {}
         if unseen_texts:
+            logger.info(
+                f"Distributing {len(unseen_texts)} texts across {self.max_workers} workers "
+                "(batch size: {self.worker_batch_size})..."
+            )
             batches = [
                 unseen_texts[i : i + self.worker_batch_size]
                 for i in range(0, len(unseen_texts), self.worker_batch_size)
@@ -154,7 +165,12 @@ class CCGCompilerStep(PipelineStep):
 
             pool = self._get_pool()
             # imap_unordered yields results as workers finish, keeping memory low
+            processed_batches = 0
             for batch_results in pool.imap_unordered(_worker_process_batch, batches, chunksize=1):
+                processed_batches += 1
+                if processed_batches % max(1, len(batches) // 5) == 0:
+                    logger.debug(f"Compiled {processed_batches}/{len(batches)} batches...")
+
                 for res in batch_results:
                     h = hashlib.sha256(res["text"].encode("utf-8")).hexdigest()
                     payload = {
@@ -162,7 +178,10 @@ class CCGCompilerStep(PipelineStep):
                         "symbols": res["symbols"],
                         "error": res["error"],
                     }
+                    if res["error"]:
+                        logger.warning(f"Compilation error for text '{res['text'][:50]}...': {res['error']}")
                     compiled_map[h] = json.dumps(payload).encode("utf-8")
+            logger.info("Compilation complete.")
 
         # 4. Attach compiled bytes (None for cached/failed rows)
         compiled_bytes = [compiled_map.get(h) for h in hashes]

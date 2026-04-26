@@ -1,11 +1,17 @@
 from pathlib import Path
+from typing import Protocol
 
 import polars as pl
 
-from qnlp.core.data_engine.processing.steps import PipelineStep
 from qnlp.utils.logging import setup_logger
 
 logger = setup_logger(log_name="processing_pipeline")
+
+
+class PipelineStep(Protocol):
+    def process(self, df: pl.DataFrame) -> pl.DataFrame:
+        """Process a dataframe chunk and return the modified dataframe."""
+        ...
 
 
 class Pipeline:
@@ -43,7 +49,9 @@ class Pipeline:
 
     def _process_chunk(self, chunk_df: pl.DataFrame) -> tuple[pl.DataFrame, dict[str, bytes]]:
         """Apply pipeline steps, validate, resolve paths, and extract LMDB payloads."""
-        for step in self.steps:
+        logger.info(f"Processing chunk with {len(self.steps)} step(s)...")
+        for i, step in enumerate(self.steps):
+            logger.debug(f"Running step {i + 1}/{len(self.steps)}: {step.__class__.__name__}")
             chunk_df = step.process(chunk_df)
 
         if "sample_id" not in chunk_df.columns:
@@ -96,10 +104,13 @@ class Pipeline:
 
     def run(self, chunk_size: int = 1000, dry_run: bool = False) -> None:
         """Execute the pipeline across all unprocessed samples."""
+        logger.info("Starting pipeline execution")
         delta_sample_ids = self._get_delta_sample_ids()
         if not delta_sample_ids:
             logger.info("No new data to process.")
             return
+
+        logger.info(f"Detected {len(delta_sample_ids)} new row(s) to process.")
 
         total_chunks = (len(delta_sample_ids) + chunk_size - 1) // chunk_size
 

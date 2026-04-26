@@ -16,7 +16,19 @@ class COCOFlattenStep:
         self.list_column = list_column
 
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
-        if self.list_column in df.columns:
-            # explode() duplicates all other columns for each item in the list
-            return df.explode(self.list_column)
+        return df.explode(self.list_column)
+
+
+class SchemaMappingStep:
+    def __init__(self, column_mapping: dict[str, str]):
+        """
+        Maps arbitrary raw columns to standard target columns.
+        e.g., {"raw_caption_column": "processed_text"}
+        """
+        self.column_mapping = column_mapping
+
+    def process(self, df: pl.DataFrame) -> pl.DataFrame:
+        rename_dict = {k: v for k, v in self.column_mapping.items() if k in df.columns}
+        if rename_dict:
+            df = df.rename(rename_dict)
         return df
