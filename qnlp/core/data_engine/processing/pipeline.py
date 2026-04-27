@@ -91,17 +91,17 @@ class Pipeline:
             with env.begin(write=True) as txn:
                 kv_pairs = ((k.encode("utf-8"), v) for k, v in entries.items())
                 curs = txn.cursor()
-                written = curs.putmulti(kv_pairs, overwrite=True)
+                consumed, added = curs.putmulti(kv_pairs, overwrite=True)
 
-                if written != len(entries):
+                if added != len(entries):
                     logger.warning(
                         "Chunk %d: LMDB putmulti wrote %d/%d entries. Duplicates or errors may have occurred.",
                         chunk_idx,
-                        written,
+                        added,
                         len(entries),
                     )
                 else:
-                    logger.info(f"Chunk {chunk_idx}: Successfully wrote {written} entries to LMDB.")
+                    logger.info(f"Chunk {chunk_idx}: Successfully wrote {added} entries to LMDB.")
         finally:
             env.close()
 
