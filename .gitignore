@@ -28,3 +28,4 @@ mlartifacts
 .zed
 data/atlases/*
 llm/
+*.mdb

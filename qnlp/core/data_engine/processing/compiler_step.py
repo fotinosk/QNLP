@@ -13,7 +13,7 @@ from qnlp.core.data_engine.processing.pipeline import PipelineStep
 from qnlp.utils.logging import setup_logger
 
 _worker_processor = None
-logger = setup_logger("ccg_parser")
+logger = setup_logger(log_name="ccg_parser")
 
 
 def _worker_init(bond_dim: int, embedding_dim: int, device: str, rules: list[str]):
@@ -156,7 +156,7 @@ class CCGCompilerStep(PipelineStep):
         if unseen_texts:
             logger.info(
                 f"Distributing {len(unseen_texts)} texts across {self.max_workers} workers "
-                "(batch size: {self.worker_batch_size})..."
+                f"(batch size: {self.worker_batch_size})..."
             )
             batches = [
                 unseen_texts[i : i + self.worker_batch_size]
@@ -194,9 +194,22 @@ class CCGCompilerStep(PipelineStep):
     def teardown(self) -> None:
         """Gracefully shut down the worker pool. Call after pipeline.run()."""
         if self._pool is not None:
-            self._pool.close()
-            self._pool.join()
-            self._pool = None
+            try:
+                self._pool.close()
+                self._pool.join()
+            except Exception:
+                pass
+            finally:
+                self._pool = None
 
     def __del__(self):
-        self.teardown()
+        try:
+            # Only attempt teardown if modules are still loaded
+            # During interpreter shutdown, globals like mp or logger might be None
+            import sys
+
+            if mp is not None and getattr(sys, "is_finalizing", lambda: False)():
+                return
+            self.teardown()
+        except Exception:
+            pass

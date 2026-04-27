@@ -32,3 +32,19 @@ class SchemaMappingStep:
         if rename_dict:
             df = df.rename(rename_dict)
         return df
+
+
+class RemoveTrailingDotsStep:
+    """
+    Removes trailing dots from sentences to avoid CCG parsing errors
+    like 'Bobcat failed to parse'.
+    """
+
+    def __init__(self, text_column: str = "processed_text"):
+        self.text_column = text_column
+
+    def process(self, df: pl.DataFrame) -> pl.DataFrame:
+        if self.text_column not in df.columns:
+            return df
+
+        return df.with_columns(pl.col(self.text_column).str.replace(r"\.+$", "").alias(self.text_column))

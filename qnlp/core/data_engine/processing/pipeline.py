@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Protocol
 
+import lmdb
 import polars as pl
 
 from qnlp.utils.logging import setup_logger
@@ -57,13 +58,6 @@ class Pipeline:
         if "sample_id" not in chunk_df.columns:
             raise ValueError("Pipeline step dropped required column 'sample_id'")
 
-        if "local_image_path" in chunk_df.columns:
-            chunk_df = chunk_df.with_columns(
-                pl.col("local_image_path")
-                .map_elements(lambda p: str(Path(p).resolve()), return_dtype=pl.String, skip_nulls=True)
-                .alias("local_image_path")
-            )
-
         lmdb_entries: dict[str, bytes] = {}
         if {"compiled_bytes", "text_hash"}.issubset(chunk_df.columns):
             valid = chunk_df.filter(pl.col("compiled_bytes").is_not_null())
@@ -79,28 +73,43 @@ class Pipeline:
 
         return chunk_df, lmdb_entries
 
-    def _write_lmdb_chunk(self, env, entries: dict[str, bytes], chunk_idx: int) -> None:
+    def _write_lmdb_chunk(self, entries: dict[str, bytes], chunk_idx: int) -> None:
         """Atomically write compiled bytes to LMDB using batched cursor."""
-        if not entries or not env:
+        if not entries or not self.lmdb_path:
+            logger.info(f"Chunk {chunk_idx}: No LMDB entries to write.")
             return
 
-        with env.begin(write=True) as txn:
-            kv_pairs = ((k.encode("utf-8"), v) for k, v in entries.items())
-            curs = txn.cursor()
-            written = curs.putmulti(kv_pairs, overwrite=True)
+        env = lmdb.open(
+            str(self.lmdb_path),
+            max_readers=128,
+            map_size=self.lmdb_map_size,
+            create=True,
+            writemap=True,
+        )
 
-            if written != len(entries):
-                logger.warning(
-                    "Chunk %d: LMDB putmulti wrote %d/%d entries. Duplicates or errors may have occurred.",
-                    chunk_idx,
-                    written,
-                    len(entries),
-                )
+        try:
+            with env.begin(write=True) as txn:
+                kv_pairs = ((k.encode("utf-8"), v) for k, v in entries.items())
+                curs = txn.cursor()
+                written = curs.putmulti(kv_pairs, overwrite=True)
+
+                if written != len(entries):
+                    logger.warning(
+                        "Chunk %d: LMDB putmulti wrote %d/%d entries. Duplicates or errors may have occurred.",
+                        chunk_idx,
+                        written,
+                        len(entries),
+                    )
+                else:
+                    logger.info(f"Chunk {chunk_idx}: Successfully wrote {written} entries to LMDB.")
+        finally:
+            env.close()
 
     def _write_parquet_chunk(self, df: pl.DataFrame, chunk_offset: int) -> None:
         """Write processed metadata to Parquet."""
         chunk_path = self.derived_dir / f"chunk_{chunk_offset:06d}.parquet"
         df.write_parquet(chunk_path)
+        logger.info(f"Successfully wrote {len(df)} metadata rows to Parquet chunk: {chunk_path.name}")
 
     def run(self, chunk_size: int = 1000, dry_run: bool = False) -> None:
         """Execute the pipeline across all unprocessed samples."""
@@ -119,44 +128,34 @@ class Pipeline:
             if self.lmdb_path:
                 self.lmdb_path.parent.mkdir(parents=True, exist_ok=True)
 
-        lmdb_env = None
-        if not dry_run and self.lmdb_path:
-            import lmdb
+        raw_lf = pl.scan_parquet(self.data_manifest_path)
+        for i in range(0, len(delta_sample_ids), chunk_size):
+            chunk_idx = i // chunk_size + 1
+            chunk_ids = delta_sample_ids[i : i + chunk_size]
+            chunk_df = raw_lf.filter(pl.col("sample_id").is_in(chunk_ids)).collect()
 
-            lmdb_env = lmdb.open(
-                str(self.lmdb_path),
-                max_readers=128,
-                map_size=self.lmdb_map_size,
-                create=True,
-                writemap=True,
-            )
+            if "local_image_path" in chunk_df.columns:
+                chunk_df = chunk_df.with_columns(
+                    pl.col("local_image_path")
+                    .map_elements(lambda p: str(Path(p).resolve()), return_dtype=pl.String, skip_nulls=True)
+                    .alias("local_image_path")
+                )
 
-        try:
-            raw_lf = pl.scan_parquet(self.data_manifest_path)
-            for i in range(0, len(delta_sample_ids), chunk_size):
-                chunk_idx = i // chunk_size + 1
-                chunk_ids = delta_sample_ids[i : i + chunk_size]
-                chunk_df = raw_lf.filter(pl.col("sample_id").is_in(chunk_ids)).collect()
+            processed_df, lmdb_entries = self._process_chunk(chunk_df)
 
-                processed_df, lmdb_entries = self._process_chunk(chunk_df)
-
-                if dry_run:
-                    logger.info(
-                        "[DRY RUN] Chunk %d/%d | Schema: %s | Shape: %s",
-                        chunk_idx,
-                        total_chunks,
-                        processed_df.columns,
-                        processed_df.shape,
-                    )
-                    if i == 0:
-                        logger.info("Sample output:\n%s", processed_df.head(3))
-                else:
-                    self._write_lmdb_chunk(lmdb_env, lmdb_entries, chunk_idx)
-                    self._write_parquet_chunk(processed_df, i)
-
-        finally:
-            if lmdb_env:
-                lmdb_env.close()
+            if dry_run:
+                logger.info(
+                    "[DRY RUN] Chunk %d/%d | Schema: %s | Shape: %s",
+                    chunk_idx,
+                    total_chunks,
+                    processed_df.columns,
+                    processed_df.shape,
+                )
+                if i == 0:
+                    logger.info("Sample output:\n%s", processed_df.head(3))
+            else:
+                self._write_lmdb_chunk(lmdb_entries, chunk_idx)
+                self._write_parquet_chunk(processed_df, i)
 
         mode_str = "[DRY RUN] " if dry_run else ""
         logger.info("%sProcessed and committed %d records in %d chunks.", mode_str, len(delta_sample_ids), total_chunks)

@@ -10,7 +10,7 @@ class Constants(BaseSettings):
     embedding_dim: int = 512
     bond_dim: int = 10
     atlases_path: Path = Path("data/atlases/")
-    lmdb_path: Path = Path("sentence_mapping/")
+    lmdb_path: Path = Path("data/sentence_mapping/")
     splits_path: Path = Path("data/splits/")
     logs_path: Path = Path("runs/logs/")
     checkpoints_path: Path = Path("runs/checkpoints/")

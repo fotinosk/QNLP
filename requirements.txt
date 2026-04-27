@@ -22,3 +22,4 @@ torchvision==0.24.0
 torchviz==0.0.3
 tqdm==4.67.1
 lmdb==2.2.0
+lemminflext==0.2.3
