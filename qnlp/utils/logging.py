@@ -25,7 +25,11 @@ def setup_logger(
     log_dir.mkdir(parents=True, exist_ok=True)
     full_log_path = log_dir / f"{log_name}_{ts_string}.log"
 
-    formatter = logging.Formatter("%(asctime)s | %(levelname)-8s | %(name)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    formatter = logging.Formatter(
+        "%(levelname)-8s | %(asctime)s | %(filename)s:%(lineno)d \
+        | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
 
     # File handler
     fh = logging.FileHandler(full_log_path, encoding="utf-8")

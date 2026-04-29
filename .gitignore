@@ -29,3 +29,4 @@ mlartifacts
 data/atlases/*
 llm/
 *.mdb
+data/datasets/*

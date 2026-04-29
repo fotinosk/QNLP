@@ -23,3 +23,4 @@ torchviz==0.0.3
 tqdm==4.67.1
 lmdb==2.2.0
 lemminflext==0.2.3
+orjson==3.11.8
