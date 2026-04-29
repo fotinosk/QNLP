@@ -14,6 +14,7 @@ class Constants(BaseSettings):
     splits_path: Path = Path("data/splits/")
     logs_path: Path = Path("runs/logs/")
     checkpoints_path: Path = Path("runs/checkpoints/")
+    datasets_path: Path = Path("data/datasets/")
 
 
 constants = Constants()
