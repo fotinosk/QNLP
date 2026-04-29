@@ -57,7 +57,11 @@ class Atlas:
 
     @classmethod
     def create_atlas(
-        cls, name: str, source_path_or_url: str, image_column: str = "image", image_file_path_column: str = "filepath"
+        cls,
+        name: str,
+        source_path_or_url: str,
+        image_column: str = "image",
+        image_file_path_column: str = "filepath",
     ) -> Self:
         """Creates a new, blank Atlas and sets up the directory structure."""
         atlas_dir = ATLAS_DIR / name
@@ -80,7 +84,6 @@ class Atlas:
             image_file_path_column=image_file_path_column,
         )
 
-        # Explicitly create the image directory so the storage path exists
         instance.image_path.mkdir(parents=True, exist_ok=True)
         instance._save_metadata()
 
@@ -97,14 +100,12 @@ class Atlas:
             "image_file_path_column": self.image_file_path_column,
         }
 
-        # Write to temp file then replace to prevent corruption on crash
         temp_path = self.metadata_location.with_suffix(".tmp")
         with open(temp_path, "w") as f:
             json.dump(state, f, indent=4)
         temp_path.replace(self.metadata_location)
 
     def ingest_data_from_remote(self, n: int = 100) -> None:
-        # TODO: in local cases images are already downloaded somewhere else
         if not self._is_hf:
             raise NotImplementedError("Loading for local files not implemented yet")
 
@@ -123,7 +124,6 @@ class Atlas:
             image_storage_path=self.image_path,
         )
 
-        # Generate unique sample_ids based on atlas name and cursor location
         n_rows = len(processed)
         sample_ids = [f"{self.name}_{i}" for i in range(self.cursor_location, self.cursor_location + n_rows)]
         processed = processed.with_columns(pl.Series("sample_id", sample_ids))
@@ -136,6 +136,5 @@ class Atlas:
         self.manifest.write_parquet(self.data_manifest_location)
 
         self.cursor_location += n
-
         self._save_metadata()
-        print(f"Successfully ingested {len(processed)} records. Cursor at {self.cursor_location}.")
+        print(f"Successfully ingested {n_rows} records. Cursor at {self.cursor_location}.")
