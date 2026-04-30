@@ -67,7 +67,7 @@ class VLMDataset(Dataset):
 
         # Load images
         for col in self.image_columns:
-            img = torchvision.io.read_image(row[col])
+            img = torchvision.io.read_image(row[col]).float().div(255.0)
             if self.image_transform is not None:
                 img = self.image_transform(img)
             result[col] = img
