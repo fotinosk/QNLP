@@ -84,6 +84,12 @@ def enrich_atoms(derived_dirs: list[Path], lmdb_path: Path = constants.lmdb_path
     diag_df, sym_df = _fetch_lmdb_fields(atoms, lmdb_path)
     atoms = atoms.join(diag_df, on="text_hash", how="left").join(sym_df, on="text_hash", how="left")
 
+    before = len(atoms)
+    atoms = atoms.filter(pl.col("diagram").is_not_null() & pl.col("symbols").is_not_null())
+    dropped = before - len(atoms)
+    if dropped:
+        logger.warning(f"Dropped {dropped} atoms with null diagram/symbols (CCG compilation failures).")
+
     logger.info(f"Enriched {len(atoms)} atoms from {len(chunk_files)} chunk(s).")
     return atoms
 

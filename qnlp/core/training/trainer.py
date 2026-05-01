@@ -171,4 +171,5 @@ class Trainer:
     def _load_checkpoint(self) -> None:
         checkpoint = torch.load(self.checkpoint_path, map_location=self.device)
         self.model.load_state_dict(checkpoint["model_state_dict"])
+        self.model.to(self.device)
         logger.info(f"Loaded checkpoint from epoch {checkpoint['epoch']}.")

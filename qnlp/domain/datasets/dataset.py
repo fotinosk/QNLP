@@ -67,7 +67,7 @@ class VLMDataset(Dataset):
 
         # Load images
         for col in self.image_columns:
-            img = torchvision.io.read_image(row[col]).float().div(255.0)
+            img = torchvision.io.read_image(row[col], mode=torchvision.io.ImageReadMode.RGB).float().div(255.0)
             if self.image_transform is not None:
                 img = self.image_transform(img)
             result[col] = img
@@ -88,9 +88,47 @@ class VLMDataset(Dataset):
 
 
 def _deserialize_symbols(raw: str | list | None) -> list[Symbol]:
-    """Deserialize symbols from JSON string or raw list to Symbol objects."""
+    """Deserialize symbols stored as [sym_dict, size] pairs or plain sym_dicts."""
     if raw is None:
         return []
     if isinstance(raw, str):
         raw = orjson.loads(raw)
-    return [Symbol(**entry) if isinstance(entry, dict) else entry for entry in raw]
+    result = []
+    for entry in raw:
+        if isinstance(entry, dict):
+            result.append(Symbol(**entry))
+        elif isinstance(entry, (list, tuple)) and entry and isinstance(entry[0], dict):
+            # stored as [sym_dict, size_tuple] — strip the size
+            result.append(Symbol(**entry[0]))
+        else:
+            result.append(entry)
+    return result
+
+
+def collect_symbol_sizes(
+    datasets: list["VLMDataset"],
+    symbol_cols: list[str],
+) -> tuple[list[Symbol], list[tuple]]:
+    """
+    Collect unique (Symbol, size) pairs from pre-loaded dataset DataFrames.
+    Reads from the stored [sym_dict, size] format without loading any images.
+    Raises ValueError if a symbol appears with conflicting sizes.
+    """
+    seen: dict[Symbol, tuple] = {}
+    for ds in datasets:
+        for col in symbol_cols:
+            if col not in ds.df.columns:
+                continue
+            for raw in ds.df[col].to_list():
+                if raw is None:
+                    continue
+                entries = orjson.loads(raw) if isinstance(raw, str) else raw
+                for entry in entries:
+                    if not (isinstance(entry, (list, tuple)) and entry and isinstance(entry[0], dict)):
+                        continue
+                    sym = Symbol(**entry[0])
+                    size = tuple(entry[1]) if isinstance(entry[1], list) else entry[1]
+                    if sym in seen and seen[sym] != size:
+                        raise ValueError(f"Symbol {sym} has conflicting sizes: {seen[sym]} vs {size}")
+                    seen[sym] = size
+    return list(seen.keys()), list(seen.values())
