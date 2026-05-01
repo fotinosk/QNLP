@@ -1,3 +1,5 @@
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -6,34 +8,35 @@ from torch import Tensor
 
 class SymmetricInfoNCE(nn.Module):
     """
-    Symmetric InfoNCE loss (CLIP-style).
+    Symmetric InfoNCE loss (CLIP-style) with learnable temperature.
 
-    Computes contrastive loss in both directions — image→text and text→image —
-    and returns their mean. This doubles the gradient signal per batch compared
-    to single-direction InfoNCE and is the standard for single-caption datasets
-    where no explicit negatives are available.
+    The logit scale (1/temperature) is a learnable scalar parameter following
+    CLIP convention. It is clamped to prevent instability (equivalent to
+    keeping temperature in [0.01, 1.0]).
 
     Expects:
         image_embeddings:  [B, D]
         text_embeddings:   [B, D]
 
-    Both are L2-normalised internally; do not pre-normalise.
+    Both are L2-normalised internally.
     """
 
     def __init__(self, temperature: float = 0.07):
         super().__init__()
-        if temperature <= 0:
-            raise ValueError(f"Temperature must be positive, got {temperature}")
-        self.temperature = temperature
+        # logit_scale = log(1/temperature); exp(logit_scale) multiplies the logits
+        self.logit_scale = nn.Parameter(torch.tensor(math.log(1.0 / temperature)))
 
     def forward(self, image_emb: Tensor, text_emb: Tensor) -> tuple[Tensor, Tensor]:
         image_emb = F.normalize(image_emb, dim=-1)
         text_emb = F.normalize(text_emb, dim=-1)
 
+        # Clamp scale to [1/0.3, 100] → temperature stays in [0.01, 0.3]
+        logit_scale = self.logit_scale.exp().clamp(min=1 / 0.3, max=100.0)
+
         batch_size = image_emb.shape[0]
         labels = torch.arange(batch_size, device=image_emb.device)
 
-        logits = torch.matmul(image_emb, text_emb.t()) / self.temperature
+        logits = logit_scale * torch.matmul(image_emb, text_emb.t())
 
         i2t_loss = F.cross_entropy(logits, labels)
         t2i_loss = F.cross_entropy(logits.t(), labels)

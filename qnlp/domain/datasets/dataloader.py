@@ -34,7 +34,7 @@ def get_dataloaders(
     val_transform: Callable | None = None,
     image_columns: list[str] | None = None,
     compiled_columns: list[tuple[str, str, str]] | None = None,
-    num_workers: int = 0,
+    num_workers: int = 4,
 ) -> tuple[list[DataLoader], list[VLMDataset]]:
     """
     Build train/val/test DataLoaders from enriched parquet files.
@@ -71,26 +71,32 @@ def get_dataloaders(
         image_transform=val_transform,
     )
 
+    worker_kwargs = dict(
+        num_workers=num_workers,
+        persistent_workers=num_workers > 0,
+        prefetch_factor=2 if num_workers > 0 else None,
+    )
+
     train_loader = DataLoader(
         train_ds,
         batch_size=batch_size,
         shuffle=True,
         collate_fn=vlm_collate_fn,
-        num_workers=num_workers,
+        **worker_kwargs,
     )
     val_loader = DataLoader(
         val_ds,
         batch_size=batch_size,
         shuffle=False,
         collate_fn=vlm_collate_fn,
-        num_workers=num_workers,
+        **worker_kwargs,
     )
     test_loader = DataLoader(
         test_ds,
         batch_size=batch_size,
         shuffle=False,
         collate_fn=vlm_collate_fn,
-        num_workers=num_workers,
+        **worker_kwargs,
     )
 
     return [[train_loader, val_loader, test_loader], [train_ds, val_ds, test_ds]]

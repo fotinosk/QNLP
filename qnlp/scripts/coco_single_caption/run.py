@@ -5,35 +5,31 @@ import torch
 from torchvision import transforms
 
 from qnlp.constants import constants
-from qnlp.core.training.losses.contrastive import ContrastiveLoss
+from qnlp.core.training.losses.single_caption import SingleCaptionLoss
 from qnlp.core.training.trainer import Trainer
 from qnlp.discoviz.models.einsum_model import EinsumModel
 from qnlp.discoviz.models.image_model import TTNImageModel, image_model_hyperparams
 from qnlp.domain.datasets.dataloader import get_dataloaders
 from qnlp.domain.datasets.dataset import collect_symbol_sizes
 from qnlp.domain.models.vlm.contrastive_vlm import ContrastiveVLM
-from qnlp.scripts.aro_contrastive.config import ExperimentConfig
-from qnlp.scripts.aro_contrastive.step import AROContrastiveStep
+from qnlp.scripts.coco_single_caption.config import ExperimentConfig
+from qnlp.scripts.coco_single_caption.step import COCOSingleCaptionStep
 from qnlp.utils.logging import setup_logger
 from qnlp.utils.mlflow_utils import setup_mlflow_run
 from qnlp.utils.seeding import set_seed
 from qnlp.utils.torch_utils import get_device
 from qnlp.utils.training_notifications import send_training_finished_notification
 
-EXPERIMENT_NAME = "aro_contrastive"
+EXPERIMENT_NAME = "coco_single_caption"
 logger = setup_logger(log_name=EXPERIMENT_NAME)
 
 DATASETS_PATH = constants.datasets_path
+TRAIN_PARQUET = DATASETS_PATH / "coco_single_caption_train.parquet"
+VAL_PARQUET = DATASETS_PATH / "coco_single_caption_val.parquet"
+TEST_PARQUET = DATASETS_PATH / "coco_single_caption_test.parquet"
 
-TRAIN_PARQUET = DATASETS_PATH / "coco_contrastive_train.parquet"
-VAL_PARQUET = DATASETS_PATH / "coco_contrastive_val.parquet"
-TEST_PARQUET = DATASETS_PATH / "coco_contrastive_test.parquet"
-
-COMPILED_COLUMNS = [
-    ("true_diagram", "true_symbols", "true_caption"),
-    ("false_diagram", "false_symbols", "false_caption"),
-]
-SYMBOL_COLS = ["true_symbols", "false_symbols"]
+COMPILED_COLUMNS = [("diagram", "symbols", "caption")]
+SYMBOL_COLS = ["symbols"]
 
 
 def run():
@@ -78,14 +74,12 @@ def run():
     image_model = TTNImageModel(cfg.embedding_dim).to(device)
     model = ContrastiveVLM(text_model, image_model, embedding_dim=cfg.embedding_dim).to(device)
 
-    loss_fn = ContrastiveLoss(
+    loss_fn = SingleCaptionLoss(
         temperature=cfg.temperature,
-        triplet_weight=cfg.triplet_weight,
-        triplet_margin=cfg.triplet_margin,
-        distance=cfg.distance,
+        alignment_weight=cfg.alignment_weight,
     ).to(device)
 
-    step = AROContrastiveStep(loss_fn=loss_fn, device=device)
+    step = COCOSingleCaptionStep(loss_fn=loss_fn, device=device)
 
     optimizer = torch.optim.AdamW(
         [
@@ -103,6 +97,12 @@ def run():
                 "params": list(model.image_head.parameters()) + list(model.text_head.parameters()),
                 "lr": cfg.head_lr,
                 "weight_decay": cfg.head_weight_decay,
+            },
+            {
+                # Learnable temperature — no weight decay on a scalar parameter
+                "params": loss_fn.parameters(),
+                "lr": cfg.text_lr,
+                "weight_decay": 0.0,
             },
         ]
     )
@@ -126,7 +126,8 @@ def run():
             train_loader=train_loader,
             val_loader=val_loader,
             test_loader=test_loader,
-            monitor_metric="hard_neg_acc",
+            monitor_metric="loss",
+            minimize_metric=True,
             checkpoint_path=checkpoint_path,
             max_epochs=cfg.max_epochs,
             patience=cfg.patience,
@@ -137,7 +138,7 @@ def run():
 
         test_metrics = trainer.fit()
 
-        mlflow.log_artifact(checkpoint_path)
+        mlflow.log_artifact(str(checkpoint_path))
         send_training_finished_notification(
             {
                 "experiment": EXPERIMENT_NAME,

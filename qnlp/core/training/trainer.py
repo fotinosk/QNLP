@@ -69,6 +69,7 @@ class Trainer:
         patience: int = 10,
         min_delta: float = 0.0001,
         max_grad_norm: float = 1.0,
+        minimize_metric: bool = False,
         device: torch.device | None = None,
         scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
     ):
@@ -85,7 +86,7 @@ class Trainer:
         self.scheduler = scheduler
         self.device = device or torch.device("cpu")
 
-        self._early_stopping = EarlyStopping(patience=patience, min_delta=min_delta, minimize=False)
+        self._early_stopping = EarlyStopping(patience=patience, min_delta=min_delta, minimize=minimize_metric)
 
     def fit(self) -> dict[str, float]:
         """
