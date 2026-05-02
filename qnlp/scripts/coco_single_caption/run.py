@@ -79,7 +79,12 @@ def run():
         alignment_weight=cfg.alignment_weight,
     ).to(device)
 
-    step = COCOSingleCaptionStep(loss_fn=loss_fn, device=device)
+    step = COCOSingleCaptionStep(
+        loss_fn=loss_fn,
+        device=device,
+        warmup_epochs=cfg.alignment_warmup_epochs,
+        warmup_alignment_weight=cfg.alignment_weight,
+    )
 
     optimizer = torch.optim.AdamW(
         [
@@ -126,8 +131,8 @@ def run():
             train_loader=train_loader,
             val_loader=val_loader,
             test_loader=test_loader,
-            monitor_metric="loss",
-            minimize_metric=True,
+            monitor_metric="hard_neg_accuracy",
+            minimize_metric=False,
             checkpoint_path=checkpoint_path,
             max_epochs=cfg.max_epochs,
             patience=cfg.patience,

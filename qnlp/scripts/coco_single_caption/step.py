@@ -17,9 +17,21 @@ class COCOSingleCaptionStep:
         caption:           list of (diagram_str, [Symbol, ...]) — length B
     """
 
-    def __init__(self, loss_fn: SingleCaptionLoss, device):
+    def __init__(
+        self,
+        loss_fn: SingleCaptionLoss,
+        device,
+        warmup_epochs: int = 0,
+        warmup_alignment_weight: float = 0.0,
+    ):
         self.loss_fn = loss_fn
         self.device = device
+        self.warmup_epochs = warmup_epochs
+        self.warmup_alignment_weight = warmup_alignment_weight
+
+    def on_epoch_start(self, epoch: int) -> None:
+        """Switch alignment weight off after the warmup phase."""
+        self.loss_fn.alignment_weight = self.warmup_alignment_weight if epoch <= self.warmup_epochs else 0.0
 
     def __call__(
         self,

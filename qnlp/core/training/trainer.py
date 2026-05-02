@@ -95,6 +95,9 @@ class Trainer:
         best_epoch = 0
 
         for epoch in trange(1, self.max_epochs + 1, desc="Epochs"):
+            if hasattr(self.step, "on_epoch_start"):
+                self.step.on_epoch_start(epoch)
+
             train_metrics = self._run_epoch(self.train_loader, train=True)
             mlflow.log_metrics({f"train/epoch_{k}": v for k, v in train_metrics.items()}, step=epoch)
             logger.info(f"Epoch {epoch} train: {train_metrics}")
