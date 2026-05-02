@@ -1,4 +1,5 @@
 import polars as pl
+import pyinflect  # noqa: F401 — registers token._.inflect with spaCy
 import spacy
 
 from qnlp.core.data_engine.processing.pipeline import PipelineStep

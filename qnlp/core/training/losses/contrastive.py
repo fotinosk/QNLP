@@ -64,4 +64,5 @@ class ContrastiveLoss:
 
     def to(self, device: torch.device) -> "ContrastiveLoss":
         self._infonce = self._infonce.to(device)
+        self._triplet = self._triplet.to(device)
         return self

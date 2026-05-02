@@ -1,27 +1,25 @@
-from typing import Literal
-
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ExperimentConfig(BaseSettings):
     embedding_dim: int = 512
 
-    batch_size: int = 128
+    batch_size: int = 512
     text_lr: float = 0.001
     text_weight_decay: float = 0.001
-    image_lr: float = 0.00005
+    image_lr: float = 0.0002
     image_weight_decay: float = 0.05
-    head_lr: float = 0.001
-    head_weight_decay: float = 0.001
 
     max_epochs: int = 100
-    patience: int = 10
+    patience: int = 20
     min_delta: float = 0.0001
     max_grad_norm: float = 1.0
 
+    head_lr: float = 0.001
+    head_weight_decay: float = 0.001
+
     temperature: float = 0.07
-    triplet_weight: float = 40000.0
-    triplet_margin: float = 0.2
-    distance: Literal["cosine", "euclidean"] = "cosine"
+    alignment_weight: float = 0.5
+    alignment_warmup_epochs: int = 5
 
     model_config = SettingsConfigDict(env_prefix="ML_")

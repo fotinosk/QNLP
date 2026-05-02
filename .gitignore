@@ -27,6 +27,5 @@ mlflow_experiments/*
 mlartifacts
 .zed
 data/atlases/*
-llm/
 *.mdb
 data/datasets/*

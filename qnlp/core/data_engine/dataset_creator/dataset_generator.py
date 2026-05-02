@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import lmdb
@@ -10,6 +11,13 @@ from qnlp.core.data_engine.dataset_creator.composition_strategy import Compositi
 from qnlp.utils.logging import setup_logger
 
 logger = setup_logger(log_name="dataset_generator")
+
+
+def _is_1d_diagram(diagram: str) -> bool:
+    if "->" not in diagram:
+        return True
+    output_part = diagram.split("->")[1].strip()
+    return len(re.findall(r"[a-zA-Z]", output_part)) == 1
 
 
 def _fetch_lmdb_fields(atoms: pl.DataFrame, lmdb_path: Path) -> tuple[pl.DataFrame, pl.DataFrame]:
@@ -65,7 +73,11 @@ def _split_ids(
     )
 
 
-def enrich_atoms(derived_dirs: list[Path], lmdb_path: Path = constants.lmdb_path) -> pl.DataFrame:
+def enrich_atoms(
+    derived_dirs: list[Path],
+    lmdb_path: Path = constants.lmdb_path,
+    filter_2d_outputs: bool = True,
+) -> pl.DataFrame:
     """
     Read all chunk_*.parquet files from the given derived dirs, concatenate,
     and enrich each atom with diagram and symbols from LMDB.
@@ -89,6 +101,13 @@ def enrich_atoms(derived_dirs: list[Path], lmdb_path: Path = constants.lmdb_path
     dropped = before - len(atoms)
     if dropped:
         logger.warning(f"Dropped {dropped} atoms with null diagram/symbols (CCG compilation failures).")
+
+    if filter_2d_outputs:
+        before = len(atoms)
+        atoms = atoms.filter(pl.col("diagram").map_elements(_is_1d_diagram, return_dtype=pl.Boolean))
+        dropped_2d = before - len(atoms)
+        if dropped_2d:
+            logger.warning(f"Dropped {dropped_2d} atoms with 2D diagram outputs.")
 
     logger.info(f"Enriched {len(atoms)} atoms from {len(chunk_files)} chunk(s).")
     return atoms
@@ -119,6 +138,7 @@ def create_dataset(
     output_name: str,
     lmdb_path: Path = constants.lmdb_path,
     excluded_sample_ids: set[str] | None = None,
+    filter_2d_outputs: bool = True,
 ) -> Path:
     """
     Create a single dataset parquet by enriching atoms and applying a composition strategy.
@@ -129,7 +149,7 @@ def create_dataset(
         output_name: Written to data/datasets/<output_name>.parquet.
         excluded_sample_ids: sample_ids to exclude before composition (e.g. a held-out test set).
     """
-    atoms = enrich_atoms(derived_dirs, lmdb_path)
+    atoms = enrich_atoms(derived_dirs, lmdb_path, filter_2d_outputs=filter_2d_outputs)
 
     if excluded_sample_ids:
         before = len(atoms)
@@ -152,6 +172,7 @@ def create_train_val_test_datasets(
     lmdb_path: Path = constants.lmdb_path,
     ratios: tuple[float, float, float] = (0.8, 0.1, 0.1),
     seed: int = 42,
+    filter_2d_outputs: bool = True,
 ) -> tuple[Path, Path, Path]:
     """
     Create non-overlapping train/val/test datasets.
@@ -160,7 +181,7 @@ def create_train_val_test_datasets(
     never sees atoms from different splits — preventing data leakage
     in synthesis scenarios (e.g. random negative sampling).
     """
-    atoms = enrich_atoms(derived_dirs, lmdb_path)
+    atoms = enrich_atoms(derived_dirs, lmdb_path, filter_2d_outputs=filter_2d_outputs)
     train_atoms, val_atoms, test_atoms = split_by_groups(atoms, ratios, seed)
 
     paths = []
