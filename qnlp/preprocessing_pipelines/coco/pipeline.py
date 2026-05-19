@@ -10,7 +10,14 @@ schema_step = SchemaMappingStep(column_mapping={"sentences_raw": "processed_text
 remove_dots_step = RemoveTrailingDotsStep(text_column="processed_text")
 lemma_step = LemmatizeStep(text_column="processed_text")
 ccg_parsing_step = CCGCompilerStep(
-    lmdb_path=constants.lmdb_path, bond_dim=constants.bond_dim, embedding_dim=constants.embedding_dim
+    lmdb_path=constants.lmdb_path,
+    bond_dim=constants.bond_dim,
+    embedding_dim=constants.embedding_dim,
+    # BERT runs on GPU in the main process (single instance — CUDA can't fork),
+    # batched at parser_batch_size. Post-parse work runs on CPU across max_workers.
+    device="cuda",
+    parser_batch_size=64,
+    max_workers=8,
 )
 unification_step = UnifyEinsumRankStep()
 

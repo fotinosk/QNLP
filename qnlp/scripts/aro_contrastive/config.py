@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class ExperimentConfig(BaseSettings):
     embedding_dim: int = 512
 
-    batch_size: int = 128
+    batch_size: int = 1024
     text_lr: float = 0.001
     text_weight_decay: float = 0.001
     image_lr: float = 0.00005
