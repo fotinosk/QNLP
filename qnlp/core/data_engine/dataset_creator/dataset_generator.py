@@ -13,11 +13,14 @@ from qnlp.utils.logging import setup_logger
 logger = setup_logger(log_name="dataset_generator")
 
 
+_LETTER_RE = re.compile(r"[^\W\d_]", re.UNICODE)
+
+
 def _is_1d_diagram(diagram: str) -> bool:
     if "->" not in diagram:
         return True
-    output_part = diagram.split("->")[1].strip()
-    return len(re.findall(r"[a-zA-Z]", output_part)) == 1
+    output_part = diagram.rsplit("->", 1)[-1].strip()
+    return len(_LETTER_RE.findall(output_part)) == 1
 
 
 def _fetch_lmdb_fields(atoms: pl.DataFrame, lmdb_path: Path) -> tuple[pl.DataFrame, pl.DataFrame]:

@@ -30,10 +30,12 @@ class UnifyEinsumRankStep(PipelineStep):
         # Group 3: Matches the closing quote ('"')
         # Replacement: Keeps only Group 1, Group 2, and Group 3, effectively deleting the rest.
 
+        # \w matches unicode word chars; \d_ are excluded to keep only letters.
+        # Keeps the first output letter and drops any extras.
         return df.with_columns(
             pl.col("compiled_bytes")
             .cast(pl.String)
-            .str.replace(r'("diagram"\s*:\s*"[^"]*->)([a-zA-Z])[a-zA-Z]+(")', "${1}${2}${3}")
+            .str.replace(r'("diagram"\s*:\s*"[^"]*->)([^\W\d_])([^\W\d_])+(")', "${1}${2}${4}")
             .cast(pl.Binary)
             .alias("compiled_bytes")
         )

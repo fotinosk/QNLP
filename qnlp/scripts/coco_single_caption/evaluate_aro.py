@@ -162,7 +162,7 @@ def evaluate(
 
 if __name__ == "__main__":
     evaluate(
-        "runs/checkpoints/coco_single_caption/2026-05-01_22-36-22/best_model.pt",
+        "runs/checkpoints/coco_single_caption/2026-05-20_17-24-15/best_model.pt",
         parquet=SPLIT_PARQUETS["test"],
         batch_size=512,
     )

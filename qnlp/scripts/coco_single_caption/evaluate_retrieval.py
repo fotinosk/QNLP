@@ -240,7 +240,7 @@ def evaluate(
 
 if __name__ == "__main__":
     evaluate(
-        checkpoint_path=Path("runs/checkpoints/coco_single_caption/2026-05-02_00-59-08/best_model.pt"),
+        checkpoint_path=Path("runs/checkpoints/coco_single_caption/2026-05-01_22-36-22/best_model.pt"),
         parquet=SPLIT_PARQUETS["test"],
         batch_size=512,
     )
