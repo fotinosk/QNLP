@@ -10,8 +10,8 @@ class ExperimentConfig(BaseSettings):
     image_lr: float = 0.0002
     image_weight_decay: float = 0.05
 
-    max_epochs: int = 100
-    patience: int = 20
+    max_epochs: int = 20
+    patience: int = 5
     min_delta: float = 0.0001
     max_grad_norm: float = 1.0
 

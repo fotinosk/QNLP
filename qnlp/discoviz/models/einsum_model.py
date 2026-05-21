@@ -109,6 +109,13 @@ class EinsumModel(nn.Module):
         einsum_expr, symbols = input
 
         x = einsum(einsum_expr, *[self.sym2weight[sym] for sym in symbols])
+        if x.ndim != 1:
+            shapes = {str(sym): tuple(self.sym2weight[sym].shape) for sym in symbols}
+            raise RuntimeError(
+                f"Expected 1D output, got shape {tuple(x.shape)}\n"
+                f"  diagram: {einsum_expr}\n"
+                f"  symbol shapes: {shapes}"
+            )
         return nn.functional.normalize(x, dim=-1)
 
     def forward(self, inputs: List[tuple[str, List[Symbol]]]) -> torch.Tensor:

@@ -6,6 +6,7 @@ import polars as pl
 
 from qnlp.constants import constants
 from qnlp.core.data_engine.atlas.hf_utils import fetch_hf_batch_lazily, save_images_and_clear_df
+from qnlp.core.data_engine.atlas.local_utils import read_local_manifest, resolve_image_paths
 
 ATLAS_DIR = Path.cwd() / constants.atlases_path
 
@@ -104,6 +105,78 @@ class Atlas:
         with open(temp_path, "w") as f:
             json.dump(state, f, indent=4)
         temp_path.replace(self.metadata_location)
+
+    def ingest_data_from_local(
+        self,
+        manifest_path: str | Path,
+        image_path_column: str | None = None,
+        image_dir: str | Path | None = None,
+        image_filename_column: str | None = None,
+        n: int | None = None,
+    ) -> None:
+        """
+        Ingest from a local manifest file. Images are never copied — local_image_path
+        stores resolved absolute pointers to the original files.
+
+        Args:
+            manifest_path: Path to .parquet, .csv, .json, or .jsonl manifest.
+            image_path_column: Column in the manifest containing full image paths.
+            image_dir: Base directory when paths are bare filenames.
+            image_filename_column: Column of bare filenames (used with image_dir).
+            n: Max rows to ingest this call. None = ingest all remaining rows.
+        """
+        df = read_local_manifest(manifest_path)
+
+        # Apply cursor and optional row limit
+        remaining = df.slice(self.cursor_location)
+        if n is not None:
+            remaining = remaining.head(n)
+
+        if remaining.is_empty():
+            print("No more data to ingest.")
+            return
+
+        df = resolve_image_paths(
+            remaining,
+            image_path_column=image_path_column,
+            image_dir=image_dir,
+            image_filename_column=image_filename_column,
+        )
+
+        n_rows = len(df)
+        sample_ids = [f"{self.name}_{i}" for i in range(self.cursor_location, self.cursor_location + n_rows)]
+        df = df.with_columns(pl.Series("sample_id", sample_ids))
+
+        if self.manifest.is_empty():
+            self.manifest = df
+        else:
+            self.manifest = pl.concat([self.manifest, df], how="diagonal")
+
+        self.manifest.write_parquet(self.data_manifest_location)
+        self.cursor_location += n_rows
+        self._save_metadata()
+        print(f"Successfully ingested {n_rows} records. Cursor at {self.cursor_location}.")
+
+    def ingest_dataframe(self, df: pl.DataFrame) -> None:
+        """
+        Ingest a pre-prepared DataFrame. The caller is responsible for resolving
+        all image paths to absolute paths. Images are never copied — paths are
+        stored as-is. Useful for multi-image datasets (e.g. SVO, Winoground)
+        where a single local_image_path column is insufficient.
+        """
+        n_rows = len(df)
+        sample_ids = [f"{self.name}_{i}" for i in range(self.cursor_location, self.cursor_location + n_rows)]
+        df = df.with_columns(pl.Series("sample_id", sample_ids))
+
+        if self.manifest.is_empty():
+            self.manifest = df
+        else:
+            self.manifest = pl.concat([self.manifest, df], how="diagonal")
+
+        self.manifest.write_parquet(self.data_manifest_location)
+        self.cursor_location += n_rows
+        self._save_metadata()
+        print(f"Successfully ingested {n_rows} records. Cursor at {self.cursor_location}.")
 
     def ingest_data_from_remote(self, n: int = 100) -> None:
         if not self._is_hf:
