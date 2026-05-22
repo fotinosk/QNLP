@@ -2,7 +2,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ExperimentConfig(BaseSettings):
-    embedding_dim: int = 512
+    embedding_dim: int = 256
+    bond_dim: int = 20
 
     batch_size: int = 512
     text_lr: float = 0.001

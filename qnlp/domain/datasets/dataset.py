@@ -108,11 +108,18 @@ def _deserialize_symbols(raw: str | list | None) -> list[Symbol]:
 def collect_symbol_sizes(
     datasets: list["VLMDataset"],
     symbol_cols: list[str],
+    remap: dict[int, int] | None = None,
 ) -> tuple[list[Symbol], list[tuple]]:
     """
     Collect unique (Symbol, size) pairs from pre-loaded dataset DataFrames.
     Reads from the stored [sym_dict, size] format without loading any images.
     Raises ValueError if a symbol appears with conflicting sizes.
+
+    Args:
+        remap: Optional mapping of compiled dimension values to new values, e.g.
+            {512: 256, 10: 20} to change embedding_dim and bond_dim without
+            recompiling. Each dimension in every size tuple is replaced if it
+            appears as a key in the map.
     """
     seen: dict[Symbol, tuple] = {}
     for ds in datasets:
@@ -131,4 +138,8 @@ def collect_symbol_sizes(
                     if sym in seen and seen[sym] != size:
                         raise ValueError(f"Symbol {sym} has conflicting sizes: {seen[sym]} vs {size}")
                     seen[sym] = size
+
+    if remap:
+        seen = {sym: tuple(remap.get(d, d) for d in size) for sym, size in seen.items()}
+
     return list(seen.keys()), list(seen.values())

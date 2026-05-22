@@ -67,7 +67,11 @@ def run():
 
     logger.info(f"Train: {len(train_ds)} | Val: {len(val_ds)} | Test: {len(test_ds)}")
 
-    symbols, sizes = collect_symbol_sizes([train_ds, val_ds, test_ds], SYMBOL_COLS)
+    symbols, sizes = collect_symbol_sizes(
+        [train_ds, val_ds, test_ds],
+        SYMBOL_COLS,
+        remap={constants.embedding_dim: cfg.embedding_dim, constants.bond_dim: cfg.bond_dim},
+    )
     logger.info(f"Collected {len(symbols)} unique symbols.")
 
     text_model = EinsumModel(symbols, sizes).to(device)
