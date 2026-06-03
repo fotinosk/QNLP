@@ -18,8 +18,8 @@ class Atlas:
         source_path_or_url: str,
         data_manifest_location: Path,
         cursor_location: int,
-        image_column: str = "image",
-        image_file_path_column: str = "filepath",
+        image_column: str | list[str] = "image",
+        image_file_path_column: str | list[str] | None = "filepath",
     ):
         self.name = name
         self.remote_location = source_path_or_url
@@ -61,8 +61,8 @@ class Atlas:
         cls,
         name: str,
         source_path_or_url: str,
-        image_column: str = "image",
-        image_file_path_column: str = "filepath",
+        image_column: str | list[str] = "image",
+        image_file_path_column: str | list[str] | None = "filepath",
     ) -> Self:
         """Creates a new, blank Atlas and sets up the directory structure."""
         atlas_dir = ATLAS_DIR / name

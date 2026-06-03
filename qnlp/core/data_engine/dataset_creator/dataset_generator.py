@@ -1,4 +1,5 @@
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 import lmdb
@@ -120,18 +121,22 @@ def split_by_groups(
     atoms: pl.DataFrame,
     ratios: tuple[float, float, float] = (0.8, 0.1, 0.1),
     seed: int = 42,
+    group_column: str = "sample_id",
 ) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
     """
-    Split atoms into train/val/test ensuring all atoms sharing a sample_id
-    land in the same split. Guarantees no overlap between splits.
+    Split atoms into train/val/test ensuring all atoms sharing a group_column
+    value land in the same split. Guarantees no overlap between splits.
+
+    group_column defaults to "sample_id". Pass a different column (e.g.
+    "pair_id") for datasets where the natural grouping differs from sample_id.
     """
-    unique_ids = atoms["sample_id"].unique().to_list()
+    unique_ids = atoms[group_column].unique().to_list()
     train_ids, val_ids, test_ids = _split_ids(unique_ids, ratios, seed)
 
     return (
-        atoms.filter(pl.col("sample_id").is_in(train_ids)),
-        atoms.filter(pl.col("sample_id").is_in(val_ids)),
-        atoms.filter(pl.col("sample_id").is_in(test_ids)),
+        atoms.filter(pl.col(group_column).is_in(train_ids)),
+        atoms.filter(pl.col(group_column).is_in(val_ids)),
+        atoms.filter(pl.col(group_column).is_in(test_ids)),
     )
 
 
@@ -176,16 +181,24 @@ def create_train_val_test_datasets(
     ratios: tuple[float, float, float] = (0.8, 0.1, 0.1),
     seed: int = 42,
     filter_2d_outputs: bool = True,
+    group_column: str = "sample_id",
+    pre_split_hook: "Callable[[pl.DataFrame], pl.DataFrame] | None" = None,
 ) -> tuple[Path, Path, Path]:
     """
     Create non-overlapping train/val/test datasets.
 
-    Groups are split on sample_id before composition, so the strategy
+    Groups are split on group_column before composition, so the strategy
     never sees atoms from different splits — preventing data leakage
     in synthesis scenarios (e.g. random negative sampling).
+
+    pre_split_hook: optional transform applied to atoms before splitting,
+        useful for deriving a group_column that doesn't exist in the raw
+        atoms (e.g. extracting pair_id from sample_id for Winoground).
     """
     atoms = enrich_atoms(derived_dirs, lmdb_path, filter_2d_outputs=filter_2d_outputs)
-    train_atoms, val_atoms, test_atoms = split_by_groups(atoms, ratios, seed)
+    if pre_split_hook is not None:
+        atoms = pre_split_hook(atoms)
+    train_atoms, val_atoms, test_atoms = split_by_groups(atoms, ratios, seed, group_column)
 
     paths = []
     for split_name, split_atoms in [("train", train_atoms), ("val", val_atoms), ("test", test_atoms)]:
