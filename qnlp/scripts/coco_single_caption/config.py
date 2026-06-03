@@ -2,7 +2,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ExperimentConfig(BaseSettings):
-    embedding_dim: int = 512
+    embedding_dim: int = 256
+    bond_dim: int = 20
 
     batch_size: int = 512
     text_lr: float = 0.001
@@ -10,8 +11,8 @@ class ExperimentConfig(BaseSettings):
     image_lr: float = 0.0002
     image_weight_decay: float = 0.05
 
-    max_epochs: int = 100
-    patience: int = 20
+    max_epochs: int = 20
+    patience: int = 5
     min_delta: float = 0.0001
     max_grad_norm: float = 1.0
 

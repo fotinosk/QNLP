@@ -1,55 +1,49 @@
 """
-Evaluate a trained COCO single-caption model on ARO-style binary choice.
+Evaluate a trained COCO single-caption model on the Winoground benchmark.
 
 For each sample the model sees one image, a true caption and a foil caption.
 Hard-negative accuracy measures how often cosine_similarity(image, true) beats
-cosine_similarity(image, false) — directly comparable to the ARO benchmark and
-to the 78% target from train_aro_clean.py.
+cosine_similarity(image, false).
 
 Usage:
-    python -m qnlp.scripts.coco_single_caption.evaluate_aro <checkpoint_path>
-    python -m qnlp.scripts.coco_single_caption.evaluate_aro <checkpoint_path> --split val
-    python -m qnlp.scripts.coco_single_caption.evaluate_aro <checkpoint_path> --parquet /path/to/custom.parquet
+    python -m qnlp.scripts.coco_single_caption.evaluate_winoground
+    python -m qnlp.scripts.coco_single_caption.evaluate_winoground <checkpoint_path>
+    python -m qnlp.scripts.coco_single_caption.evaluate_winoground <checkpoint_path> --split val
 """
 
+import sys
 from pathlib import Path
 
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from torchvision import transforms
 
-from qnlp.constants import constants
+from qnlp.discoviz.image_transforms.aro import create_aro_image_transforms
 from qnlp.discoviz.models.einsum_model import EinsumModel
 from qnlp.discoviz.models.image_model import TTNImageModel, image_model_hyperparams
-from qnlp.domain.datasets.dataloader import vlm_collate_fn
-from qnlp.domain.datasets.dataset import VLMDataset
+from qnlp.domain.datasets.aro.aro_dataset import ProcessedARODataset, aro_tn_collate_fn
 from qnlp.domain.models.vlm.contrastive_vlm import ContrastiveVLM
 from qnlp.utils.logging import setup_logger
 from qnlp.utils.torch_utils import get_device
 
-logger = setup_logger(log_name="evaluate_aro")
+logger = setup_logger(log_name="evaluate_winoground")
 
 EMBEDDING_DIM = 512
 BATCH_SIZE = 128
 
-SPLIT_PARQUETS = {
-    "train": constants.datasets_path / "coco_contrastive_train.parquet",
-    "val": constants.datasets_path / "coco_contrastive_val.parquet",
-    "test": constants.datasets_path / "coco_contrastive_test.parquet",
+SPLIT_PATHS = {
+    "train": Path("data/winoground/processed/train.json"),
+    "val": Path("data/winoground/processed/val.json"),
+    "test": Path("data/winoground/processed/test.json"),
 }
 
-COMPILED_COLUMNS = [
-    ("true_diagram", "true_symbols", "true_caption"),
-    ("false_diagram", "false_symbols", "false_caption"),
-]
+DEFAULT_CHECKPOINT = "runs/checkpoints/coco_single_caption/2026-05-02_11-27-49/best_model.pt"
 
 
 def _load_model(checkpoint_path: Path, device: torch.device) -> ContrastiveVLM:
     checkpoint = torch.load(checkpoint_path, map_location=device)
     state_dict = checkpoint["model_state_dict"]
 
-    # EinsumModel reconstructs its symbols/sizes from the state dict
     text_model = EinsumModel()
     image_model = TTNImageModel(EMBEDDING_DIM)
     model = ContrastiveVLM(text_model, image_model, embedding_dim=EMBEDDING_DIM)
@@ -64,27 +58,21 @@ def _load_model(checkpoint_path: Path, device: torch.device) -> ContrastiveVLM:
 
 def evaluate(
     checkpoint_path: Path,
-    parquet: Path,
+    data_path: Path,
     batch_size: int = BATCH_SIZE,
 ) -> dict[str, float]:
     device = get_device()
 
-    size = image_model_hyperparams.image_size
-    transform = transforms.Compose(
-        [
-            transforms.Resize((size, size)),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ]
-    )
+    _, val_preprocess = create_aro_image_transforms(image_model_hyperparams.image_size)
 
-    ds = VLMDataset(parquet, compiled_columns=COMPILED_COLUMNS, image_transform=transform)
-    logger.info(f"Evaluating on {parquet.name} — {len(ds)} samples")
+    ds = ProcessedARODataset(data_path=str(data_path), return_images=True, image_processing_fn=val_preprocess)
+    logger.info(f"Evaluating on {data_path.name} — {len(ds)} samples")
 
     loader = DataLoader(
         ds,
         batch_size=batch_size,
         shuffle=False,
-        collate_fn=vlm_collate_fn,
+        collate_fn=aro_tn_collate_fn,
         num_workers=4,
         persistent_workers=True,
         prefetch_factor=2,
@@ -106,17 +94,16 @@ def evaluate(
 
     with torch.no_grad():
         for batch in loader:
-            images = batch["local_image_path"]
-            true_captions = batch["true_caption"]
-            false_captions = batch["false_caption"]
+            images = batch["images"]
+            true_captions = batch["true_captions"]
+            false_captions = batch["false_captions"]
 
-            # Filter samples whose true or false caption contains unknown symbols
             valid = [
                 i
-                for i in range(len(images))
+                for i in range(len(true_captions))
                 if _all_symbols_known(true_captions[i]) and _all_symbols_known(false_captions[i])
             ]
-            n_skipped += len(images) - len(valid)
+            n_skipped += len(true_captions) - len(valid)
 
             if not valid:
                 continue
@@ -133,9 +120,8 @@ def evaluate(
             true_sim = F.cosine_similarity(img_emb, true_emb, dim=-1)
             false_sim = F.cosine_similarity(img_emb, false_emb, dim=-1)
 
-            B = images.shape[0]
             n_correct += (true_sim > false_sim).sum().item()
-            n_total += B
+            n_total += images.shape[0]
             sum_true_sim += true_sim.sum().item()
             sum_false_sim += false_sim.sum().item()
 
@@ -145,15 +131,15 @@ def evaluate(
         )
 
     metrics = {
-        "hard_neg_accuracy": n_correct / n_total,
-        "true_cosine_similarity": sum_true_sim / n_total,
-        "false_cosine_similarity": sum_false_sim / n_total,
-        "margin": (sum_true_sim - sum_false_sim) / n_total,
+        "hard_neg_accuracy": n_correct / n_total if n_total > 0 else 0.0,
+        "true_cosine_similarity": sum_true_sim / n_total if n_total > 0 else 0.0,
+        "false_cosine_similarity": sum_false_sim / n_total if n_total > 0 else 0.0,
+        "margin": (sum_true_sim - sum_false_sim) / n_total if n_total > 0 else 0.0,
         "n_samples": n_total,
         "n_skipped": n_skipped,
     }
 
-    logger.info("=== ARO Evaluation Results ===")
+    logger.info("=== Winoground Evaluation Results ===")
     for k, v in metrics.items():
         logger.info(f"  {k}: {v:.4f}" if isinstance(v, float) else f"  {k}: {v}")
 
@@ -161,8 +147,11 @@ def evaluate(
 
 
 if __name__ == "__main__":
-    evaluate(
-        "runs/checkpoints/coco_single_caption/2026-05-20_17-24-15/best_model.pt",
-        parquet=SPLIT_PARQUETS["test"],
-        batch_size=512,
-    )
+    args = sys.argv[1:]
+    checkpoint = Path(args[0]) if args else Path(DEFAULT_CHECKPOINT)
+
+    split = "train"
+    if "--split" in args:
+        split = args[args.index("--split") + 1]
+
+    evaluate(checkpoint, data_path=SPLIT_PATHS[split], batch_size=BATCH_SIZE)

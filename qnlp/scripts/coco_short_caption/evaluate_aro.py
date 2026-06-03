@@ -1,15 +1,13 @@
 """
-Evaluate a trained COCO single-caption model on ARO-style binary choice.
+ARO-style evaluation for the coco_short_caption model.
 
-For each sample the model sees one image, a true caption and a foil caption.
-Hard-negative accuracy measures how often cosine_similarity(image, true) beats
-cosine_similarity(image, false) — directly comparable to the ARO benchmark and
-to the 78% target from train_aro_clean.py.
+For each sample the model sees one image, a true caption and a foil caption
+synthesised by random derangement. Hard-negative accuracy measures how often
+cosine_similarity(image, true) > cosine_similarity(image, false).
 
 Usage:
-    python -m qnlp.scripts.coco_single_caption.evaluate_aro <checkpoint_path>
-    python -m qnlp.scripts.coco_single_caption.evaluate_aro <checkpoint_path> --split val
-    python -m qnlp.scripts.coco_single_caption.evaluate_aro <checkpoint_path> --parquet /path/to/custom.parquet
+    python -m qnlp.scripts.coco_short_caption.evaluate_aro <checkpoint>
+    python -m qnlp.scripts.coco_short_caption.evaluate_aro <checkpoint> --parquet /path/to/custom.parquet
 """
 
 from pathlib import Path
@@ -28,16 +26,12 @@ from qnlp.domain.models.vlm.contrastive_vlm import ContrastiveVLM
 from qnlp.utils.logging import setup_logger
 from qnlp.utils.torch_utils import get_device
 
-logger = setup_logger(log_name="evaluate_aro")
+logger = setup_logger(log_name="evaluate_aro_short")
 
-EMBEDDING_DIM = 512
+EMBEDDING_DIM = 256
 BATCH_SIZE = 128
 
-SPLIT_PARQUETS = {
-    "train": constants.datasets_path / "coco_contrastive_train.parquet",
-    "val": constants.datasets_path / "coco_contrastive_val.parquet",
-    "test": constants.datasets_path / "coco_contrastive_test.parquet",
-}
+DEFAULT_PARQUET = constants.datasets_path / "coco_short_caption_aro_test.parquet"
 
 COMPILED_COLUMNS = [
     ("true_diagram", "true_symbols", "true_caption"),
@@ -49,7 +43,6 @@ def _load_model(checkpoint_path: Path, device: torch.device) -> ContrastiveVLM:
     checkpoint = torch.load(checkpoint_path, map_location=device)
     state_dict = checkpoint["model_state_dict"]
 
-    # EinsumModel reconstructs its symbols/sizes from the state dict
     text_model = EinsumModel()
     image_model = TTNImageModel(EMBEDDING_DIM)
     model = ContrastiveVLM(text_model, image_model, embedding_dim=EMBEDDING_DIM)
@@ -64,7 +57,7 @@ def _load_model(checkpoint_path: Path, device: torch.device) -> ContrastiveVLM:
 
 def evaluate(
     checkpoint_path: Path,
-    parquet: Path,
+    parquet: Path = DEFAULT_PARQUET,
     batch_size: int = BATCH_SIZE,
 ) -> dict[str, float]:
     device = get_device()
@@ -91,7 +84,6 @@ def evaluate(
     )
 
     model = _load_model(checkpoint_path, device)
-
     known_symbols = set(model.text_model.sym2weight.keys())
 
     def _all_symbols_known(caption) -> bool:
@@ -110,7 +102,6 @@ def evaluate(
             true_captions = batch["true_caption"]
             false_captions = batch["false_caption"]
 
-            # Filter samples whose true or false caption contains unknown symbols
             valid = [
                 i
                 for i in range(len(images))
@@ -133,9 +124,8 @@ def evaluate(
             true_sim = F.cosine_similarity(img_emb, true_emb, dim=-1)
             false_sim = F.cosine_similarity(img_emb, false_emb, dim=-1)
 
-            B = images.shape[0]
             n_correct += (true_sim > false_sim).sum().item()
-            n_total += B
+            n_total += images.shape[0]
             sum_true_sim += true_sim.sum().item()
             sum_false_sim += false_sim.sum().item()
 
@@ -161,8 +151,12 @@ def evaluate(
 
 
 if __name__ == "__main__":
-    evaluate(
-        "runs/checkpoints/coco_single_caption/2026-05-20_17-24-15/best_model.pt",
-        parquet=SPLIT_PARQUETS["test"],
-        batch_size=512,
-    )
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    checkpoint = "runs/checkpoints/coco_single_caption/2026-05-31_18-39-01/best_model.pt"
+    parser.add_argument("--parquet", type=Path, default=DEFAULT_PARQUET)
+    parser.add_argument("--batch_size", type=int, default=BATCH_SIZE)
+    args = parser.parse_args()
+
+    evaluate(Path(checkpoint), parquet=args.parquet, batch_size=args.batch_size)

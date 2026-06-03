@@ -36,13 +36,13 @@ from qnlp.utils.torch_utils import get_device
 
 logger = setup_logger(log_name="evaluate_retrieval")
 
-EMBEDDING_DIM = 512
+EMBEDDING_DIM = 256
 BATCH_SIZE = 128
 
 SPLIT_PARQUETS = {
-    "train": constants.datasets_path / "coco_single_caption_train.parquet",
-    "val": constants.datasets_path / "coco_single_caption_val.parquet",
-    "test": constants.datasets_path / "coco_single_caption_test.parquet",
+    "train": constants.datasets_path / "coco_short_caption_train.parquet",
+    "val": constants.datasets_path / "coco_short_caption_val.parquet",
+    "test": constants.datasets_path / "coco_short_caption_test.parquet",
 }
 
 COMPILED_COLUMNS = [("diagram", "symbols", "caption")]
@@ -240,7 +240,7 @@ def evaluate(
 
 if __name__ == "__main__":
     evaluate(
-        checkpoint_path=Path("runs/checkpoints/coco_single_caption/2026-05-02_00-59-08/best_model.pt"),
+        checkpoint_path=Path("runs/checkpoints/coco_single_caption/2026-05-31_18-39-01/best_model.pt"),
         parquet=SPLIT_PARQUETS["test"],
         batch_size=512,
     )

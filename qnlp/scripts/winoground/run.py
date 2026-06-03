@@ -2,34 +2,36 @@ from datetime import datetime
 
 import mlflow
 import torch
+from torch.utils.data import DataLoader
 from torchvision import transforms
 
 from qnlp.constants import constants
-from qnlp.core.training.losses.single_caption import SingleCaptionLoss
+from qnlp.core.training.losses.winoground_pair import WinogroundPairLoss
 from qnlp.core.training.trainer import Trainer
 from qnlp.discoviz.models.einsum_model import EinsumModel
 from qnlp.discoviz.models.image_model import TTNImageModel, image_model_hyperparams
-from qnlp.domain.datasets.dataloader import get_dataloaders
 from qnlp.domain.datasets.dataset import collect_symbol_sizes
+from qnlp.domain.datasets.winoground_dataset import (
+    WinogroundDataset,
+    winoground_eval_collate_fn,
+)
 from qnlp.domain.models.vlm.contrastive_vlm import ContrastiveVLM
-from qnlp.scripts.coco_single_caption.config import ExperimentConfig
-from qnlp.scripts.coco_single_caption.step import COCOSingleCaptionStep
+from qnlp.scripts.winoground.config import ExperimentConfig
+from qnlp.scripts.winoground.step import WinogroundPairStep
 from qnlp.utils.logging import setup_logger
 from qnlp.utils.mlflow_utils import setup_mlflow_run
 from qnlp.utils.seeding import set_seed
 from qnlp.utils.torch_utils import get_device
 from qnlp.utils.training_notifications import send_training_finished_notification
 
-EXPERIMENT_NAME = "coco_single_caption"
+EXPERIMENT_NAME = "winoground"
 logger = setup_logger(log_name=EXPERIMENT_NAME)
 
-DATASETS_PATH = constants.datasets_path
-TRAIN_PARQUET = DATASETS_PATH / "coco_short_caption_train.parquet"
-VAL_PARQUET = DATASETS_PATH / "coco_short_caption_val.parquet"
-TEST_PARQUET = DATASETS_PATH / "coco_short_caption_test.parquet"
+TRAIN_PARQUET = constants.datasets_path / "winoground_train.parquet"
+VAL_PARQUET = constants.datasets_path / "winoground_val.parquet"
+TEST_PARQUET = constants.datasets_path / "winoground_test.parquet"
 
-COMPILED_COLUMNS = [("diagram", "symbols", "caption")]
-SYMBOL_COLS = ["symbols"]
+SYMBOL_COLS = ["cap0_symbols", "cap1_symbols"]
 
 
 def run():
@@ -53,65 +55,50 @@ def run():
         ]
     )
 
-    loaders, datasets = get_dataloaders(
-        train_parquet=TRAIN_PARQUET,
-        val_parquet=VAL_PARQUET,
-        test_parquet=TEST_PARQUET,
-        batch_size=cfg.batch_size,
-        train_transform=train_transform,
-        val_transform=val_transform,
-        compiled_columns=COMPILED_COLUMNS,
-    )
-    train_loader, val_loader, test_loader = loaders
-    train_ds, val_ds, test_ds = datasets
+    train_ds = WinogroundDataset(TRAIN_PARQUET, mode="eval", image_transform=train_transform)
+    val_ds = WinogroundDataset(VAL_PARQUET, mode="eval", image_transform=val_transform)
+    test_ds = WinogroundDataset(TEST_PARQUET, mode="eval", image_transform=val_transform)
 
     logger.info(f"Train: {len(train_ds)} | Val: {len(val_ds)} | Test: {len(test_ds)}")
 
-    symbols, sizes = collect_symbol_sizes(
-        [train_ds, val_ds, test_ds],
-        SYMBOL_COLS,
-        remap={constants.embedding_dim: cfg.embedding_dim, constants.bond_dim: cfg.bond_dim},
+    worker_kwargs = dict(num_workers=4, persistent_workers=True, prefetch_factor=2)
+    train_loader = DataLoader(
+        train_ds, batch_size=cfg.batch_size, shuffle=True, collate_fn=winoground_eval_collate_fn, **worker_kwargs
     )
+    val_loader = DataLoader(
+        val_ds, batch_size=cfg.batch_size, shuffle=False, collate_fn=winoground_eval_collate_fn, **worker_kwargs
+    )
+    test_loader = DataLoader(
+        test_ds, batch_size=cfg.batch_size, shuffle=False, collate_fn=winoground_eval_collate_fn, **worker_kwargs
+    )
+
+    symbols, sizes = collect_symbol_sizes([train_ds, val_ds, test_ds], SYMBOL_COLS)
     logger.info(f"Collected {len(symbols)} unique symbols.")
 
     text_model = EinsumModel(symbols, sizes).to(device)
     image_model = TTNImageModel(cfg.embedding_dim).to(device)
     model = ContrastiveVLM(text_model, image_model, embedding_dim=cfg.embedding_dim).to(device)
 
-    loss_fn = SingleCaptionLoss(
-        temperature=cfg.temperature,
-        alignment_weight=cfg.alignment_weight,
+    if cfg.pretrained_checkpoint:
+        checkpoint = torch.load(cfg.pretrained_checkpoint, map_location=device)
+        model.load_state_dict(checkpoint["model_state_dict"], strict=False)
+        logger.info(f"Loaded pretrained weights from {cfg.pretrained_checkpoint} (strict=False)")
+
+    loss_fn = WinogroundPairLoss(
+        margin=cfg.triplet_margin,
+        distance=cfg.distance,
     ).to(device)
 
-    step = COCOSingleCaptionStep(
-        loss_fn=loss_fn,
-        device=device,
-        warmup_epochs=cfg.alignment_warmup_epochs,
-        warmup_alignment_weight=cfg.alignment_weight,
-    )
+    step = WinogroundPairStep(loss_fn=loss_fn, device=device)
 
     optimizer = torch.optim.AdamW(
         [
-            {
-                "params": text_model.parameters(),
-                "lr": cfg.text_lr,
-                "weight_decay": cfg.text_weight_decay,
-            },
-            {
-                "params": image_model.parameters(),
-                "lr": cfg.image_lr,
-                "weight_decay": cfg.image_weight_decay,
-            },
+            {"params": text_model.parameters(), "lr": cfg.text_lr, "weight_decay": cfg.text_weight_decay},
+            {"params": image_model.parameters(), "lr": cfg.image_lr, "weight_decay": cfg.image_weight_decay},
             {
                 "params": list(model.image_head.parameters()) + list(model.text_head.parameters()),
                 "lr": cfg.head_lr,
                 "weight_decay": cfg.head_weight_decay,
-            },
-            {
-                # Learnable temperature — no weight decay on a scalar parameter
-                "params": loss_fn.parameters(),
-                "lr": cfg.text_lr,
-                "weight_decay": 0.0,
             },
         ]
     )
@@ -135,8 +122,7 @@ def run():
             train_loader=train_loader,
             val_loader=val_loader,
             test_loader=test_loader,
-            monitor_metric="hard_neg_accuracy",
-            minimize_metric=False,
+            monitor_metric="group_acc",
             checkpoint_path=checkpoint_path,
             max_epochs=cfg.max_epochs,
             patience=cfg.patience,

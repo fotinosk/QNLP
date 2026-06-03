@@ -15,11 +15,16 @@ def fetch_hf_batch_lazily(
     return batch_df
 
 
-def _write_single_file(image_data: bytes, original_filepath: str, storage_dir: Path) -> str:
-    original_filename = Path(original_filepath).name
-    img_bytes = image_data.get("bytes") if isinstance(image_data, dict) else image_data
+def _write_single_file(image_data, original_filepath: str | None, storage_dir: Path) -> str:
+    if isinstance(image_data, dict):
+        img_bytes: bytes = image_data.get("bytes") or b""
+        if original_filepath is None:
+            original_filepath = image_data.get("path") or "unknown.jpg"
+    else:
+        img_bytes = image_data
 
-    local_filepath = storage_dir / original_filename
+    filename = Path(original_filepath or "unknown.jpg").name
+    local_filepath = storage_dir / filename
 
     with open(local_filepath, "wb") as f:
         f.write(img_bytes)
@@ -28,32 +33,54 @@ def _write_single_file(image_data: bytes, original_filepath: str, storage_dir: P
 
 def save_images_and_clear_df(
     df: pl.DataFrame,
-    image_column: str,
-    image_file_path_column: str,
+    image_column: str | list[str],
+    image_file_path_column: str | list[str] | None,
     image_storage_path: Path,
 ) -> pl.DataFrame:
-    """Saves image bytes concurrently and returns the lightweight manifest."""
+    """Saves image bytes concurrently and returns the lightweight manifest.
 
-    if df.is_empty() or image_column not in df.columns or image_file_path_column not in df.columns:
-        return df
+    Single image_column (str) → adds ``local_image_path`` column (backward compatible).
+    Multiple image_columns (list) → adds ``local_{col}_path`` for each column.
+    image_file_path_column=None → path extracted from the image struct's ``path`` field.
+    """
+    is_single = isinstance(image_column, str)
+
+    if is_single:
+        image_columns = [image_column]
+        file_path_columns = [image_file_path_column]
+        output_columns = ["local_image_path"]
+    else:
+        image_columns = image_column
+        if image_file_path_column is None:
+            file_path_columns = [None] * len(image_columns)
+        elif isinstance(image_file_path_column, str):
+            file_path_columns = [image_file_path_column] * len(image_columns)
+        else:
+            file_path_columns = image_file_path_column
+        output_columns = [f"local_{col}_path" for col in image_columns]
 
     absolute_storage_dir = image_storage_path.resolve()
     absolute_storage_dir.mkdir(parents=True, exist_ok=True)
 
-    image_data_list = df[image_column].to_list()
-    filepath_list = df[image_file_path_column].to_list()
+    for img_col, fp_col, out_col in zip(image_columns, file_path_columns, output_columns):
+        if img_col not in df.columns:
+            continue
 
-    local_paths = []
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = [
-            executor.submit(_write_single_file, img, path, absolute_storage_dir)
-            for img, path in zip(image_data_list, filepath_list)
-        ]
+        image_data_list = df[img_col].to_list()
+        filepath_list = df[fp_col].to_list() if (fp_col and fp_col in df.columns) else [None] * len(image_data_list)
 
-        for future in futures:
-            local_paths.append(future.result())
+        local_paths = []
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures = [
+                executor.submit(_write_single_file, img, path, absolute_storage_dir)
+                for img, path in zip(image_data_list, filepath_list)
+            ]
+            for future in futures:
+                local_paths.append(future.result())
 
-    return df.with_columns(pl.Series("local_image_path", local_paths)).drop(image_column)
+        df = df.with_columns(pl.Series(out_col, local_paths)).drop(img_col)
+
+    return df
 
 
 if __name__ == "__main__":
