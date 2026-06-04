@@ -155,6 +155,22 @@ Alignment loss was a shortcut that collapsed the solution.
 
 ---
 
+## TreeNeuralComposer — neural CCG semantics (frozen CLIP)
+**Script:** `tree_neural_coco_run.py` · **Model:** `qnlp/discoviz/models/tree_neural_composer.py`
+**Architecture:** word `nn.Embedding` + per-CCG-rule (or one shared) MLP composing along the parse tree; frozen CLIP-ViT image tower. Fixed ~10M text params (vs EinsumModel's 0.3–1B on COCO).
+**Motivation:** is the EinsumModel COCO failure (memorises: train 0.99 / val chance) data-limited, or an inductive-bias limit?
+
+**COCO train-size scaling law** (test `hard_neg_acc`, fixed val/test):
+
+| train imgs | 1k | 2k | 4k | 8k | 13k |
+|---|---|---|---|---|---|
+| EinsumModel + frozen CLIP | 0.49 | 0.51 | 0.49 | 0.48 | 0.46 |
+| TreeNeuralComposer + frozen CLIP | 0.82 | 0.87 | 0.91 | 0.94 | 0.95 |
+
+EinsumModel sits at chance for every N (slightly worse with more data — bigger vocab → more free params → more memorisation). TreeNeuralComposer scales as a clean power law (error ∝ N^−0.52). Same images, CLIP tower, and loss → the failure is the **parameterisation (free per-symbol tensors), not the data budget**. This resolves the EinsumModel-generalisation open question below. Branch: `neural-semantics`.
+
+---
+
 ## Known Issues / Open Questions
 
 - **EinsumModel vocabulary generalisation**: Val-only symbols receive no gradient during
