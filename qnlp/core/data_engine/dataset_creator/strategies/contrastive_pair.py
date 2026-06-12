@@ -23,6 +23,9 @@ _OUTPUT_SCHEMA = {
     "false_symbols": pl.String,
 }
 
+# Included only when atoms carry pre-computed contraction paths.
+_PATH_OUTPUT_COLUMNS = ["true_path", "false_path"]
+
 
 class ContrastivePairStrategy:
     """
@@ -49,6 +52,7 @@ class ContrastivePairStrategy:
 
     def compose(self, atoms: pl.DataFrame) -> pl.DataFrame:
         has_labels = "label" in atoms.columns and atoms["label"].drop_nulls().len() > 0
+        has_path = "path" in atoms.columns
 
         if has_labels:
             labeled = atoms.filter(pl.col("label").is_not_null())
@@ -59,32 +63,39 @@ class ContrastivePairStrategy:
 
         parts = []
         if not labeled.is_empty():
-            parts.append(self._reconstruct_labeled(labeled))
+            parts.append(self._reconstruct_labeled(labeled, has_path))
         if not unlabeled.is_empty():
-            synthesized = self._synthesize_negatives(unlabeled)
+            synthesized = self._synthesize_negatives(unlabeled, has_path)
             if not synthesized.is_empty():
                 parts.append(synthesized)
 
         if not parts:
             return pl.DataFrame(schema=_OUTPUT_SCHEMA)
 
-        return pl.concat(parts, how="diagonal_relaxed").select(_OUTPUT_COLUMNS)
+        output_columns = _OUTPUT_COLUMNS + (_PATH_OUTPUT_COLUMNS if has_path else [])
+        return pl.concat(parts, how="diagonal_relaxed").select(output_columns)
 
-    def _reconstruct_labeled(self, atoms: pl.DataFrame) -> pl.DataFrame:
+    def _reconstruct_labeled(self, atoms: pl.DataFrame, has_path: bool = False) -> pl.DataFrame:
         """Pair pre-labeled positive and negative atoms by sample_id."""
+        pos_cols = ["sample_id", "local_image_path", "diagram", "symbols"] + (["path"] if has_path else [])
+        neg_cols = ["sample_id", "diagram", "symbols"] + (["path"] if has_path else [])
         positives = (
             atoms.filter(pl.col("label"))
-            .select(["sample_id", "local_image_path", "diagram", "symbols"])
-            .rename({"diagram": "true_diagram", "symbols": "true_symbols"})
+            .select(pos_cols)
+            .rename(
+                {"diagram": "true_diagram", "symbols": "true_symbols", **({"path": "true_path"} if has_path else {})}
+            )
         )
         negatives = (
             atoms.filter(~pl.col("label"))
-            .select(["sample_id", "diagram", "symbols"])
-            .rename({"diagram": "false_diagram", "symbols": "false_symbols"})
+            .select(neg_cols)
+            .rename(
+                {"diagram": "false_diagram", "symbols": "false_symbols", **({"path": "false_path"} if has_path else {})}
+            )
         )
         return positives.join(negatives, on="sample_id", how="inner")
 
-    def _synthesize_negatives(self, atoms: pl.DataFrame) -> pl.DataFrame:
+    def _synthesize_negatives(self, atoms: pl.DataFrame, has_path: bool = False) -> pl.DataFrame:
         """
         Assign each sample_id group a random negative group via derangement,
         then join to produce contrastive rows without any per-row Python loops.
@@ -111,23 +122,28 @@ class ContrastivePairStrategy:
 
         # Randomly select one atom per group to serve as the negative representative.
         # Shuffle first so that group_by().first() gives a random atom per group.
+        neg_cols = ["sample_id", "diagram", "symbols"] + (["path"] if has_path else [])
         neg_pool = (
             atoms.sample(fraction=1.0, shuffle=True, seed=int(rng.integers(0, 2**31)))
             .group_by("sample_id")
             .first()
-            .select(["sample_id", "diagram", "symbols"])
+            .select(neg_cols)
             .rename(
                 {
                     "sample_id": "neg_sample_id",
                     "diagram": "false_diagram",
                     "symbols": "false_symbols",
+                    **({"path": "false_path"} if has_path else {}),
                 }
             )
         )
 
+        pos_cols = ["sample_id", "local_image_path", "diagram", "symbols"] + (["path"] if has_path else [])
         return (
-            atoms.select(["sample_id", "local_image_path", "diagram", "symbols"])
-            .rename({"diagram": "true_diagram", "symbols": "true_symbols"})
+            atoms.select(pos_cols)
+            .rename(
+                {"diagram": "true_diagram", "symbols": "true_symbols", **({"path": "true_path"} if has_path else {})}
+            )
             .join(mapping, on="sample_id", how="left")
             .join(neg_pool, on="neg_sample_id", how="left")
             .drop("neg_sample_id")

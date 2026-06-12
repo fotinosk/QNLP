@@ -1,9 +1,12 @@
+from functools import partial
 from typing import Any, Dict, List
 
 import torch
 import torch.nn as nn
 from cotengra import einsum
 from lambeq import Symbol
+
+from qnlp.core.non_linear_contraction.einsum_interface import contract_einsum_non_linearly
 
 torch.serialization.add_safe_globals([Symbol])
 
@@ -24,7 +27,9 @@ def get_einsum_model(datasets: list):
 
 
 class EinsumModel(nn.Module):
-    def __init__(self, symbols: List[Symbol] = [], sizes: List[tuple[int, ...]] = []):
+    def __init__(
+        self, symbols: List[Symbol] = [], sizes: List[tuple[int, ...]] = [], non_linear_contractions: bool = False
+    ):
         """
         symbols: a list of strings (can be any words, with punctuation, etc.)
         """
@@ -37,10 +42,24 @@ class EinsumModel(nn.Module):
         super().__init__()
         self.symbols = list(symbols)
         self.sizes = list(sizes)
+        self.non_linear_contractions = non_linear_contractions
         self.weights = nn.ParameterList([nn.Parameter(torch.empty(size)) for size in sizes])
 
+        if non_linear_contractions:
+            # Global scalar residual gate. Init 0 => the contraction is exactly linear
+            # at the start of training (linear floor); the model learns how much
+            # non-linearity to add.
+            self.nonlinear_gate = nn.Parameter(torch.zeros(()))
+
+        self._setup_contractions_function()
         self.reset_parameters()
         self.sym2weight = self.compute_sym2weight()
+
+    def _setup_contractions_function(self):
+        if self.non_linear_contractions:
+            self.contractions_function = partial(contract_einsum_non_linearly, non_linear_fn=nn.functional.gelu)
+        else:
+            self.contractions_function = lambda expr, tensors, path=None, gate=None: einsum(expr, *tensors)
 
     def compute_sym2weight(self) -> Dict[Symbol, nn.Parameter]:
         return {sym: weight for sym, weight in zip(self.symbols, self.weights)}
@@ -105,16 +124,19 @@ class EinsumModel(nn.Module):
 
         self.sym2weight = self.compute_sym2weight()
 
-    def _forward_single(self, input: tuple[str, List[Symbol]]) -> torch.Tensor:
-        einsum_expr, symbols = input
+    def _forward_single(self, input: tuple) -> torch.Tensor:
+        # Input is (einsum_expr, symbols) or, for non-linear contractions,
+        # (einsum_expr, symbols, path) where path is pre-computed at dataset creation.
+        einsum_expr, symbols = input[0], input[1]
+        path = input[2] if len(input) > 2 else None
 
-        x = einsum(einsum_expr, *[self.sym2weight[sym] for sym in symbols])
+        tensors = [self.sym2weight[sym] for sym in symbols]
+        gate = self.nonlinear_gate if self.non_linear_contractions else None
+        x = self.contractions_function(einsum_expr, tensors, path, gate=gate)
         if x.ndim != 1:
             shapes = {str(sym): tuple(self.sym2weight[sym].shape) for sym in symbols}
             raise RuntimeError(
-                f"Expected 1D output, got shape {tuple(x.shape)}\n"
-                f"  diagram: {einsum_expr}\n"
-                f"  symbol shapes: {shapes}"
+                f"Expected 1D output, got shape {tuple(x.shape)}\n  diagram: {einsum_expr}\n  symbol shapes: {shapes}"
             )
         return nn.functional.normalize(x, dim=-1)
 
@@ -125,6 +147,7 @@ class EinsumModel(nn.Module):
         base = super().state_dict(*args, **kwargs)
         base["symbols_list"] = self.symbols
         base["sizes_list"] = self.sizes
+        base["non_linear_contractions"] = self.non_linear_contractions
         return base
 
     def load_state_dict(self, state_dict: Dict[str, Any], strict: bool = True):
@@ -134,6 +157,9 @@ class EinsumModel(nn.Module):
         if "sizes_list" in state_dict:
             loaded_sizes = state_dict.pop("sizes_list")
             self.sizes = list(loaded_sizes)
+        if "non_linear_contractions" in state_dict:
+            self.non_linear_contractions = state_dict.pop("non_linear_contractions")
+            self._setup_contractions_function()
 
         self.weights = nn.ParameterList([nn.Parameter(torch.empty(size)) for size in self.sizes])
 

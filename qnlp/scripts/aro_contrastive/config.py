@@ -5,6 +5,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class ExperimentConfig(BaseSettings):
     embedding_dim: int = 512
+    bond_dim: int = 10
+
+    # Toggle the non-linear pairwise contraction text model. Requires the dataset
+    # to have been created with compute_contraction_paths=True.
+    use_non_linear_contractions: bool = True
 
     batch_size: int = 128
     text_lr: float = 0.001

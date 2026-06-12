@@ -33,8 +33,9 @@ def get_dataloaders(
     train_transform: Callable | None = None,
     val_transform: Callable | None = None,
     image_columns: list[str] | None = None,
-    compiled_columns: list[tuple[str, str, str]] | None = None,
+    compiled_columns: list[tuple] | None = None,
     num_workers: int = 4,
+    use_non_linear_contractions: bool = False,
 ) -> tuple[list[DataLoader], list[VLMDataset]]:
     """
     Build train/val/test DataLoaders from enriched parquet files.
@@ -57,18 +58,21 @@ def get_dataloaders(
         image_columns=image_columns,
         compiled_columns=compiled_columns,
         image_transform=train_transform,
+        use_non_linear_contractions=use_non_linear_contractions,
     )
     val_ds = VLMDataset(
         val_parquet,
         image_columns=image_columns,
         compiled_columns=compiled_columns,
         image_transform=val_transform,
+        use_non_linear_contractions=use_non_linear_contractions,
     )
     test_ds = VLMDataset(
         test_parquet,
         image_columns=image_columns,
         compiled_columns=compiled_columns,
         image_transform=val_transform,
+        use_non_linear_contractions=use_non_linear_contractions,
     )
 
     worker_kwargs = dict(

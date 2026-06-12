@@ -2,7 +2,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ExperimentConfig(BaseSettings):
-    embedding_dim: int = 512
+    embedding_dim: int = 256
+
+    # Use non-linear pairwise contractions in the text model. Requires the dataset
+    # to have been created with compute_contraction_paths=True.
+    use_non_linear_contractions: bool = True
 
     batch_size: int = 32
     text_lr: float = 0.0005
@@ -13,7 +17,7 @@ class ExperimentConfig(BaseSettings):
     head_weight_decay: float = 0.001
 
     max_epochs: int = 100
-    patience: int = 15
+    patience: int = 10
     min_delta: float = 0.0001
     max_grad_norm: float = 1.0
 

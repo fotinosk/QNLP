@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -23,6 +24,7 @@ class Pipeline:
         lmdb_path: Path | str | None = None,
         derived_name: str = "derived_v1",
         lmdb_map_size: int = 10 * 1024 * 1024 * 1024,
+        keep_columns: list[str] | None = None,
     ):
         self.atlas_dir = Path(atlas_dir)
         self.data_manifest_path = self.atlas_dir / "data_manifest.parquet"
@@ -30,6 +32,9 @@ class Pipeline:
         self.lmdb_path = Path(lmdb_path) if lmdb_path else None
         self.lmdb_map_size = lmdb_map_size
         self.steps = steps
+        # Extra columns (beyond the standard four) to carry into the derived
+        # parquets — e.g. `label`/`split` for contrastive datasets like ARO.
+        self.keep_columns = keep_columns or []
 
     def _get_delta_sample_ids(self) -> list[str]:
         """Identify sample_ids that haven't been processed yet."""
@@ -67,8 +72,8 @@ class Pipeline:
                     lmdb_entries[str(h)] = row["compiled_bytes"]
             chunk_df = chunk_df.drop("compiled_bytes")
 
-        required_cols = ["sample_id", "local_image_path", "processed_text", "text_hash"]
-        available_cols = [c for c in required_cols if c in chunk_df.columns]
+        required_cols = ["sample_id", "local_image_path", "processed_text", "text_hash", *self.keep_columns]
+        available_cols = [c for c in dict.fromkeys(required_cols) if c in chunk_df.columns]
         chunk_df = chunk_df.select(available_cols)
 
         return chunk_df, lmdb_entries
@@ -105,15 +110,22 @@ class Pipeline:
         finally:
             env.close()
 
-    def _write_parquet_chunk(self, df: pl.DataFrame, chunk_offset: int) -> None:
-        """Write processed metadata to Parquet."""
-        chunk_path = self.derived_dir / f"chunk_{chunk_offset:06d}.parquet"
+    def _write_parquet_chunk(self, df: pl.DataFrame, chunk_offset: int, run_token: str) -> None:
+        """Write processed metadata to Parquet.
+
+        The filename is prefixed with a per-run token so that resumed runs append
+        new chunks instead of overwriting earlier ones (the delta-relative offset
+        restarts at 0 every run).
+        """
+        chunk_path = self.derived_dir / f"chunk_{run_token}_{chunk_offset:06d}.parquet"
         df.write_parquet(chunk_path)
         logger.info(f"Successfully wrote {len(df)} metadata rows to Parquet chunk: {chunk_path.name}")
 
     def run(self, chunk_size: int = 1000, dry_run: bool = False) -> None:
         """Execute the pipeline across all unprocessed samples."""
         logger.info("Starting pipeline execution")
+        # Unique per-run token so resumed runs never overwrite earlier chunk files.
+        run_token = datetime.now().strftime("%Y%m%d%H%M%S")
         delta_sample_ids = self._get_delta_sample_ids()
         if not delta_sample_ids:
             logger.info("No new data to process.")
@@ -155,7 +167,7 @@ class Pipeline:
                     logger.info("Sample output:\n%s", processed_df.head(3))
             else:
                 self._write_lmdb_chunk(lmdb_entries, chunk_idx)
-                self._write_parquet_chunk(processed_df, i)
+                self._write_parquet_chunk(processed_df, i, run_token)
 
         mode_str = "[DRY RUN] " if dry_run else ""
         logger.info("%sProcessed and committed %d records in %d chunks.", mode_str, len(delta_sample_ids), total_chunks)

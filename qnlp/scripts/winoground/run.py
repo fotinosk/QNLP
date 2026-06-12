@@ -55,9 +55,14 @@ def run():
         ]
     )
 
-    train_ds = WinogroundDataset(TRAIN_PARQUET, mode="eval", image_transform=train_transform)
-    val_ds = WinogroundDataset(VAL_PARQUET, mode="eval", image_transform=val_transform)
-    test_ds = WinogroundDataset(TEST_PARQUET, mode="eval", image_transform=val_transform)
+    nlc = cfg.use_non_linear_contractions
+    train_ds = WinogroundDataset(
+        TRAIN_PARQUET, mode="eval", image_transform=train_transform, use_non_linear_contractions=nlc
+    )
+    val_ds = WinogroundDataset(VAL_PARQUET, mode="eval", image_transform=val_transform, use_non_linear_contractions=nlc)
+    test_ds = WinogroundDataset(
+        TEST_PARQUET, mode="eval", image_transform=val_transform, use_non_linear_contractions=nlc
+    )
 
     logger.info(f"Train: {len(train_ds)} | Val: {len(val_ds)} | Test: {len(test_ds)}")
 
@@ -72,10 +77,14 @@ def run():
         test_ds, batch_size=cfg.batch_size, shuffle=False, collate_fn=winoground_eval_collate_fn, **worker_kwargs
     )
 
-    symbols, sizes = collect_symbol_sizes([train_ds, val_ds, test_ds], SYMBOL_COLS)
+    symbols, sizes = collect_symbol_sizes(
+        [train_ds, val_ds, test_ds],
+        SYMBOL_COLS,
+        remap={constants.embedding_dim: cfg.embedding_dim},
+    )
     logger.info(f"Collected {len(symbols)} unique symbols.")
 
-    text_model = EinsumModel(symbols, sizes).to(device)
+    text_model = EinsumModel(symbols, sizes, non_linear_contractions=nlc).to(device)
     image_model = TTNImageModel(cfg.embedding_dim).to(device)
     model = ContrastiveVLM(text_model, image_model, embedding_dim=cfg.embedding_dim).to(device)
 

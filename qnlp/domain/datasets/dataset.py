@@ -46,16 +46,29 @@ class VLMDataset(Dataset):
         self,
         parquet_path: str | Path,
         image_columns: list[str] | None = None,
-        compiled_columns: list[tuple[str, str, str]] | None = None,
+        compiled_columns: list[tuple] | None = None,
         image_transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
+        use_non_linear_contractions: bool = False,
     ):
         self.df = pl.read_parquet(parquet_path)
         self.image_columns = image_columns or ["local_image_path"]
         self.compiled_columns = compiled_columns or [("diagram", "symbols", "caption")]
         self.image_transform = image_transform
+        self.use_non_linear_contractions = use_non_linear_contractions
+
+        # compiled_columns entries are (diagram_col, symbols_col, output_key) or, for
+        # non-linear contractions, (diagram_col, symbols_col, output_key, path_col).
+        if use_non_linear_contractions:
+            missing = [spec for spec in self.compiled_columns if len(spec) < 4]
+            if missing:
+                raise ValueError(
+                    "use_non_linear_contractions=True requires a 4th path-column entry in each "
+                    f"compiled_columns spec; got {missing}. Recreate the dataset with compute_contraction_paths=True."
+                )
 
         # Columns consumed by compiled_columns — excluded from the raw dict output
-        self._compiled_raw_cols = {col for diag_col, sym_col, _ in self.compiled_columns for col in (diag_col, sym_col)}
+        self._compiled_raw_cols = {col for spec in self.compiled_columns for col in spec[:2]}
+        self._compiled_raw_cols |= {spec[3] for spec in self.compiled_columns if len(spec) > 3}
 
     def __len__(self) -> int:
         return len(self.df)
@@ -72,12 +85,17 @@ class VLMDataset(Dataset):
                 img = self.image_transform(img)
             result[col] = img
 
-        # Bundle compiled (diagram, symbols) pairs
-        for diag_col, sym_col, output_key in self.compiled_columns:
+        # Bundle compiled (diagram, symbols[, path]) tuples
+        for spec in self.compiled_columns:
+            diag_col, sym_col, output_key = spec[0], spec[1], spec[2]
             diagram = row[diag_col]
-            raw_symbols = row[sym_col]
-            symbols = _deserialize_symbols(raw_symbols)
-            result[output_key] = (diagram, symbols)
+            symbols = _deserialize_symbols(row[sym_col])
+            if self.use_non_linear_contractions:
+                raw_path = row[spec[3]]
+                path = [tuple(step) for step in orjson.loads(raw_path)] if raw_path else None
+                result[output_key] = (diagram, symbols, path)
+            else:
+                result[output_key] = (diagram, symbols)
 
         # Pass through all remaining columns
         for col, val in row.items():

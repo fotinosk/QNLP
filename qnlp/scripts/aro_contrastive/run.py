@@ -25,13 +25,14 @@ logger = setup_logger(log_name=EXPERIMENT_NAME)
 
 DATASETS_PATH = constants.datasets_path
 
-TRAIN_PARQUET = DATASETS_PATH / "coco_contrastive_train.parquet"
-VAL_PARQUET = DATASETS_PATH / "coco_contrastive_val.parquet"
-TEST_PARQUET = DATASETS_PATH / "coco_contrastive_test.parquet"
+TRAIN_PARQUET = DATASETS_PATH / "aro_train.parquet"
+VAL_PARQUET = DATASETS_PATH / "aro_val.parquet"
+TEST_PARQUET = DATASETS_PATH / "aro_test.parquet"
 
+# 4th element is the pre-computed contraction path column (used only in non-linear mode).
 COMPILED_COLUMNS = [
-    ("true_diagram", "true_symbols", "true_caption"),
-    ("false_diagram", "false_symbols", "false_caption"),
+    ("true_diagram", "true_symbols", "true_caption", "true_path"),
+    ("false_diagram", "false_symbols", "false_caption", "false_path"),
 ]
 SYMBOL_COLS = ["true_symbols", "false_symbols"]
 
@@ -57,6 +58,8 @@ def run():
         ]
     )
 
+    nlc = cfg.use_non_linear_contractions
+
     loaders, datasets = get_dataloaders(
         train_parquet=TRAIN_PARQUET,
         val_parquet=VAL_PARQUET,
@@ -65,16 +68,21 @@ def run():
         train_transform=train_transform,
         val_transform=val_transform,
         compiled_columns=COMPILED_COLUMNS,
+        use_non_linear_contractions=nlc,
     )
     train_loader, val_loader, test_loader = loaders
     train_ds, val_ds, test_ds = datasets
 
     logger.info(f"Train: {len(train_ds)} | Val: {len(val_ds)} | Test: {len(test_ds)}")
 
-    symbols, sizes = collect_symbol_sizes([train_ds, val_ds, test_ds], SYMBOL_COLS)
+    symbols, sizes = collect_symbol_sizes(
+        [train_ds, val_ds, test_ds],
+        SYMBOL_COLS,
+        remap={constants.embedding_dim: cfg.embedding_dim, constants.bond_dim: cfg.bond_dim},
+    )
     logger.info(f"Collected {len(symbols)} unique symbols.")
 
-    text_model = EinsumModel(symbols, sizes).to(device)
+    text_model = EinsumModel(symbols, sizes, non_linear_contractions=nlc).to(device)
     image_model = TTNImageModel(cfg.embedding_dim).to(device)
     model = ContrastiveVLM(text_model, image_model, embedding_dim=cfg.embedding_dim).to(device)
 

@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Any, Callable
 
+import orjson
 import polars as pl
 import torch
 import torchvision.io
@@ -38,11 +39,19 @@ class WinogroundDataset(Dataset):
         parquet_path: str | Path,
         mode: str = "train",
         image_transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
+        use_non_linear_contractions: bool = False,
     ):
         assert mode in ("train", "eval"), f"mode must be 'train' or 'eval', got '{mode}'"
         self.mode = mode
         self.image_transform = image_transform
+        self.use_non_linear_contractions = use_non_linear_contractions
         self.df = pl.read_parquet(parquet_path)
+
+        if use_non_linear_contractions and "cap0_path" not in self.df.columns:
+            raise ValueError(
+                "use_non_linear_contractions=True but parquet has no 'cap0_path' column. "
+                "Recreate the dataset with compute_contraction_paths=True."
+            )
 
     def __len__(self) -> int:
         return 2 * len(self.df) if self.mode == "train" else len(self.df)
@@ -56,6 +65,10 @@ class WinogroundDataset(Dataset):
     def _get_caption(self, row: dict[str, Any], index: int) -> tuple:
         diagram = row[f"cap{index}_diagram"]
         symbols = _deserialize_symbols(row[f"cap{index}_symbols"])
+        if self.use_non_linear_contractions:
+            raw_path = row[f"cap{index}_path"]
+            path = [tuple(step) for step in orjson.loads(raw_path)] if raw_path else None
+            return (diagram, symbols, path)
         return (diagram, symbols)
 
     def __getitem__(self, idx: int) -> dict[str, Any]:

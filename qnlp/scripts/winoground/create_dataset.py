@@ -16,4 +16,5 @@ if __name__ == "__main__":
             pl.col("sample_id").str.split("__").list.first().alias("pair_id")
         ),
         group_column="pair_id",
+        compute_contraction_paths=True,
     )

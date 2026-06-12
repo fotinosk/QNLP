@@ -14,6 +14,9 @@ _OUTPUT_COLUMNS = [
     "cap1_symbols",
 ]
 
+# Included only when atoms carry pre-computed contraction paths.
+_PATH_OUTPUT_COLUMNS = ["cap0_path", "cap1_path"]
+
 
 class WinogroundPairStrategy:
     """
@@ -33,6 +36,9 @@ class WinogroundPairStrategy:
     """
 
     def compose(self, atoms: pl.DataFrame) -> pl.DataFrame:
+        has_path = "path" in atoms.columns
+        base_cols = ["pair_id", "local_image_path", "diagram", "symbols"] + (["path"] if has_path else [])
+
         atoms = atoms.with_columns(
             [
                 pl.col("sample_id").str.split("__").list.first().alias("pair_id"),
@@ -42,24 +48,26 @@ class WinogroundPairStrategy:
 
         cap0 = (
             atoms.filter(pl.col("caption_index") == "0")
-            .select(["pair_id", "local_image_path", "diagram", "symbols"])
+            .select(base_cols)
             .rename(
                 {
                     "local_image_path": "local_image_0_path",
                     "diagram": "cap0_diagram",
                     "symbols": "cap0_symbols",
+                    **({"path": "cap0_path"} if has_path else {}),
                 }
             )
         )
 
         cap1 = (
             atoms.filter(pl.col("caption_index") == "1")
-            .select(["pair_id", "local_image_path", "diagram", "symbols"])
+            .select(base_cols)
             .rename(
                 {
                     "local_image_path": "local_image_1_path",
                     "diagram": "cap1_diagram",
                     "symbols": "cap1_symbols",
+                    **({"path": "cap1_path"} if has_path else {}),
                 }
             )
         )
@@ -72,4 +80,5 @@ class WinogroundPairStrategy:
                 f"Dropped {dropped} pairs where one atom was missing " "(CCG compilation failure or split mismatch)."
             )
 
-        return paired.select(_OUTPUT_COLUMNS)
+        output_columns = _OUTPUT_COLUMNS + (_PATH_OUTPUT_COLUMNS if has_path else [])
+        return paired.select(output_columns)

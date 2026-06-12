@@ -43,4 +43,10 @@ class AROContrastiveStep:
             metrics["false_cosine_mean"] = neg_sim.mean()
             metrics["hard_neg_acc"] = (pos_sim > neg_sim).float().mean()
 
+            # Surface the non-linear contraction gate so its trajectory is logged
+            # per epoch — it's the verdict on whether non-linearity is being used.
+            gate = getattr(model.text_model, "nonlinear_gate", None)
+            if gate is not None:
+                metrics["nonlinear_gate"] = gate.detach()
+
         return loss, metrics
