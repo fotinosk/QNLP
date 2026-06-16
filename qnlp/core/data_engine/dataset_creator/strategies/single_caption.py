@@ -1,6 +1,7 @@
 import polars as pl
 
-_OUTPUT_COLUMNS = ["sample_id", "local_image_path", "processed_text", "text_hash", "diagram", "symbols"]
+# "path" is included only when atoms carry pre-computed contraction paths.
+_OUTPUT_COLUMNS = ["sample_id", "local_image_path", "processed_text", "text_hash", "diagram", "symbols", "path"]
 
 
 class SingleCaptionStrategy:

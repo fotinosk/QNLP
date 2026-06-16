@@ -6,6 +6,7 @@ import torch.nn as nn
 from cotengra import einsum
 from lambeq import Symbol
 
+from qnlp.core.non_linear_contraction.atom import IntermediateTooLargeError
 from qnlp.core.non_linear_contraction.einsum_interface import contract_einsum_non_linearly
 
 torch.serialization.add_safe_globals([Symbol])
@@ -132,7 +133,19 @@ class EinsumModel(nn.Module):
 
         tensors = [self.sym2weight[sym] for sym in symbols]
         gate = self.nonlinear_gate if self.non_linear_contractions else None
-        x = self.contractions_function(einsum_expr, tensors, path, gate=gate)
+        try:
+            x = self.contractions_function(einsum_expr, tensors, path, gate=gate)
+        except IntermediateTooLargeError:
+            # Skip this diagram: return a NaN sentinel sized to the output index.
+            # Downstream the training step drops non-finite rows from the batch.
+            output_idx = einsum_expr.split("->")[1]
+            size_map = {
+                c: dim
+                for repr_, t in zip(einsum_expr.split("->")[0].split(","), tensors)
+                for c, dim in zip(repr_, t.shape)
+            }
+            out_dim = size_map[output_idx[0]] if output_idx else 1
+            return torch.full((out_dim,), float("nan"), device=tensors[0].device, dtype=tensors[0].dtype)
         if x.ndim != 1:
             shapes = {str(sym): tuple(self.sym2weight[sym].shape) for sym in symbols}
             raise RuntimeError(

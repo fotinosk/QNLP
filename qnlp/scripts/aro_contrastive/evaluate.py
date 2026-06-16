@@ -156,8 +156,12 @@ def evaluate(checkpoint_path: Path, split: str = "test", batch_size: int | None 
             pos = F.cosine_similarity(outputs["true_caption_embeddings"], outputs["image_embeddings"])
             neg = F.cosine_similarity(outputs["false_caption_embeddings"], outputs["image_embeddings"])
             correct = (pos > neg).tolist()
+            finite = (torch.isfinite(pos) & torch.isfinite(neg)).tolist()
 
             for j, i in enumerate(valid):
+                if not finite[j]:  # diagram skipped during contraction — exclude from metric
+                    n_skipped += 1
+                    continue
                 task = task_map[sample_ids[i]]
                 correct_by_task[task].append(bool(correct[j]))
                 pos_by_task[task].append(float(pos[j]))

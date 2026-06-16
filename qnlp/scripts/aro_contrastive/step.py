@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
+from qnlp.core.training.batch_utils import drop_nonfinite_rows
 from qnlp.core.training.losses.contrastive import ContrastiveLoss
 
 
@@ -34,7 +35,22 @@ class AROContrastiveStep:
         false_captions = batch["false_caption"]
 
         outputs = model(images, true_captions, false_captions)
+
+        # Drop diagrams skipped during non-linear contraction (NaN embeddings) from
+        # image/true/false together, keeping the triple aligned.
+        outputs, n_dropped = drop_nonfinite_rows(
+            outputs, ["image_embeddings", "true_caption_embeddings", "false_caption_embeddings"]
+        )
+
+        # Whole batch skipped — return a grad-connected zero so backward is a no-op.
+        if outputs["image_embeddings"].shape[0] == 0:
+            return torch.zeros((), device=self.device, requires_grad=True), {
+                "n_skipped": images.new_tensor(float(n_dropped))
+            }
+
         loss, metrics = self.loss_fn(outputs)
+        if n_dropped:
+            metrics["n_skipped"] = images.new_tensor(float(n_dropped))
 
         with torch.no_grad():
             pos_sim = F.cosine_similarity(outputs["true_caption_embeddings"], outputs["image_embeddings"])

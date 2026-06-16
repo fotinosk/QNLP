@@ -9,4 +9,5 @@ if __name__ == "__main__":
         derived_dirs=[COCO_DERIVED_DIR],
         strategy=SingleCaptionStrategy(),
         output_name="coco_single_caption",
+        compute_contraction_paths=True,
     )

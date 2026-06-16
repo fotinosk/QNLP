@@ -30,6 +30,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 
 from qnlp.constants import constants
+from qnlp.core.training.batch_utils import drop_nonfinite_rows
 from qnlp.core.training.losses.contrastive import ContrastiveLoss
 from qnlp.discoviz.models.einsum_model import EinsumModel
 from qnlp.discoviz.models.lookup_embeddings import LookupEmbedding
@@ -126,6 +127,11 @@ def _run_epoch(text_model, image_lookup, loader, loss_fn, optimizer, device, tra
             if train:
                 optimizer.zero_grad()
             outputs = _embed(text_model, image_lookup, batch, device)
+            outputs, _ = drop_nonfinite_rows(
+                outputs, ["image_embeddings", "true_caption_embeddings", "false_caption_embeddings"]
+            )
+            if outputs["image_embeddings"].shape[0] == 0:
+                continue
             loss, metrics = loss_fn(outputs)
 
             if train:
@@ -158,9 +164,11 @@ def _evaluate_by_task(text_model, image_lookup, loader, device) -> dict[str, dic
             outputs = _embed(text_model, image_lookup, batch, device)
             pos = F.cosine_similarity(outputs["true_caption_embeddings"], outputs["image_embeddings"])
             neg = F.cosine_similarity(outputs["false_caption_embeddings"], outputs["image_embeddings"])
+            finite = (torch.isfinite(pos) & torch.isfinite(neg)).tolist()
             correct = (pos > neg).tolist()
-            for sid, c in zip(batch["sample_id"], correct):
-                correct_by_task[task_map[sid]].append(bool(c))
+            for sid, c, ok in zip(batch["sample_id"], correct, finite):
+                if ok:  # skip diagrams that were dropped during contraction
+                    correct_by_task[task_map[sid]].append(bool(c))
 
     results = {}
     all_c: list[bool] = []

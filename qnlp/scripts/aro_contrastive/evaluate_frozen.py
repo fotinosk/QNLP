@@ -87,7 +87,10 @@ def evaluate(checkpoint_path: Path, split: str = "test", batch_size: int = 128) 
             pos = F.cosine_similarity(outputs["true_caption_embeddings"], outputs["image_embeddings"])
             neg = F.cosine_similarity(outputs["false_caption_embeddings"], outputs["image_embeddings"])
             correct = (pos > neg).tolist()
-            for sid, c, p, n in zip(batch["sample_id"], correct, pos.tolist(), neg.tolist()):
+            finite = (torch.isfinite(pos) & torch.isfinite(neg)).tolist()
+            for sid, c, p, n, ok in zip(batch["sample_id"], correct, pos.tolist(), neg.tolist(), finite):
+                if not ok:  # diagram skipped during contraction — exclude from metric
+                    continue
                 task = task_map[sid]
                 correct_by_task[task].append(bool(c))
                 pos_by_task[task].append(float(p))

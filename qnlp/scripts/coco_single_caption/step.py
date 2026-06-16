@@ -1,6 +1,8 @@
+import torch
 import torch.nn as nn
 from torch import Tensor
 
+from qnlp.core.training.batch_utils import drop_nonfinite_rows
 from qnlp.core.training.losses.single_caption import SingleCaptionLoss
 
 
@@ -44,9 +46,28 @@ class COCOSingleCaptionStep:
 
         outputs = model(images, captions)
 
-        return self.loss_fn(
-            {
-                "image_embeddings": outputs["image_embeddings"],
-                "caption_embeddings": outputs["true_caption_embeddings"],
+        # Drop diagrams skipped during non-linear contraction (NaN embeddings),
+        # keeping image/caption rows aligned.
+        loss_inputs = {
+            "image_embeddings": outputs["image_embeddings"],
+            "caption_embeddings": outputs["true_caption_embeddings"],
+        }
+        loss_inputs, n_dropped = drop_nonfinite_rows(loss_inputs, list(loss_inputs))
+
+        # Whole batch skipped — return a grad-connected zero so backward is a no-op.
+        if loss_inputs["image_embeddings"].shape[0] == 0:
+            return torch.zeros((), device=self.device, requires_grad=True), {
+                "n_skipped": images.new_tensor(float(n_dropped))
             }
-        )
+
+        loss, metrics = self.loss_fn(loss_inputs)
+        if n_dropped:
+            metrics["n_skipped"] = images.new_tensor(float(n_dropped))
+
+        # Surface the non-linear contraction gate so its trajectory is logged
+        # per epoch — the verdict on whether non-linearity is being used.
+        gate = getattr(model.text_model, "nonlinear_gate", None)
+        if gate is not None:
+            metrics["nonlinear_gate"] = gate.detach()
+
+        return loss, metrics

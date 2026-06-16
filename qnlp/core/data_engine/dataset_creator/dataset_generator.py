@@ -32,14 +32,18 @@ def _time_limit(seconds: float):
         signal.signal(signal.SIGALRM, old)
 
 
-def add_contraction_paths(atoms: pl.DataFrame, timeout_seconds: float = 10.0) -> pl.DataFrame:
+def add_contraction_paths(atoms: pl.DataFrame, timeout_seconds: float = 10.0, max_symbols: int = 200) -> pl.DataFrame:
     """Compute the non-linear contraction path for each atom's diagram and add it
     as a JSON-serialised `path` column.
 
     Derived purely from the already-fetched `diagram` and `symbols` (no LMDB cache
-    changes). Atoms whose path times out or would produce an intermediate larger
-    than MAX_INTERMEDIATE_ELEMENTS get `path = None` (excluded later via require_path).
+    changes). Atoms get `path = None` (excluded later via require_path) when they
+    have more than `max_symbols` operands (branch-2 path search is exponential in
+    operand count, so long diagrams are skipped outright), time out, or would
+    produce an intermediate larger than MAX_INTERMEDIATE_ELEMENTS.
     """
+    from tqdm import tqdm
+
     from qnlp.core.non_linear_contraction.determine_optimal_contraction_path import (
         MAX_INTERMEDIATE_ELEMENTS,
         get_contraction_path_and_cost,
@@ -55,7 +59,7 @@ def add_contraction_paths(atoms: pl.DataFrame, timeout_seconds: float = 10.0) ->
     # thousands of times, and path planning is the expensive part.
     cache: dict[tuple, str | None] = {}
 
-    for diagram, sym_json in zip(diagrams, symbols_list):
+    for diagram, sym_json in tqdm(zip(diagrams, symbols_list), total=len(diagrams), desc="Computing contraction paths"):
         if diagram is None or sym_json is None:
             paths.append(None)
             continue
@@ -69,17 +73,22 @@ def add_contraction_paths(atoms: pl.DataFrame, timeout_seconds: float = 10.0) ->
             n_failed += result is None
             continue
 
-        try:
-            with _time_limit(timeout_seconds):
-                path, largest_intermediate = get_contraction_path_and_cost(diagram, shapes)
-            if largest_intermediate > MAX_INTERMEDIATE_ELEMENTS:
-                raise ValueError(f"largest intermediate {largest_intermediate:,} > {MAX_INTERMEDIATE_ELEMENTS:,}")
-            result = orjson.dumps(path).decode()
-            n_ok += 1
-        except Exception as e:
+        if len(shapes) > max_symbols:
+            # Skip outright — branch-2 cost is exponential in operand count.
             result = None
             n_failed += 1
-            logger.warning(f"Contraction path failed for diagram '{diagram[:60]}...': {e}")
+        else:
+            try:
+                with _time_limit(timeout_seconds):
+                    path, largest_intermediate = get_contraction_path_and_cost(diagram, shapes)
+                if largest_intermediate > MAX_INTERMEDIATE_ELEMENTS:
+                    raise ValueError(f"largest intermediate {largest_intermediate:,} > {MAX_INTERMEDIATE_ELEMENTS:,}")
+                result = orjson.dumps(path).decode()
+                n_ok += 1
+            except Exception as e:
+                result = None
+                n_failed += 1
+                logger.warning(f"Contraction path failed for diagram '{diagram[:60]}...': {e}")
 
         cache[key] = result
         paths.append(result)
@@ -194,7 +203,7 @@ def enrich_atoms(
             logger.warning(f"Dropped {dropped_2d} atoms with 2D diagram outputs.")
 
     if compute_contraction_paths:
-        atoms = add_contraction_paths(atoms, path_timeout_seconds)
+        atoms = add_contraction_paths(atoms, path_timeout_seconds, max_symbols=20)
         before = len(atoms)
         atoms = atoms.filter(pl.col("path").is_not_null())
         dropped_path = before - len(atoms)

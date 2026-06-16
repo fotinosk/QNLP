@@ -24,11 +24,12 @@ EXPERIMENT_NAME = "coco_single_caption"
 logger = setup_logger(log_name=EXPERIMENT_NAME)
 
 DATASETS_PATH = constants.datasets_path
-TRAIN_PARQUET = DATASETS_PATH / "coco_short_caption_train.parquet"
-VAL_PARQUET = DATASETS_PATH / "coco_short_caption_val.parquet"
-TEST_PARQUET = DATASETS_PATH / "coco_short_caption_test.parquet"
+TRAIN_PARQUET = DATASETS_PATH / "coco_single_caption_train.parquet"
+VAL_PARQUET = DATASETS_PATH / "coco_single_caption_val.parquet"
+TEST_PARQUET = DATASETS_PATH / "coco_single_caption_test.parquet"
 
-COMPILED_COLUMNS = [("diagram", "symbols", "caption")]
+# 4th element is the pre-computed contraction path column (used only in non-linear mode).
+COMPILED_COLUMNS = [("diagram", "symbols", "caption", "path")]
 SYMBOL_COLS = ["symbols"]
 
 
@@ -61,6 +62,7 @@ def run():
         train_transform=train_transform,
         val_transform=val_transform,
         compiled_columns=COMPILED_COLUMNS,
+        use_non_linear_contractions=cfg.use_non_linear_contractions,
     )
     train_loader, val_loader, test_loader = loaders
     train_ds, val_ds, test_ds = datasets
@@ -74,7 +76,7 @@ def run():
     )
     logger.info(f"Collected {len(symbols)} unique symbols.")
 
-    text_model = EinsumModel(symbols, sizes).to(device)
+    text_model = EinsumModel(symbols, sizes, non_linear_contractions=cfg.use_non_linear_contractions).to(device)
     image_model = TTNImageModel(cfg.embedding_dim).to(device)
     model = ContrastiveVLM(text_model, image_model, embedding_dim=cfg.embedding_dim).to(device)
 

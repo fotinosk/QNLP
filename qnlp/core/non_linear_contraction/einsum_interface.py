@@ -3,11 +3,8 @@ from collections.abc import Callable
 import torch
 from cotengra import einsum  # supports non-alpha index characters, unlike torch.einsum
 
-from qnlp.core.non_linear_contraction.atom import IntermediateTooLargeError, non_linear_contraction
+from qnlp.core.non_linear_contraction.atom import non_linear_contraction
 from qnlp.core.non_linear_contraction.determine_optimal_contraction_path import get_contraction_path
-from qnlp.utils.logging import setup_logger
-
-logger = setup_logger(log_name="non_linear_contraction")
 
 
 def contract_einsum_non_linearly(
@@ -33,25 +30,18 @@ def contract_einsum_non_linearly(
         left_repr, left_tensor = operands.pop(j)
         right_repr, right_tensor = operands.pop(i)
 
-        try:
-            new_tensor, new_repr = non_linear_contraction(
-                left_tensor=left_tensor,
-                left_einsum_repr=left_repr,
-                right_tensor=right_tensor,
-                right_einsum_repr=right_repr,
-                non_linear_fn=non_linear_fn,
-                protected_indices=protected_indices,
-                gate=gate,
-            )
-        except IntermediateTooLargeError as e:
-            logger.warning(
-                f"Large intermediate in diagram {einsum_str!r} — "
-                f"falling back to linear einsum for full diagram. {e}"
-            )
-            result = einsum(einsum_str, *symbols)
-            g = gate if gate is not None else 1.0
-            return result + g * non_linear_fn(result)
-
+        # On a too-large intermediate this raises IntermediateTooLargeError, which
+        # propagates up to EinsumModel._forward_single so the diagram is skipped
+        # (rather than silently falling back to a linear contraction).
+        new_tensor, new_repr = non_linear_contraction(
+            left_tensor=left_tensor,
+            left_einsum_repr=left_repr,
+            right_tensor=right_tensor,
+            right_einsum_repr=right_repr,
+            non_linear_fn=non_linear_fn,
+            protected_indices=protected_indices,
+            gate=gate,
+        )
         operands.append((new_repr, new_tensor))
 
     curr_repr, curr_symbol = operands[0]
