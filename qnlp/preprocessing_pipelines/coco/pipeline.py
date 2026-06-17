@@ -10,7 +10,10 @@ schema_step = SchemaMappingStep(column_mapping={"sentences_raw": "processed_text
 remove_dots_step = RemoveTrailingDotsStep(text_column="processed_text")
 lemma_step = LemmatizeStep(text_column="processed_text")
 ccg_parsing_step = CCGCompilerStep(
-    lmdb_path=constants.lmdb_path, bond_dim=constants.bond_dim, embedding_dim=constants.embedding_dim
+    lmdb_path=constants.lmdb_path,
+    bond_dim=constants.bond_dim,
+    embedding_dim=constants.embedding_dim,
+    cache_path=str(constants.bobcat_cache_path),
 )
 unification_step = UnifyEinsumRankStep()
 

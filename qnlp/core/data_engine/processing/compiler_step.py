@@ -16,7 +16,7 @@ _worker_processor = None
 logger = setup_logger(log_name="ccg_parser")
 
 
-def _worker_init(bond_dim: int, embedding_dim: int, device: str, rules: list[str]):
+def _worker_init(bond_dim: int, embedding_dim: int, device: str, rules: list[str], cache_path: str):
     """Initialise heavy CCG objects ONCE per worker process."""
     global _worker_processor
     from lambeq import AtomicType, Rewriter
@@ -34,7 +34,7 @@ def _worker_init(bond_dim: int, embedding_dim: int, device: str, rules: list[str
         },
         bond_dim=bond_dim,
     )
-    parser = CachedBobcatParser(device=device)
+    parser = CachedBobcatParser(device=device, cache_path=cache_path)
     _worker_processor = BobcatTextProcessor(
         ccg_parser=parser,
         ansatz=ansatz,
@@ -78,6 +78,7 @@ class CCGCompilerStep(PipelineStep):
         bond_dim: int = 10,
         embedding_dim: int = 50,
         device: str = "mps",
+        cache_path: str = "~/.cache/lambeq/bobcat/diskcache",
         max_workers: int = 2,
         worker_batch_size: int = 1000,
         max_tasks_per_child: int = 5,
@@ -87,6 +88,7 @@ class CCGCompilerStep(PipelineStep):
         self.bond_dim = bond_dim
         self.embedding_dim = embedding_dim
         self.device = device
+        self.cache_path = cache_path
         self.max_workers = max_workers
         self.worker_batch_size = worker_batch_size
         self.max_tasks_per_child = max_tasks_per_child
@@ -109,7 +111,7 @@ class CCGCompilerStep(PipelineStep):
             self._pool = mp.Pool(
                 processes=self.max_workers,
                 initializer=_worker_init,
-                initargs=(self.bond_dim, self.embedding_dim, self.device, self.rules),
+                initargs=(self.bond_dim, self.embedding_dim, self.device, self.rules, self.cache_path),
                 maxtasksperchild=self.max_tasks_per_child,  # Forces worker restart to free RAM
             )
         return self._pool

@@ -24,9 +24,6 @@ EXPERIMENT_NAME = "coco_single_caption"
 logger = setup_logger(log_name=EXPERIMENT_NAME)
 
 DATASETS_PATH = constants.datasets_path
-TRAIN_PARQUET = DATASETS_PATH / "coco_single_caption_train.parquet"
-VAL_PARQUET = DATASETS_PATH / "coco_single_caption_val.parquet"
-TEST_PARQUET = DATASETS_PATH / "coco_single_caption_test.parquet"
 
 # 4th element is the pre-computed contraction path column (used only in non-linear mode).
 COMPILED_COLUMNS = [("diagram", "symbols", "caption", "path")]
@@ -37,6 +34,14 @@ def run():
     cfg = ExperimentConfig()
     set_seed()
     device = get_device()
+
+    # Linear and non-linear use different datasets: the linear one is built fast
+    # without contraction paths; the non-linear one carries the `path` column.
+    dataset = "coco_single_caption_nlc" if cfg.use_non_linear_contractions else "coco_single_caption"
+    TRAIN_PARQUET = DATASETS_PATH / f"{dataset}_train.parquet"
+    VAL_PARQUET = DATASETS_PATH / f"{dataset}_val.parquet"
+    TEST_PARQUET = DATASETS_PATH / f"{dataset}_test.parquet"
+    logger.info(f"Using dataset '{dataset}' (non_linear={cfg.use_non_linear_contractions})")
 
     size = image_model_hyperparams.image_size
     train_transform = transforms.Compose(
