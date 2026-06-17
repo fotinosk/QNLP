@@ -40,6 +40,8 @@ def add_contraction_paths(atoms: pl.DataFrame, timeout_seconds: float = 10.0) ->
     changes). Atoms whose path times out or would produce an intermediate larger
     than MAX_INTERMEDIATE_ELEMENTS get `path = None` (excluded later via require_path).
     """
+    from tqdm import tqdm
+
     from qnlp.core.non_linear_contraction.determine_optimal_contraction_path import (
         MAX_INTERMEDIATE_ELEMENTS,
         get_contraction_path_and_cost,
@@ -52,10 +54,13 @@ def add_contraction_paths(atoms: pl.DataFrame, timeout_seconds: float = 10.0) ->
     n_failed = 0
 
     # Memoise on (diagram, shapes): templated captions produce the same topology
-    # thousands of times, and path planning is the expensive part.
+    # thousands of times, and path planning is the expensive part. A cache miss on a
+    # long diagram can take up to `timeout_seconds`, so the bar may crawl on novel ones.
     cache: dict[tuple, str | None] = {}
 
-    for diagram, sym_json in zip(diagrams, symbols_list):
+    bar = tqdm(zip(diagrams, symbols_list), total=len(diagrams), desc="Computing contraction paths")
+    for diagram, sym_json in bar:
+        bar.set_postfix(ok=n_ok, failed=n_failed, topologies=len(cache))
         if diagram is None or sym_json is None:
             paths.append(None)
             continue
@@ -105,9 +110,11 @@ def _fetch_lmdb_fields(atoms: pl.DataFrame, lmdb_path: Path) -> tuple[pl.DataFra
     hash_to_symbols: dict[str, str] = {}
 
     try:
+        from tqdm import tqdm
+
         unique_hashes = atoms["text_hash"].drop_nulls().unique().to_list()
         with env.begin() as txn:
-            for h in unique_hashes:
+            for h in tqdm(unique_hashes, desc="Fetching diagrams from LMDB"):
                 val = txn.get(h.encode("utf-8"))
                 if val:
                     data = orjson.loads(val)
@@ -175,7 +182,9 @@ def enrich_atoms(
     if not chunk_files:
         raise FileNotFoundError(f"No chunk_*.parquet files found in: {derived_dirs}")
 
+    logger.info(f"Reading {len(chunk_files)} derived chunk(s)...")
     atoms = pl.concat([pl.scan_parquet(f) for f in chunk_files], how="vertical_relaxed").collect()
+    logger.info(f"Read {len(atoms)} atoms. Fetching diagrams/symbols from LMDB...")
 
     diag_df, sym_df = _fetch_lmdb_fields(atoms, lmdb_path)
     atoms = atoms.join(diag_df, on="text_hash", how="left").join(sym_df, on="text_hash", how="left")
@@ -187,6 +196,7 @@ def enrich_atoms(
         logger.warning(f"Dropped {dropped} atoms with null diagram/symbols (CCG compilation failures).")
 
     if filter_2d_outputs:
+        logger.info("Filtering 2D-output diagrams...")
         before = len(atoms)
         atoms = atoms.filter(pl.col("diagram").map_elements(_is_1d_diagram, return_dtype=pl.Boolean))
         dropped_2d = before - len(atoms)
@@ -194,6 +204,7 @@ def enrich_atoms(
             logger.warning(f"Dropped {dropped_2d} atoms with 2D diagram outputs.")
 
     if compute_contraction_paths:
+        logger.info(f"Computing contraction paths for {len(atoms)} atoms...")
         atoms = add_contraction_paths(atoms, path_timeout_seconds)
         before = len(atoms)
         atoms = atoms.filter(pl.col("path").is_not_null())
