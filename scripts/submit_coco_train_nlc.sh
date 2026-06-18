@@ -1,7 +1,8 @@
 #!/bin/bash
-#$ -l tmem=16G
+#$ -l tmem=32G
 #$ -l h_rt=48:0:0
 #$ -l gpu=true
+#$ -l gpu_type=a40
 #$ -S /bin/bash
 #$ -j y
 #$ -N coco_train_nlc
@@ -38,6 +39,10 @@ export XDG_CACHE_HOME=$CACHE_DIR/.xdg_cache
 # --- Experiment config ---
 export ML_BOND_DIM=20
 export ML_USE_NON_LINEAR_CONTRACTIONS=true
+export ML_BATCH_SIZE=256
+
+# --- Reduce fragmentation from many small NLC intermediate tensors ---
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # --- MLflow: disabled on cluster, metrics go to job output log ---
 export MLFLOW_DISABLED=true
