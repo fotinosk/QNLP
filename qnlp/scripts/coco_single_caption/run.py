@@ -35,6 +35,13 @@ def run():
     set_seed()
     device = get_device()
 
+    logger.info("========================================")
+    logger.info("Experiment config:")
+    for k, v in cfg.model_dump().items():
+        logger.info(f"  {k}: {v}")
+    logger.info(f"  device: {device}")
+    logger.info("========================================")
+
     # Linear and non-linear use different datasets: the linear one is built fast
     # without contraction paths; the non-linear one carries the `path` column.
     dataset = "coco_single_caption_nlc" if cfg.use_non_linear_contractions else "coco_single_caption"
