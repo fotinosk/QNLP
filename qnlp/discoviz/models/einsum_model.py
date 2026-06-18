@@ -55,6 +55,7 @@ class EinsumModel(nn.Module):
         self._setup_contractions_function()
         self.reset_parameters()
         self.sym2weight = self.compute_sym2weight()
+        self._path_cache: dict[tuple, list | None] = {}
 
     def _setup_contractions_function(self):
         if self.non_linear_contractions:
@@ -125,19 +126,60 @@ class EinsumModel(nn.Module):
 
         self.sym2weight = self.compute_sym2weight()
 
+    def _get_path(self, einsum_expr: str, tensors: list[torch.Tensor]) -> list | None:
+        """Recompute a contraction path from actual tensor shapes via opt_einsum branch-2.
+
+        Only called when no stored path is available (e.g. cluster training where
+        bond_dim at training time exceeds bond_dim at dataset-creation time).
+        """
+        key = (einsum_expr, tuple(tuple(t.shape) for t in tensors))
+        if key not in self._path_cache:
+            from qnlp.core.non_linear_contraction.determine_optimal_contraction_path import (
+                MAX_INTERMEDIATE_ELEMENTS,
+                get_contraction_path_and_cost,
+            )
+
+            try:
+                path, largest = get_contraction_path_and_cost(einsum_expr, tuple(tuple(t.shape) for t in tensors))
+                self._path_cache[key] = path if largest <= MAX_INTERMEDIATE_ELEMENTS else None
+            except Exception:
+                self._path_cache[key] = None
+        return self._path_cache[key]
+
     def _forward_single(self, input: tuple) -> torch.Tensor:
-        # Input is (einsum_expr, symbols) or, for non-linear contractions,
-        # (einsum_expr, symbols, path) where path is pre-computed at dataset creation.
+        # input = (einsum_expr, symbols) for linear, or (einsum_expr, symbols, path) for NLC.
         einsum_expr, symbols = input[0], input[1]
-        path = input[2] if len(input) > 2 else None
+        stored_path = input[2] if len(input) > 2 else None
 
         tensors = [self.sym2weight[sym] for sym in symbols]
         gate = self.nonlinear_gate if self.non_linear_contractions else None
+
+        if self.non_linear_contractions:
+            # Prefer the stored path from the dataset — it was verified feasible at
+            # creation time and at training shapes it can only be cheaper (all dims
+            # are remapped to ≤ their creation values locally). If no stored path is
+            # present (rare: sample was added without path computation, or cluster
+            # run where bond_dim increased), fall back to recomputing.
+            if stored_path is not None:
+                path = stored_path
+            else:
+                path = self._get_path(einsum_expr, tensors)
+            if path is None:
+                # Infeasible: skip without attempting the contraction to avoid OOM.
+                output_idx = einsum_expr.split("->")[1]
+                size_map = {
+                    c: dim
+                    for repr_, t in zip(einsum_expr.split("->")[0].split(","), tensors)
+                    for c, dim in zip(repr_, t.shape)
+                }
+                out_dim = size_map[output_idx[0]] if output_idx else 1
+                return torch.full((out_dim,), float("nan"), device=tensors[0].device, dtype=tensors[0].dtype)
+        else:
+            path = None
+
         try:
             x = self.contractions_function(einsum_expr, tensors, path, gate=gate)
         except IntermediateTooLargeError:
-            # Skip this diagram: return a NaN sentinel sized to the output index.
-            # Downstream the training step drops non-finite rows from the batch.
             output_idx = einsum_expr.split("->")[1]
             size_map = {
                 c: dim
@@ -177,4 +219,5 @@ class EinsumModel(nn.Module):
         self.weights = nn.ParameterList([nn.Parameter(torch.empty(size)) for size in self.sizes])
 
         self.sym2weight = self.compute_sym2weight()
+        self._path_cache = {}
         return super().load_state_dict(state_dict, strict=strict)

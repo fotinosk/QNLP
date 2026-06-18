@@ -6,6 +6,7 @@ from torchvision import transforms
 
 from qnlp.constants import constants
 from qnlp.core.training.losses.single_caption import SingleCaptionLoss
+from qnlp.core.training.retrieval_eval import retrieval_metrics
 from qnlp.core.training.trainer import Trainer
 from qnlp.discoviz.models.einsum_model import EinsumModel
 from qnlp.discoviz.models.image_model import TTNImageModel, image_model_hyperparams
@@ -30,6 +31,21 @@ COMPILED_COLUMNS = [("diagram", "symbols", "caption", "path")]
 SYMBOL_COLS = ["symbols"]
 
 
+def _collect_retrieval_metrics(model, loader, device) -> dict[str, float]:
+    model.eval()
+    img_embs, txt_embs = [], []
+    with torch.no_grad():
+        for batch in loader:
+            images = batch["local_image_path"].to(device)
+            outputs = model(images, batch["caption"])
+            img_e = outputs["image_embeddings"]
+            txt_e = outputs["true_caption_embeddings"]
+            finite = torch.isfinite(img_e).all(-1) & torch.isfinite(txt_e).all(-1)
+            img_embs.append(img_e[finite].cpu())
+            txt_embs.append(txt_e[finite].cpu())
+    return retrieval_metrics(torch.cat(img_embs), torch.cat(txt_embs))
+
+
 def run():
     cfg = ExperimentConfig()
     set_seed()
@@ -44,7 +60,9 @@ def run():
 
     # Linear and non-linear use different datasets: the linear one is built fast
     # without contraction paths; the non-linear one carries the `path` column.
-    dataset = "coco_single_caption_nlc" if cfg.use_non_linear_contractions else "coco_single_caption"
+    dataset = cfg.dataset_name or (
+        "coco_single_caption_nlc" if cfg.use_non_linear_contractions else "coco_single_caption"
+    )
     TRAIN_PARQUET = DATASETS_PATH / f"{dataset}_train.parquet"
     VAL_PARQUET = DATASETS_PATH / f"{dataset}_val.parquet"
     TEST_PARQUET = DATASETS_PATH / f"{dataset}_test.parquet"
@@ -160,6 +178,10 @@ def run():
         )
 
         test_metrics = trainer.fit()
+
+        retrieval = _collect_retrieval_metrics(model, test_loader, device)
+        mlflow.log_metrics({f"test/{k}": v for k, v in retrieval.items()})
+        logger.info(f"Test retrieval: {retrieval}")
 
         mlflow.log_artifact(str(checkpoint_path))
         send_training_finished_notification(

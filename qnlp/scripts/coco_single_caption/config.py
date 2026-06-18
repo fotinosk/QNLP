@@ -9,6 +9,10 @@ class ExperimentConfig(BaseSettings):
     # to have been created with compute_contraction_paths=True.
     use_non_linear_contractions: bool = True
 
+    # Override the dataset name (default derived from use_non_linear_contractions).
+    # E.g. ML_DATASET_NAME=coco_single_caption_nlc_tiny for local dev.
+    dataset_name: str | None = None
+
     batch_size: int = 512
     text_lr: float = 0.001
     text_weight_decay: float = 0.001

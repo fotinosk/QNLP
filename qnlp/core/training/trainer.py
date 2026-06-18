@@ -108,8 +108,10 @@ class Trainer:
 
             if self.monitor_metric not in val_metrics:
                 raise KeyError(
-                    f"monitor_metric '{self.monitor_metric}' not found in step metrics. "
-                    f"Available: {list(val_metrics.keys())}"
+                    f"monitor_metric '{self.monitor_metric}' not found in val metrics "
+                    f"(available: {list(val_metrics.keys())}). "
+                    "All samples may have been skipped — check that contractions are feasible "
+                    "at the configured tensor sizes."
                 )
 
             status = self._early_stopping(val_metrics[self.monitor_metric])

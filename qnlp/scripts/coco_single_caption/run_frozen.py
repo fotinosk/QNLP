@@ -25,6 +25,7 @@ from torch.utils.data import DataLoader, Dataset
 from qnlp.constants import constants
 from qnlp.core.training.batch_utils import drop_nonfinite_rows
 from qnlp.core.training.losses.single_caption import SingleCaptionLoss
+from qnlp.core.training.retrieval_eval import retrieval_metrics
 from qnlp.discoviz.models.einsum_model import EinsumModel
 from qnlp.domain.datasets.dataset import _deserialize_symbols, collect_symbol_sizes
 from qnlp.scripts.coco_single_caption.config import ExperimentConfig
@@ -106,8 +107,29 @@ def _collate(batch: list[dict]) -> dict:
     return {k: [item[k] for item in batch] for k in batch[0]}
 
 
+def _collect_retrieval_metrics(
+    text_model: nn.Module,
+    text_head: nn.Module,
+    image_cache: "CLIPImageCache",
+    loader: DataLoader,
+) -> dict[str, float]:
+    text_model.eval()
+    text_head.eval()
+    img_embs, txt_embs = [], []
+    with torch.no_grad():
+        for batch in loader:
+            img_e = image_cache(batch["image_path"])
+            txt_e = F.normalize(text_head(text_model(batch["caption"])), dim=-1)
+            finite = torch.isfinite(img_e).all(-1) & torch.isfinite(txt_e).all(-1)
+            img_embs.append(img_e[finite].cpu())
+            txt_embs.append(txt_e[finite].cpu())
+    return retrieval_metrics(torch.cat(img_embs), torch.cat(txt_embs))
+
+
 def _build_loaders(cfg: ExperimentConfig) -> dict[str, DataLoader]:
-    dataset_name = "coco_single_caption_nlc" if cfg.use_non_linear_contractions else "coco_single_caption"
+    dataset_name = cfg.dataset_name or (
+        "coco_single_caption_nlc" if cfg.use_non_linear_contractions else "coco_single_caption"
+    )
     splits = {
         "train": DATASETS_PATH / f"{dataset_name}_train.parquet",
         "val": DATASETS_PATH / f"{dataset_name}_val.parquet",
@@ -260,6 +282,10 @@ def run() -> None:
         )
         mlflow.log_metrics({f"test/{k}": v for k, v in test_metrics.items()})
         logger.info(f"Test: {test_metrics}")
+
+        retrieval = _collect_retrieval_metrics(text_model, text_head, image_cache, loaders["test"])
+        mlflow.log_metrics({f"test/{k}": v for k, v in retrieval.items()})
+        logger.info(f"Test retrieval: {retrieval}")
 
         mlflow.log_artifact(str(checkpoint_path))
         send_training_finished_notification({"experiment": EXPERIMENT_NAME, "run": run.info.run_name, **test_metrics})

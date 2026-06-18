@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils import clip_grad_norm_
@@ -48,14 +49,34 @@ class ContrastiveVLM(nn.Module):
 
     def forward(self, images, true_captions, false_captions=None) -> dict:
         image_emb = self.image_head(self.image_model(images))
-        true_emb = self.text_head(self.text_model(true_captions))
+        true_emb = self._safe_text_embed(true_captions)
         outputs = {
             "image_embeddings": image_emb,
             "true_caption_embeddings": true_emb,
         }
         if false_captions is not None:
-            outputs["false_caption_embeddings"] = self.text_head(self.text_model(false_captions))
+            outputs["false_caption_embeddings"] = self._safe_text_embed(false_captions)
         return outputs
+
+    def _safe_text_embed(self, captions) -> "torch.Tensor":
+        """Apply text_model → text_head, preventing NaN gradient contamination.
+
+        Infeasible NLC contractions return a NaN sentinel from EinsumModel. If
+        those NaN rows are passed directly through text_head (an nn.Linear),
+        backprop computes grad_weight = grad_output.T @ input, and
+        0 * nan = nan in IEEE arithmetic — poisoning text_head.weight even
+        though those rows are masked out by drop_nonfinite_rows.
+
+        Fix: replace NaN rows with 0 before text_head (so 0 * 0 = 0 in backprop),
+        apply text_head, then restore NaN so drop_nonfinite_rows still filters them.
+        """
+        import torch
+
+        text_out = self.text_model(captions)
+        finite = torch.isfinite(text_out).all(dim=-1, keepdim=True)
+        text_out_safe = torch.where(finite, text_out, torch.zeros_like(text_out))
+        emb = self.text_head(text_out_safe)
+        return torch.where(finite, emb, torch.full_like(emb, float("nan")))
 
     def load_state_dict(self, state_dict, strict: bool = True):
         # EinsumModel injects "symbols_list"/"sizes_list" as bare (unprefixed) keys.
