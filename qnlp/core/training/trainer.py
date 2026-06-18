@@ -99,11 +99,13 @@ class Trainer:
                 self.step.on_epoch_start(epoch)
 
             train_metrics = self._run_epoch(self.train_loader, train=True)
-            mlflow.log_metrics({f"train/epoch_{k}": v for k, v in train_metrics.items()}, step=epoch)
+            if mlflow.active_run():
+                mlflow.log_metrics({f"train/epoch_{k}": v for k, v in train_metrics.items()}, step=epoch)
             logger.info(f"Epoch {epoch} train: {train_metrics}")
 
             val_metrics = self._run_epoch(self.val_loader, train=False)
-            mlflow.log_metrics({f"val/epoch_{k}": v for k, v in val_metrics.items()}, step=epoch)
+            if mlflow.active_run():
+                mlflow.log_metrics({f"val/epoch_{k}": v for k, v in val_metrics.items()}, step=epoch)
             logger.info(f"Epoch {epoch} val: {val_metrics}")
 
             if self.monitor_metric not in val_metrics:
@@ -131,7 +133,8 @@ class Trainer:
         self._load_checkpoint()
 
         test_metrics = self._run_epoch(self.test_loader, train=False)
-        mlflow.log_metrics({f"test/epoch_{k}": v for k, v in test_metrics.items()}, step=best_epoch)
+        if mlflow.active_run():
+            mlflow.log_metrics({f"test/epoch_{k}": v for k, v in test_metrics.items()}, step=best_epoch)
         logger.info(f"Test metrics: {test_metrics}")
 
         return test_metrics

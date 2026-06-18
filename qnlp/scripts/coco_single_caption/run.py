@@ -180,10 +180,10 @@ def run():
         test_metrics = trainer.fit()
 
         retrieval = _collect_retrieval_metrics(model, test_loader, device)
-        mlflow.log_metrics({f"test/{k}": v for k, v in retrieval.items()})
+        if mlflow.active_run():
+            mlflow.log_metrics({f"test/{k}": v for k, v in retrieval.items()})
+            mlflow.log_artifact(str(checkpoint_path))
         logger.info(f"Test retrieval: {retrieval}")
-
-        mlflow.log_artifact(str(checkpoint_path))
         send_training_finished_notification(
             {
                 "experiment": EXPERIMENT_NAME,

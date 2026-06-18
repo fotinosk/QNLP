@@ -249,13 +249,15 @@ def run() -> None:
             train_metrics = _run_epoch(
                 text_model, text_head, image_cache, loaders["train"], loss_fn, optimizer, device, train=True
             )
-            mlflow.log_metrics({f"train/{k}": v for k, v in train_metrics.items()}, step=epoch)
+            if mlflow.active_run():
+                mlflow.log_metrics({f"train/{k}": v for k, v in train_metrics.items()}, step=epoch)
             logger.info(f"Epoch {epoch} train: {train_metrics}")
 
             val_metrics = _run_epoch(
                 text_model, text_head, image_cache, loaders["val"], loss_fn, optimizer, device, train=False
             )
-            mlflow.log_metrics({f"val/{k}": v for k, v in val_metrics.items()}, step=epoch)
+            if mlflow.active_run():
+                mlflow.log_metrics({f"val/{k}": v for k, v in val_metrics.items()}, step=epoch)
             logger.info(f"Epoch {epoch} val: {val_metrics}")
 
             status = early_stopping(val_metrics.get("loss", 0.0))
@@ -280,14 +282,15 @@ def run() -> None:
         test_metrics = _run_epoch(
             text_model, text_head, image_cache, loaders["test"], loss_fn, optimizer, device, train=False
         )
-        mlflow.log_metrics({f"test/{k}": v for k, v in test_metrics.items()})
         logger.info(f"Test: {test_metrics}")
 
         retrieval = _collect_retrieval_metrics(text_model, text_head, image_cache, loaders["test"])
-        mlflow.log_metrics({f"test/{k}": v for k, v in retrieval.items()})
         logger.info(f"Test retrieval: {retrieval}")
 
-        mlflow.log_artifact(str(checkpoint_path))
+        if mlflow.active_run():
+            mlflow.log_metrics({f"test/{k}": v for k, v in test_metrics.items()})
+            mlflow.log_metrics({f"test/{k}": v for k, v in retrieval.items()})
+            mlflow.log_artifact(str(checkpoint_path))
         send_training_finished_notification({"experiment": EXPERIMENT_NAME, "run": run.info.run_name, **test_metrics})
 
 

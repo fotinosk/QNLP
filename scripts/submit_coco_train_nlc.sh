@@ -39,8 +39,9 @@ export XDG_CACHE_HOME=$CACHE_DIR/.xdg_cache
 export ML_BOND_DIM=20
 export ML_USE_NON_LINEAR_CONTRACTIONS=true
 
-# --- MLflow run name ---
-export MLFLOW_RUN_NAME="${RUN_NAME:-coco_nlc_bond30}"
+# --- MLflow: disabled on cluster, metrics go to job output log ---
+export MLFLOW_DISABLED=true
+export MLFLOW_RUN_NAME="${RUN_NAME:-coco_nlc_bond20}"
 
 # --- Use full path to Python (no activation needed) ---
 PYTHON=$ENV_DIR/bin/python
@@ -53,24 +54,11 @@ echo "Using Python: $PYTHON"
 echo "Bond dim: $ML_BOND_DIM"
 echo "Non-linear: $ML_USE_NON_LINEAR_CONTRACTIONS"
 echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
-echo "MLflow run name: $MLFLOW_RUN_NAME"
 echo "========================================="
 
 cd $PROJECT_DIR
 
-# Start mlflow server in the background
-$PYTHON -m mlflow server \
-    --backend-store-uri sqlite:///$PROJECT_DIR/mlflow_db/mlflow.db \
-    --default-artifact-root $PROJECT_DIR/mlflow_db/artifacts \
-    --port 8080 &
-MLFLOW_PID=$!
-echo "MLflow server started (PID $MLFLOW_PID)"
-
-sleep 5
-
 $PYTHON -m qnlp.scripts.coco_single_caption.run
-
-kill $MLFLOW_PID
 
 echo "========================================="
 echo "Job finished successfully at $(date)"
