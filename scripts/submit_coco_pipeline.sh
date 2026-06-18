@@ -46,7 +46,6 @@ export PYTHONPYCACHEPREFIX=$CACHE_DIR/pycache
 
 # Bobcat cache
 export GLOBAL_CONSTANTS_BOBCAT_CACHE_PATH=$CACHE_DIR/bobcat/diskcache
-export LAMBEQ_CACHE_HOME=$CACHE_DIR/lambeq
 
 # --- Override any default cache locations ---
 export XDG_CACHE_HOME=$CACHE_DIR/.xdg_cache
