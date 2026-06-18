@@ -6,7 +6,9 @@ import mlflow
 
 
 @contextmanager
-def setup_mlflow_run(experiment_name: str, params: dict[str, Any], port: int = 5000):
+def setup_mlflow_run(experiment_name: str, params: dict[str, Any], port: int = 5000, run_name: str | None = None):
+    import os
+
     ts_string = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
     mlflow.config.enable_async_logging()
@@ -15,7 +17,8 @@ def setup_mlflow_run(experiment_name: str, params: dict[str, Any], port: int = 5
     mlflow.config.enable_system_metrics_logging()
     mlflow.config.set_system_metrics_sampling_interval(15)
 
-    run_name = input("Please provide a short description for the run:\n> ")
+    if run_name is None:
+        run_name = os.environ.get("MLFLOW_RUN_NAME") or input("Please provide a short description for the run:\n> ")
     run_name = run_name.replace(" ", "_")
     run_name = f"{run_name}_{ts_string}"
 
