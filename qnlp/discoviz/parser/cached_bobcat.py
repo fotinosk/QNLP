@@ -9,7 +9,7 @@ class CachedBobcatParser(BobcatParser):
     def __init__(
         self,
         *args,
-        cache_path: str = "~/.cache/lambeq/bobcat/diskcache",
+        cache_path: str = "/SAN/intelsys/discoviz/fotinos/QNLP/.cache/lambeq/bobcat/diskcache",
         load_parser: bool = False,
         **kwargs,
     ):

@@ -11,6 +11,7 @@ import polars as pl
 
 from qnlp.core.data_engine.processing.pipeline import PipelineStep
 from qnlp.utils.logging import setup_logger
+from qnlp.utils.torch_utils import get_device
 
 _worker_processor = None
 logger = setup_logger(log_name="ccg_parser")
@@ -77,7 +78,7 @@ class CCGCompilerStep(PipelineStep):
         text_column: str = "processed_text",
         bond_dim: int = 10,
         embedding_dim: int = 50,
-        device: str = "mps",
+        device: str | None = None,
         cache_path: str = "~/.cache/lambeq/bobcat/diskcache",
         max_workers: int = 2,
         worker_batch_size: int = 1000,
@@ -87,7 +88,7 @@ class CCGCompilerStep(PipelineStep):
         self.text_column = text_column
         self.bond_dim = bond_dim
         self.embedding_dim = embedding_dim
-        self.device = device
+        self.device = device or str(get_device())
         self.cache_path = cache_path
         self.max_workers = max_workers
         self.worker_batch_size = worker_batch_size
@@ -104,11 +105,12 @@ class CCGCompilerStep(PipelineStep):
             "subject_rel_pronoun",
         ]
         self._pool: Optional[mp.Pool] = None
+        print("device ", self.device)
 
     def _get_pool(self) -> mp.Pool:
         """Lazy-initialise multiprocessing pool with worker recycling."""
         if self._pool is None:
-            self._pool = mp.Pool(
+            self._pool = mp.get_context("spawn").Pool(
                 processes=self.max_workers,
                 initializer=_worker_init,
                 initargs=(self.bond_dim, self.embedding_dim, self.device, self.rules, self.cache_path),

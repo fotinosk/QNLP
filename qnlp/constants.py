@@ -15,7 +15,7 @@ class Constants(BaseSettings):
     logs_path: Path = Path("runs/logs/")
     checkpoints_path: Path = Path("runs/checkpoints/")
     datasets_path: Path = Path("data/datasets/")
-    bobcat_cache_path: Path = Path("~/.cache/lambeq/bobcat/diskcache")
+    bobcat_cache_path: Path = Path("/SAN/intelsys/discoviz/fotinos/QNLP/.cache/lambeq/bobcat/diskcache")
 
 
 constants = Constants()

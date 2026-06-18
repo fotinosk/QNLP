@@ -1,3 +1,5 @@
+import argparse
+
 from qnlp.constants import constants
 from qnlp.core.data_engine.processing.compiler_step import CCGCompilerStep
 from qnlp.core.data_engine.processing.conform_rank_step import UnifyEinsumRankStep
@@ -5,27 +7,36 @@ from qnlp.core.data_engine.processing.lemmatize_step import LemmatizeStep
 from qnlp.core.data_engine.processing.pipeline import Pipeline
 from qnlp.preprocessing_pipelines.coco.steps import COCOFlattenStep, RemoveTrailingDotsStep, SchemaMappingStep
 
-flatten_step = COCOFlattenStep("sentences_raw")
-schema_step = SchemaMappingStep(column_mapping={"sentences_raw": "processed_text"})
-remove_dots_step = RemoveTrailingDotsStep(text_column="processed_text")
-lemma_step = LemmatizeStep(text_column="processed_text")
-ccg_parsing_step = CCGCompilerStep(
-    lmdb_path=constants.lmdb_path,
-    bond_dim=constants.bond_dim,
-    embedding_dim=constants.embedding_dim,
-    cache_path=str(constants.bobcat_cache_path),
-)
-unification_step = UnifyEinsumRankStep()
 
-coco_atlas = constants.atlases_path / "coco"
+def build_pipeline(max_workers: int, worker_batch_size: int) -> Pipeline:
+    flatten_step = COCOFlattenStep("sentences_raw")
+    schema_step = SchemaMappingStep(column_mapping={"sentences_raw": "processed_text"})
+    remove_dots_step = RemoveTrailingDotsStep(text_column="processed_text")
+    lemma_step = LemmatizeStep(text_column="processed_text")
+    ccg_parsing_step = CCGCompilerStep(
+        lmdb_path=constants.lmdb_path,
+        bond_dim=constants.bond_dim,
+        embedding_dim=constants.embedding_dim,
+        cache_path=str(constants.bobcat_cache_path),
+        max_workers=max_workers,
+        worker_batch_size=worker_batch_size,
+    )
+    unification_step = UnifyEinsumRankStep()
 
-coco_pipeline = Pipeline(
-    atlas_dir=coco_atlas,
-    lmdb_path=constants.lmdb_path,
-    steps=[flatten_step, schema_step, remove_dots_step, lemma_step, ccg_parsing_step, unification_step],
-    derived_name="derived_test",
-)
+    return Pipeline(
+        atlas_dir=constants.atlases_path / "coco",
+        lmdb_path=constants.lmdb_path,
+        steps=[flatten_step, schema_step, remove_dots_step, lemma_step, ccg_parsing_step, unification_step],
+        derived_name="derived_test",
+    )
 
 
 if __name__ == "__main__":
-    coco_pipeline.run(chunk_size=100)
+    parser = argparse.ArgumentParser(description="Run the COCO preprocessing pipeline.")
+    parser.add_argument("--chunk-size", type=int, default=100)
+    parser.add_argument("--max-workers", type=int, default=2)
+    parser.add_argument("--worker-batch-size", type=int, default=1000)
+    args = parser.parse_args()
+
+    pipeline = build_pipeline(max_workers=args.max_workers, worker_batch_size=args.worker_batch_size)
+    pipeline.run(chunk_size=args.chunk_size)
