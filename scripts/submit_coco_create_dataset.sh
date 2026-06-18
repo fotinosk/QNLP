@@ -7,43 +7,55 @@
 #$ -N coco_create_dataset
 #$ -M ucapfky@ucl.ac.uk
 #$ -m abe
+#$ -cwd
+#$ -o /SAN/intelsys/discoviz/fotinos/QNLP/job_outputs/
+#$ -e /SAN/intelsys/discoviz/fotinos/QNLP/job_outputs/
 
-# Exit on errors
-set -e
-# Enable debugging
-set -x
+# --- Create all directories BEFORE any file operations ---
+mkdir -p /SAN/intelsys/discoviz/fotinos/QNLP/job_outputs
+mkdir -p /SAN/intelsys/discoviz/fotinos/cache/nltk_data
+mkdir -p /SAN/intelsys/discoviz/fotinos/cache/.pip_cache
 
-# Set up directories
+# --- Set up all paths to project space (NOT home!) ---
 PROJECT_DIR=/SAN/intelsys/discoviz/fotinos/QNLP
-CONDA_ENV=/SAN/intelsys/discoviz/envs/qnlp311
+ENV_DIR=/SAN/intelsys/discoviz/envs/qnlp311
 CACHE_DIR=/SAN/intelsys/discoviz/fotinos/cache
 
-# Create cache directories
-mkdir -p $CACHE_DIR/nltk_data
-mkdir -p $CACHE_DIR/.pip_cache
-
-# Set environment variables
+# --- Redirect ALL environment variables to project space ---
 export PYTHONPATH=$PROJECT_DIR
+
+# Hugging Face / Transformers cache
+export HF_HOME=$CACHE_DIR/huggingface_cache
+export TRANSFORMERS_CACHE=$CACHE_DIR/transformers_cache
+export TORCH_HOME=$CACHE_DIR/torch_cache
+
+# NLTK data
 export NLTK_DATA=$CACHE_DIR/nltk_data
+
+# Pip cache
 export PIP_CACHE_DIR=$CACHE_DIR/.pip_cache
 
-# Log job details
+# Matplotlib cache
+export MPLCONFIGDIR=$CACHE_DIR/.matplotlib_cache
+
+# Python bytecode (prevent writing to home)
+export PYTHONPYCACHEPREFIX=$CACHE_DIR/pycache
+
+# Override any default cache locations
+export XDG_CACHE_HOME=$CACHE_DIR/.xdg_cache
+
+# --- Use full path to Python (no activation needed) ---
+PYTHON=$ENV_DIR/bin/python
+
 echo "========================================="
 echo "Job started: $(date)"
 echo "Job ID: $JOB_ID"
 echo "Running on: $(hostname)"
 echo "Working directory: $(pwd)"
-echo "Non-linear: ${NON_LINEAR:-false}"
+echo "Using Python: $PYTHON"
+echo "Non-linear: ${NON_LINEAR:-0}"
+echo "All cache directories point to: $CACHE_DIR"
 echo "========================================="
-
-# Set up micromamba
-export MAMBA_ROOT_PREFIX=/home/kinianlo/micromamba
-eval "$(~/.local/bin/micromamba shell hook --shell bash)"
-micromamba activate $CONDA_ENV
-
-# Verify environment
-echo "Python path: $(which python)"
-echo "Python version: $(python --version)"
 
 cd $PROJECT_DIR
 
@@ -54,7 +66,7 @@ if [ "${NON_LINEAR:-0}" = "1" ]; then
 fi
 
 echo "Starting dataset creation at $(date)"
-python -m qnlp.scripts.coco_single_caption.create_dataset $EXTRA_ARGS
+$PYTHON -m qnlp.scripts.coco_single_caption.create_dataset $EXTRA_ARGS
 
 echo "========================================="
 echo "Job finished successfully at $(date)"
