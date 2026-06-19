@@ -72,7 +72,7 @@ class SingleCaptionLoss:
                 txt_n.mean(dim=0, keepdim=True),
             ).squeeze()
 
-            temperature = 1.0 / self._loss.logit_scale.exp().clamp(max=100.0)
+            temperature = 1.0 / self._loss.logit_scale.exp().clamp(min=1.0, max=100.0)
 
         metrics: dict[str, Tensor] = {
             "loss": loss,

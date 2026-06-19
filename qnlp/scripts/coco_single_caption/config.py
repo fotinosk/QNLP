@@ -28,7 +28,7 @@ class ExperimentConfig(BaseSettings):
     head_weight_decay: float = 0.001
 
     temperature: float = 0.07
-    alignment_weight: float = 0.5
-    alignment_warmup_epochs: int = 5
+    alignment_weight: float = 0.0
+    alignment_warmup_epochs: int = 0
 
     model_config = SettingsConfigDict(env_prefix="ML_")

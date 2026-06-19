@@ -30,8 +30,8 @@ class SymmetricInfoNCE(nn.Module):
         image_emb = F.normalize(image_emb, dim=-1)
         text_emb = F.normalize(text_emb, dim=-1)
 
-        # Clamp scale to [1/0.3, 100] → temperature stays in [0.01, 0.3]
-        logit_scale = self.logit_scale.exp().clamp(min=1 / 0.3, max=100.0)
+        # Clamp scale to [1, 100] → temperature stays in [0.01, 1.0]
+        logit_scale = self.logit_scale.exp().clamp(min=1.0, max=100.0)
 
         batch_size = image_emb.shape[0]
         labels = torch.arange(batch_size, device=image_emb.device)

@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 
 from qnlp.domain.datasets.dataset import VLMDataset
 
@@ -36,6 +36,7 @@ def get_dataloaders(
     compiled_columns: list[tuple] | None = None,
     num_workers: int = 4,
     use_non_linear_contractions: bool = False,
+    test_size: int | None = None,
 ) -> tuple[list[DataLoader], list[VLMDataset]]:
     """
     Build train/val/test DataLoaders from enriched parquet files.
@@ -75,6 +76,8 @@ def get_dataloaders(
         use_non_linear_contractions=use_non_linear_contractions,
     )
 
+    test_dataset = Subset(test_ds, range(min(test_size, len(test_ds)))) if test_size is not None else test_ds
+
     worker_kwargs = dict(
         num_workers=num_workers,
         persistent_workers=num_workers > 0,
@@ -96,7 +99,7 @@ def get_dataloaders(
         **worker_kwargs,
     )
     test_loader = DataLoader(
-        test_ds,
+        test_dataset,
         batch_size=batch_size,
         shuffle=False,
         collate_fn=vlm_collate_fn,

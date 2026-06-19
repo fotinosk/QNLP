@@ -69,15 +69,8 @@ def run():
     logger.info(f"Using dataset '{dataset}' (non_linear={cfg.use_non_linear_contractions})")
 
     size = image_model_hyperparams.image_size
-    train_transform = transforms.Compose(
-        [
-            transforms.RandomCrop(size, padding=4, padding_mode="reflect"),
-            transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
-            transforms.RandomHorizontalFlip(p=0.5),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ]
-    )
-    val_transform = transforms.Compose(
+
+    transform = transforms.Compose(
         [
             transforms.Resize((size, size)),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
@@ -89,10 +82,11 @@ def run():
         val_parquet=VAL_PARQUET,
         test_parquet=TEST_PARQUET,
         batch_size=cfg.batch_size,
-        train_transform=train_transform,
-        val_transform=val_transform,
+        train_transform=transform,
+        val_transform=transform,
         compiled_columns=COMPILED_COLUMNS,
         use_non_linear_contractions=cfg.use_non_linear_contractions,
+        test_size=5000,
     )
     train_loader, val_loader, test_loader = loaders
     train_ds, val_ds, test_ds = datasets
