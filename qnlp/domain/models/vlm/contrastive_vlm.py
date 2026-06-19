@@ -25,6 +25,27 @@ class AlignmentHead(nn.Module):
         return F.normalize(self.proj(x), dim=-1)
 
 
+class MLPProjectionHead(nn.Module):
+    """
+    Two-layer MLP projection head: Linear → GELU → Linear → L2Norm.
+
+    Gives the model capacity to learn a non-linear bridge between backbone
+    output spaces and the shared contrastive embedding. The hidden dimension
+    is 2× the embedding dim, matching the CLIP projection head design.
+    """
+
+    def __init__(self, dim: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(dim, dim * 2),
+            nn.GELU(),
+            nn.Linear(dim * 2, dim),
+        )
+
+    def forward(self, x):
+        return F.normalize(self.net(x), dim=-1)
+
+
 class ContrastiveVLM(nn.Module):
     """
     Model wrapper for contrastive VLM training.
@@ -40,12 +61,14 @@ class ContrastiveVLM(nn.Module):
         text_model: EinsumModel,
         image_model: TTNImageModel,
         embedding_dim: int,
+        use_mlp_head: bool = False,
     ):
         super().__init__()
         self.text_model = text_model
         self.image_model = image_model
-        self.image_head = AlignmentHead(embedding_dim)
-        self.text_head = AlignmentHead(embedding_dim)
+        head_cls = MLPProjectionHead if use_mlp_head else AlignmentHead
+        self.image_head = head_cls(embedding_dim)
+        self.text_head = head_cls(embedding_dim)
 
     def forward(self, images, true_captions, false_captions=None) -> dict:
         image_emb = self.image_head(self.image_model(images))

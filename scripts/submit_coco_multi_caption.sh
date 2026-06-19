@@ -4,7 +4,7 @@
 #$ -l gpu=true
 #$ -S /bin/bash
 #$ -j y
-#$ -N coco_multi_caption
+#$ -N coco_mc_mlp
 #$ -M ucapfky@ucl.ac.uk
 #$ -m abe
 #$ -R y
@@ -38,13 +38,14 @@ export XDG_CACHE_HOME=$CACHE_DIR/.xdg_cache
 export ML_BOND_DIM=20
 export ML_USE_NON_LINEAR_CONTRACTIONS=true
 export ML_BATCH_SIZE=256
+export ML_USE_MLP_HEAD=true
 
 # --- Reduce fragmentation from CUDA allocations ---
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # --- MLflow: disabled on cluster, metrics go to job output log ---
 export MLFLOW_DISABLED=true
-export MLFLOW_RUN_NAME="${RUN_NAME:-coco_multi_caption_bond20}"
+export MLFLOW_RUN_NAME="${RUN_NAME:-coco_mc_mlp_bond20}"
 
 # --- Use full path to Python (no activation needed) ---
 PYTHON=$ENV_DIR/bin/python
@@ -56,6 +57,7 @@ echo "Running on: $(hostname)"
 echo "Using Python: $PYTHON"
 echo "Bond dim: $ML_BOND_DIM"
 echo "Non-linear: $ML_USE_NON_LINEAR_CONTRACTIONS"
+echo "MLP head: $ML_USE_MLP_HEAD"
 echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
 echo "========================================="
 

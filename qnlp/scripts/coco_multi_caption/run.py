@@ -171,7 +171,9 @@ def run():
 
     text_model = EinsumModel(symbols, sizes, non_linear_contractions=cfg.use_non_linear_contractions).to(device)
     image_model = TTNImageModel(cfg.embedding_dim).to(device)
-    model = ContrastiveVLM(text_model, image_model, embedding_dim=cfg.embedding_dim).to(device)
+    model = ContrastiveVLM(text_model, image_model, embedding_dim=cfg.embedding_dim, use_mlp_head=cfg.use_mlp_head).to(
+        device
+    )
 
     # Fixed temperature — loss_fn is NOT in the optimizer so logit_scale won't move.
     loss_fn = SingleCaptionLoss(temperature=cfg.temperature, alignment_weight=0.0).to(device)

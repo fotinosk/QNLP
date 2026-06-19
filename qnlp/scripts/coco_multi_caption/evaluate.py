@@ -58,7 +58,14 @@ def _infer_non_linear(state_dict: dict) -> bool:
     return any("nonlinear_gate" in k for k in state_dict)
 
 
+def _infer_mlp_head(state_dict: dict) -> bool:
+    return "image_head.net.0.weight" in state_dict
+
+
 def _infer_embedding_dim(state_dict: dict) -> int:
+    # MLP head: first linear is dim → dim*2, so weight shape is (dim*2, dim)
+    if "image_head.net.0.weight" in state_dict:
+        return state_dict["image_head.net.0.weight"].shape[1]
     return state_dict["image_head.proj.weight"].shape[0]
 
 
@@ -66,14 +73,15 @@ def load_model(checkpoint_path: Path, device: torch.device) -> ContrastiveVLM:
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     state_dict = checkpoint["model_state_dict"]
     non_linear = _infer_non_linear(state_dict)
+    mlp_head = _infer_mlp_head(state_dict)
     embedding_dim = _infer_embedding_dim(state_dict)
     logger.info(
         f"Loaded checkpoint (epoch {checkpoint.get('epoch', '?')}) | "
-        f"embedding_dim={embedding_dim} | non_linear={non_linear}"
+        f"embedding_dim={embedding_dim} | non_linear={non_linear} | mlp_head={mlp_head}"
     )
     text_model = EinsumModel(non_linear_contractions=non_linear)
     image_model = TTNImageModel(embedding_dim)
-    model = ContrastiveVLM(text_model, image_model, embedding_dim=embedding_dim)
+    model = ContrastiveVLM(text_model, image_model, embedding_dim=embedding_dim, use_mlp_head=mlp_head)
     model.load_state_dict(state_dict)
     model.to(device).eval()
     return model

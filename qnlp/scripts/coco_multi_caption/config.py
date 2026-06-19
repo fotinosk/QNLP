@@ -23,5 +23,6 @@ class ExperimentConfig(BaseSettings):
     head_weight_decay: float = 0.001
 
     temperature: float = 0.07  # fixed — not passed to the optimizer
+    use_mlp_head: bool = False
 
     model_config = SettingsConfigDict(env_prefix="ML_")
