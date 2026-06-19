@@ -1,27 +1,24 @@
 """
-Multi-caption COCO training with hard negative mining.
+Multi-caption COCO contrastive training.
 
-Two improvements over coco_single_caption:
-  1. All 5 captions per image are used during training (each epoch each image
-     is seen once per caption, in a different random order). No dataset change
-     needed — SingleCaptionStrategy is a pass-through that keeps all atoms.
-     Val/test loaders are deduplicated to one caption per image so retrieval
-     evaluation uses the standard diagonal = true-positive assumption.
+All 5 captions per image are used as separate training rows. Val/test loaders
+are deduplicated to one caption per image for correct retrieval evaluation
+(diagonal = true-positive assumption).
 
-  2. Hard negative mining: after hard_neg_warmup_epochs, a full pass over the
-     train set builds a pool of the most confusable text embeddings. Each batch's
-     i2t logits are augmented with hard_neg_sample_k samples from this pool,
-     replacing easy random negatives with globally hard ones.
+Temperature is fixed (not learnable) to avoid collapse. No hard negative
+mining — plain symmetric InfoNCE with in-batch negatives only.
 """
 
 from datetime import datetime
 
 import mlflow
 import torch
+from torch import Tensor
 from torch.utils.data import DataLoader, Subset
 from torchvision import transforms
 
 from qnlp.constants import constants
+from qnlp.core.training.batch_utils import drop_nonfinite_rows
 from qnlp.core.training.losses.single_caption import SingleCaptionLoss
 from qnlp.core.training.retrieval_eval import retrieval_metrics
 from qnlp.core.training.trainer import Trainer
@@ -31,7 +28,6 @@ from qnlp.domain.datasets.dataloader import get_dataloaders, vlm_collate_fn
 from qnlp.domain.datasets.dataset import VLMDataset, collect_symbol_sizes
 from qnlp.domain.models.vlm.contrastive_vlm import ContrastiveVLM
 from qnlp.scripts.coco_multi_caption.config import ExperimentConfig
-from qnlp.scripts.coco_multi_caption.step import MultiCaptionHardNegStep
 from qnlp.utils.logging import setup_logger
 from qnlp.utils.mlflow_utils import setup_mlflow_run
 from qnlp.utils.seeding import set_seed
@@ -48,19 +44,46 @@ SYMBOL_COLS = ["symbols"]
 TEST_SIZE = 5000
 
 
-def _dedup_loader(ds: VLMDataset, batch_size: int, num_workers: int = 4) -> DataLoader:
-    """DataLoader over the first caption per unique sample_id.
+class SimpleCaptionStep:
+    def __init__(self, loss_fn: SingleCaptionLoss, device: torch.device):
+        self.loss_fn = loss_fn
+        self.device = device
 
-    COCO has 5 captions per image. Retrieval evaluation assumes row i of
-    img_embs is paired with row i of txt_embs (diagonal = true positive), so
-    we must use exactly one caption per image at eval time.
-    """
+    def __call__(self, model, batch: dict, train: bool) -> tuple[Tensor, dict]:
+        images = batch["local_image_path"].to(self.device)
+        outputs = model(images, batch["caption"])
+
+        loss_inputs = {
+            "image_embeddings": outputs["image_embeddings"],
+            "caption_embeddings": outputs["true_caption_embeddings"],
+        }
+        loss_inputs, n_dropped = drop_nonfinite_rows(loss_inputs, list(loss_inputs))
+
+        if loss_inputs["image_embeddings"].shape[0] == 0:
+            return torch.zeros((), device=self.device, requires_grad=True), {}
+
+        loss, metrics = self.loss_fn(loss_inputs)
+
+        if n_dropped:
+            metrics["n_skipped"] = images.new_tensor(float(n_dropped))
+
+        gate = getattr(model.text_model, "nonlinear_gate", None)
+        if gate is not None:
+            metrics["nonlinear_gate"] = gate.detach()
+
+        return loss, metrics
+
+
+def _dedup_loader(ds: VLMDataset, batch_size: int, num_workers: int = 4, max_images: int | None = None) -> DataLoader:
+    """One caption per unique sample_id — required for retrieval eval."""
     seen: set[str] = set()
     indices: list[int] = []
     for i, sid in enumerate(ds.df["sample_id"].to_list()):
         if sid not in seen:
             seen.add(sid)
             indices.append(i)
+            if max_images is not None and len(indices) >= max_images:
+                break
     subset = Subset(ds, indices)
     return DataLoader(
         subset,
@@ -100,8 +123,6 @@ def run():
     logger.info(f"  device: {device}")
     logger.info("========================================")
 
-    # Reuse the existing single-caption dataset — it already contains all 5
-    # captions per image as separate rows (SingleCaptionStrategy is pass-through).
     dataset = cfg.dataset_name or (
         "coco_single_caption_nlc" if cfg.use_non_linear_contractions else "coco_single_caption"
     )
@@ -132,9 +153,8 @@ def run():
     train_loader, _, _ = loaders
     train_ds, val_ds, test_ds = datasets
 
-    # Deduplicated loaders for eval — one caption per image
     val_loader_dedup = _dedup_loader(val_ds, cfg.batch_size)
-    test_loader_dedup = _dedup_loader(test_ds, cfg.batch_size)
+    test_loader_dedup = _dedup_loader(test_ds, cfg.batch_size, max_images=TEST_SIZE)
 
     logger.info(
         f"Train: {len(train_ds)} rows | "
@@ -153,17 +173,9 @@ def run():
     image_model = TTNImageModel(cfg.embedding_dim).to(device)
     model = ContrastiveVLM(text_model, image_model, embedding_dim=cfg.embedding_dim).to(device)
 
+    # Fixed temperature — loss_fn is NOT in the optimizer so logit_scale won't move.
     loss_fn = SingleCaptionLoss(temperature=cfg.temperature, alignment_weight=0.0).to(device)
-
-    step = MultiCaptionHardNegStep(
-        loss_fn=loss_fn,
-        train_loader=train_loader,
-        device=device,
-        hard_neg_warmup_epochs=cfg.hard_neg_warmup_epochs,
-        hard_neg_refresh_epochs=cfg.hard_neg_refresh_epochs,
-        hard_neg_pool_size=cfg.hard_neg_pool_size,
-        hard_neg_sample_k=cfg.hard_neg_sample_k,
-    )
+    step = SimpleCaptionStep(loss_fn=loss_fn, device=device)
 
     optimizer = torch.optim.AdamW(
         [
@@ -174,7 +186,6 @@ def run():
                 "lr": cfg.head_lr,
                 "weight_decay": cfg.head_weight_decay,
             },
-            {"params": loss_fn.parameters(), "lr": cfg.text_lr, "weight_decay": 0.0},
         ]
     )
 
@@ -190,16 +201,6 @@ def run():
     }
 
     with setup_mlflow_run(EXPERIMENT_NAME, params, 8080) as run:
-        # Wrap on_epoch_start to pass the model (needed for mining updates).
-        # Trainer calls step.on_epoch_start(epoch) without the model; we
-        # intercept by monkeypatching before handing step to Trainer.
-        _original_on_epoch_start = step.on_epoch_start
-
-        def _on_epoch_start_with_model(epoch: int) -> None:
-            _original_on_epoch_start(epoch, model=model)
-
-        step.on_epoch_start = _on_epoch_start_with_model
-
         trainer = Trainer(
             model=model,
             optimizer=optimizer,
@@ -207,7 +208,7 @@ def run():
             train_loader=train_loader,
             val_loader=val_loader_dedup,
             test_loader=test_loader_dedup,
-            monitor_metric="hard_neg_accuracy",
+            monitor_metric="accuracy",
             minimize_metric=False,
             checkpoint_path=checkpoint_path,
             max_epochs=cfg.max_epochs,

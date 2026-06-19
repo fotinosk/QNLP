@@ -22,14 +22,6 @@ class ExperimentConfig(BaseSettings):
     head_lr: float = 0.001
     head_weight_decay: float = 0.001
 
-    temperature: float = 0.07
-
-    # Hard negative mining
-    # Mining is inactive for the first hard_neg_warmup_epochs; afterwards the
-    # pool is refreshed every hard_neg_refresh_epochs epochs.
-    hard_neg_warmup_epochs: int = 5
-    hard_neg_refresh_epochs: int = 3
-    hard_neg_pool_size: int = 4096  # max text embeddings kept in the pool
-    hard_neg_sample_k: int = 256  # hard negs sampled per batch
+    temperature: float = 0.07  # fixed — not passed to the optimizer
 
     model_config = SettingsConfigDict(env_prefix="ML_")
