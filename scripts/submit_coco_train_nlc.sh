@@ -2,7 +2,6 @@
 #$ -l tmem=32G
 #$ -l h_rt=48:0:0
 #$ -l gpu=true
-#$ -l gpu_type=a40
 #$ -S /bin/bash
 #$ -j y
 #$ -N coco_train_nlc
