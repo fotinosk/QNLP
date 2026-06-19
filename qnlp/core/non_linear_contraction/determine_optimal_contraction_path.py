@@ -32,6 +32,20 @@ def get_contraction_path(einsum_str: str, shapes: TensorShapes) -> ContractionPa
     return path
 
 
+def get_left_to_right_path(n_operands: int) -> ContractionPath:
+    """Fold-left contraction: always contract the running result with the next operand.
+
+    Produces ((w0 ⊗ w1) ⊗ w2) ⊗ w3 ... in sentence order. With NLC this ensures
+    every gate application corresponds to a linguistically valid partial composition
+    rather than a computationally convenient but semantically arbitrary pairing.
+
+    O(n) to generate — no opt_einsum needed.
+    """
+    if n_operands <= 1:
+        return []
+    return [(0, 1)] + [(0, n_operands - k) for k in range(2, n_operands)]
+
+
 def _print_path(einsum_str: str) -> None:
     parts = einsum_str.split("->")
     reprs = parts[0].split(",")
