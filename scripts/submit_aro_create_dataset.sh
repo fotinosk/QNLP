@@ -44,7 +44,10 @@ echo "========================================="
 
 cd $PROJECT_DIR
 
-echo "Creating ARO parquet datasets..."
+echo "Step 1: Compiling ARO captions into CCG diagrams..."
+$PYTHON -m qnlp.scripts.aro_contrastive.process
+
+echo "Step 2: Creating ARO parquet datasets..."
 $PYTHON -m qnlp.scripts.aro_contrastive.create_dataset
 
 echo "========================================="
