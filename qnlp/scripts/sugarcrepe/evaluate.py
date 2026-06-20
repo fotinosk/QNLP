@@ -14,7 +14,7 @@ scored and are skipped (reported as `skipped`), so read `evaluated` alongside ac
 
 Usage:
     python -m qnlp.scripts.sugarcrepe.evaluate <checkpoint>
-    python -m qnlp.scripts.sugarcrepe.evaluate <checkpoint> --subset swap_att
+    python -m qnlp.scripts.sugarcrepe.evaluate <checkpoint> --subset swap_obj
 """
 
 from pathlib import Path
@@ -49,7 +49,7 @@ def _infer_embedding_dim(state_dict: dict) -> int:
     return state_dict["image_head.proj.weight"].shape[0]
 
 
-def evaluate(checkpoint_path: Path, subset: str = "swap_att", batch_size: int = 128) -> dict:
+def evaluate(checkpoint_path: Path, subset: str = "swap_obj", batch_size: int = 128) -> dict:
     device = get_device()
     parquet = constants.datasets_path / f"sugarcrepe_{subset}_test.parquet"
 
@@ -153,7 +153,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--subset", default="swap_att")
+    parser.add_argument("--subset", default="swap_obj")
     parser.add_argument("--batch_size", type=int, default=128)
     args = parser.parse_args()
 

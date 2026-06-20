@@ -282,7 +282,7 @@ def evaluate_sugarcrepe(
     model: ContrastiveVLM,
     device: torch.device,
     batch_size: int,
-    subset: str = "swap_att",
+    subset: str = "swap_obj",
     parquet: Path | None = None,
 ) -> dict[str, float]:
     parquet = parquet or constants.datasets_path / f"sugarcrepe_{subset}_test.parquet"
@@ -369,7 +369,7 @@ def _print_summary(wino: dict, aro: dict, sc: dict) -> None:
         r = aro[task]
         logger.info(f"  {task:<14}{r['n']:>7}{r['hard_neg_acc']:>9.4f}{r['true_cos']:>10.4f}{r['false_cos']:>11.4f}")
 
-    logger.info("SugarCREPE (swap_att)")
+    logger.info("SugarCREPE (swap_obj)")
     logger.info(f"  acc      : {sc['hard_neg_acc']:.4f}")
     logger.info(f"  true_cos : {sc['true_cos']:.4f}  false_cos: {sc['false_cos']:.4f}")
     logger.info(f"  evaluated: {sc['n_evaluated']}  skipped: {sc['n_skipped']}")
@@ -394,7 +394,7 @@ def evaluate_all(
     logger.info("--- ARO ---")
     aro = evaluate_aro(model, device, batch_size)
 
-    logger.info("--- SugarCREPE (swap_att) ---")
+    logger.info("--- SugarCREPE (swap_obj) ---")
     sc = evaluate_sugarcrepe(model, device, batch_size)
 
     _print_summary(wino, aro, sc)

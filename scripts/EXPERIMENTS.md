@@ -11,7 +11,7 @@ Exhaustive search over {contraction type} × {image model}:
 | C          | Linear      | Frozen CLIP ViT-B/32 | `coco_single_caption/run_frozen.py` |
 | D          | Non-linear  | Frozen CLIP ViT-B/32 | `coco_single_caption/run_frozen.py` |
 
-All 4 evaluated on: **ARO**, **SugarCREPE** (swap_att), **Winoground**
+All 4 evaluated on: **ARO**, **SugarCREPE** (swap_obj), **Winoground**
 
 ---
 
@@ -28,7 +28,7 @@ All 4 evaluated on: **ARO**, **SugarCREPE** (swap_att), **Winoground**
 - [ ] `coco_single_caption_nlc_{train,val,test}.parquet` — NLC (needs contraction paths, slow)
 - [x] `aro_{train,val,test}.parquet`
 - [x] `winoground_{train,val,test}.parquet`
-- [x] `sugarcrepe_swap_att_test.parquet`
+- [x] `sugarcrepe_swap_obj_test.parquet`
 
 ### 3. Training Scripts
 
@@ -52,11 +52,13 @@ All 4 evaluated on: **ARO**, **SugarCREPE** (swap_att), **Winoground**
 ## Execution Order
 
 ### Step 1 — Verify pipeline output is healthy
+
 Run the health check and confirm ok% > 0 in LMDB. If 0%, pipeline failed — check logs and resubmit.
 
 Module: `qnlp.preprocessing_pipelines.coco.pipeline`
 
 ### Step 2 — Create linear dataset
+
 Required for experiments A and C.
 
 Module: `qnlp.scripts.coco_single_caption.create_dataset`
@@ -64,14 +66,17 @@ Module: `qnlp.scripts.coco_single_caption.create_dataset`
 Output: `data/datasets/coco_single_caption_{train,val,test}.parquet`
 
 ### Step 3 — Train experiment A (Linear + TTN)
+
 Module: `qnlp.scripts.coco_single_caption.run` with `ML_USE_NON_LINEAR_CONTRACTIONS=false`
 
 ### Step 4 — Train experiment C (Linear + Frozen CLIP)
+
 Can run in parallel with Step 3.
 
 Module: `qnlp.scripts.coco_single_caption.run_frozen` with `ML_USE_NON_LINEAR_CONTRACTIONS=false`
 
 ### Step 5 — Create NLC dataset
+
 Can run in parallel with Steps 3 and 4. Slow due to contraction path computation.
 
 Module: `qnlp.scripts.coco_single_caption.create_dataset --paths`
@@ -79,26 +84,31 @@ Module: `qnlp.scripts.coco_single_caption.create_dataset --paths`
 Output: `data/datasets/coco_single_caption_nlc_{train,val,test}.parquet`
 
 ### Step 6 — Train experiment B (Non-linear + TTN)
+
 Requires Step 5.
 
 Module: `qnlp.scripts.coco_single_caption.run` with `ML_USE_NON_LINEAR_CONTRACTIONS=true`
 
 ### Step 7 — Train experiment D (Non-linear + Frozen CLIP)
+
 Requires Step 5.
 
 Module: `qnlp.scripts.coco_single_caption.run_frozen` with `ML_USE_NON_LINEAR_CONTRACTIONS=true`
 
 ### Step 8 — Write frozen evaluation scripts
+
 Prerequisite for evaluating experiments C and D. See §5 above.
 
 ### Step 9 — Evaluate all experiments
 
 #### Experiments A and B (TTN checkpoint)
+
 - ARO: `qnlp.scripts.coco_single_caption.evaluate_aro <checkpoint>`
 - Winoground: `qnlp.scripts.coco_single_caption.evaluate_winoground <checkpoint>`
 - SugarCREPE: `qnlp.scripts.sugarcrepe.evaluate <checkpoint>`
 
 #### Experiments C and D (Frozen checkpoint)
+
 - ARO: `qnlp.scripts.coco_single_caption.evaluate_aro_frozen <checkpoint>`
 - Winoground: `qnlp.scripts.coco_single_caption.evaluate_winoground_frozen <checkpoint>`
 - SugarCREPE: `qnlp.scripts.sugarcrepe.evaluate_frozen <checkpoint>`

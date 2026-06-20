@@ -22,7 +22,7 @@ from datasets import load_dataset
 from qnlp.constants import constants
 from qnlp.core.data_engine.atlas.atlas import Atlas
 
-SUBSET = "swap_att"
+SUBSET = "swap_obj"
 HF_REPO = f"HuggingFaceM4/SugarCrepe_{SUBSET}"
 ATLAS_NAME = f"sugarcrepe_{SUBSET}"
 ATLAS_DIR = constants.atlases_path / ATLAS_NAME

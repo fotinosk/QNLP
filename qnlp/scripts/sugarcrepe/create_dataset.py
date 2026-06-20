@@ -9,7 +9,7 @@ from qnlp.constants import constants
 from qnlp.core.data_engine.dataset_creator.dataset_generator import create_dataset
 from qnlp.core.data_engine.dataset_creator.strategies.contrastive_pair import ContrastivePairStrategy
 
-SUBSET = "swap_att"
+SUBSET = "swap_obj"
 ATLAS_DERIVED_DIR = constants.atlases_path / f"sugarcrepe_{SUBSET}" / "derived_v1"
 
 

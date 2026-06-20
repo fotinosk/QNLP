@@ -16,7 +16,7 @@ from qnlp.utils.logging import setup_logger
 
 logger = setup_logger(log_name="sugarcrepe_process")
 
-SUBSET = "swap_att"
+SUBSET = "swap_obj"
 ATLAS_DIR = constants.atlases_path / f"sugarcrepe_{SUBSET}"
 
 DEVICE = "cpu"  # bobcat parser device; "mps" is faster but riskier in subprocesses
