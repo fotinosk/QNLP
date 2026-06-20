@@ -117,7 +117,11 @@ Remap at training time: `{constants.embedding_dim → cfg.embedding_dim, constan
 **Config:** embedding_dim=512, bond_dim=10, max_grad_norm=0.1, batch_size=256.
 **Dataset:** `coco_single_caption_nlc` (selected automatically when NLC=true).
 **What it does:** Only the text model and a linear text head are trained. Images encoded once with CLIP ViT-B/32 and cached in memory — subsequent epochs are instant lookups. max_grad_norm tightened to 0.1 to prevent the NLC gate gradient explosion seen in job 6979930.
-**Observations:** Not yet run (as of 2026-06-20).
+**Observations:** FAILED — random performance on all benchmarks. Best checkpoint was epoch 2 (early stopping). true/false cosine similarities were ~-0.0016 throughout, meaning text embeddings are completely uncorrelated with CLIP image embeddings — the text model learned nothing.
+  - ARO overall: 0.4991 (attribution 0.5007, relation 0.4972) — chance is 0.50
+  - SugarCREPE swap_obj: 0.4805 — chance is 0.50
+  - Winoground: text 0.2555, image 0.2372, group 0.1423 (60 pairs skipped)
+  Root cause: early stopping at epoch 2 — the text model (68,922 symbols × 512-dim) has too many parameters for the sparse COCO vocabulary (~5 examples per symbol) to learn anything meaningful in 2 epochs. With embedding_dim=512 the NLC contractions produce larger tensors and more sentences are skipped as NaN, making training signal even noisier.
 
 ### 12. coco_single_caption — final linear run (emb=512, bond=10, lr=0.003)
 **Script:** `submit_coco_single_caption_final.sh`
@@ -127,12 +131,40 @@ Remap at training time: `{constants.embedding_dim → cfg.embedding_dim, constan
 **What it does:** Baseline linear run at native dataset dimensions (no remapping) with a higher text learning rate. embedding_dim=512 and bond_dim=10 match the dataset's native shapes exactly, so no tensor resizing occurs. Higher text_lr (0.003 vs 0.001 default) to accelerate symbol tensor learning given the sparsity constraint (~5-6 examples per symbol).
 **Observations:** Not yet run (as of 2026-06-20).
 
+### 13. coco_aro_style — ARO pipeline with TF-IDF hard negatives (2026-06-21)
+**Scripts:** `qnlp/scripts/coco_aro_style/`, `scripts/submit_coco_aro_style.sh`
+**Model:** `EinsumModel` NLC + `ContrastiveVLM`, same architecture as all previous runs.
+**Config:** embedding_dim=512, bond_dim=10, batch_size=128, NLC=true.
+**Dataset:** `coco_aro_style_{train,val,test}.parquet` — created by `create_dataset.py`.
+**What it does:**
+  Root cause of all prior COCO failures: random-derangement negatives gave contradictory
+  gradients because "negative" captions from other images often described very similar scenes.
+  This run fixes the negative quality problem by using TF-IDF cosine similarity to find
+  captions that share vocabulary with the true caption but come from different images —
+  i.e., genuinely confusable but definitively wrong. Exactly the ARO signal applied to COCO.
+
+  Key changes vs. all prior COCO runs:
+  1. Loss: InfoNCE + triplet (weight=40k, margin=0.2) instead of InfoNCE alone.
+     The triplet term directly pushes sim(img, true) > sim(img, false) with a margin.
+  2. Negatives: TF-IDF top-10 most similar from different images (not random derangement).
+  3. Monitor: hard_neg_acc — binary ranking signal, same as ARO.
+  4. Image augmentation: RandomCrop + ColorJitter + flip (ARO-style, not fixed Resize).
+
+  Dataset creation:
+    `python -m qnlp.scripts.coco_aro_style.create_dataset` (local, ~20 min for 184k rows)
+    Strategies: --strategy bm25_hard (top-10), bm25_medium (top-50), random (ablation)
+
+  Evaluation (after training):
+    `python -m qnlp.scripts.coco_multi_caption.evaluate <checkpoint>` (Winoground/ARO/SugarCREPE)
+    COCO val retrieval (R@1/R@5/R@10) runs automatically at end of training.
+**Observations:** Not yet run (as of 2026-06-21).
+
 ---
 
 ## What has been ruled out
 
 - **Wider bond dimension**: tried, did not improve results. Do not suggest again.
-- **Hard negatives**: rejected — creating hard negatives for COCO requires a separate retrieval model and adds complexity without addressing the root sparsity problem.
+- **Hard negatives (retrieval-model-based)**: previously rejected — too complex. Now implemented differently via TF-IDF (see experiment 13).
 - **Small batch size (2–4)**: rejected — InfoNCE with batch_size=2 gives only 1 negative per sample; loss signal is too weak.
 - **MLP head on top of NLC**: failed (see experiment 7).
 - **Left-to-right contraction path**: abandoned (35% sentence skip rate).
