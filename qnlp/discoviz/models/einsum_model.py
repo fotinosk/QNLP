@@ -47,9 +47,9 @@ class EinsumModel(nn.Module):
         self.weights = nn.ParameterList([nn.Parameter(torch.empty(size)) for size in sizes])
 
         if non_linear_contractions:
-            # Global scalar residual gate. Init 0 => the contraction is exactly linear
-            # at the start of training (linear floor); the model learns how much
-            # non-linearity to add.
+            # Global scalar residual gate, clamped to ≥ 0.1 in the forward pass so
+            # the model always applies some non-linearity. Init 0 so the effective
+            # starting value is the clamp floor (0.1).
             self.nonlinear_gate = nn.Parameter(torch.zeros(()))
 
         self._setup_contractions_function()
@@ -152,7 +152,7 @@ class EinsumModel(nn.Module):
         stored_path = input[2] if len(input) > 2 else None
 
         tensors = [self.sym2weight[sym] for sym in symbols]
-        gate = self.nonlinear_gate if self.non_linear_contractions else None
+        gate = self.nonlinear_gate.clamp(min=0.1) if self.non_linear_contractions else None
 
         if self.non_linear_contractions:
             # Prefer the stored path from the dataset — it was verified feasible at

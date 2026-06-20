@@ -9,7 +9,7 @@ class ExperimentConfig(BaseSettings):
     dataset_name: str | None = None
 
     batch_size: int = 512
-    text_lr: float = 0.001
+    text_lr: float = 0.003
     text_weight_decay: float = 0.001
     image_lr: float = 0.0002
     image_weight_decay: float = 0.05
