@@ -119,7 +119,7 @@ def evaluate_winoground(
     batch_size: int,
     parquet: Path | None = None,
 ) -> dict[str, float]:
-    parquet = parquet or constants.datasets_path / "winoground_test.parquet"
+    parquet = parquet or constants.datasets_path / "winoground_eval.parquet"
     non_linear = model.text_model.non_linear_contractions
     size = image_model_hyperparams.image_size
 
@@ -196,7 +196,7 @@ def evaluate_aro(
     batch_size: int,
     parquet: Path | None = None,
 ) -> dict[str, dict]:
-    parquet = parquet or constants.datasets_path / "aro_test.parquet"
+    parquet = parquet or constants.datasets_path / "aro_eval.parquet"
     non_linear = model.text_model.non_linear_contractions
     size = image_model_hyperparams.image_size
 
@@ -285,7 +285,7 @@ def evaluate_sugarcrepe(
     subset: str = "swap_obj",
     parquet: Path | None = None,
 ) -> dict[str, float]:
-    parquet = parquet or constants.datasets_path / f"sugarcrepe_{subset}_test.parquet"
+    parquet = parquet or constants.datasets_path / f"sugarcrepe_{subset}_eval.parquet"
     non_linear = model.text_model.non_linear_contractions
     size = image_model_hyperparams.image_size
 
