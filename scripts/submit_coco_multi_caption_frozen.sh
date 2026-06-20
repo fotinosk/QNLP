@@ -38,6 +38,7 @@ export XDG_CACHE_HOME=$CACHE_DIR/.xdg_cache
 export ML_USE_NON_LINEAR_CONTRACTIONS=true
 export ML_BATCH_SIZE=256
 export ML_EMBEDDING_DIM=512  # must match CLIP ViT-B/32 output
+export ML_MAX_GRAD_NORM=0.1  # tight clip — NLC gate exploded at 1.0 (job 6979930)
 
 # --- Reduce fragmentation from CUDA allocations ---
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True

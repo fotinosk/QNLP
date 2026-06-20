@@ -58,7 +58,7 @@ Remap at training time: `{constants.embedding_dim → cfg.embedding_dim, constan
 **Model:** `EinsumModel`, NLC, frozen TTN.
 **Config:** embedding_dim=512, batch_size=256, NLC=true.
 **What it does:** Frozen image encoder variant of experiment 4.
-**Observations:** FAILED (job 6979930). NLC gate became NaN during epoch 1 backward passes (gradient explosion at embedding_dim=512). `nonlinear_gate: nan` reported at end of epoch 1 train. Epoch 1 val was empty `{}` (gate already NaN → 100% of val samples dropped). Epoch 2 onward: all train metrics empty, completed in 20 min instead of ~70 min, confirming every batch was instantly skipped. Root cause: larger tensors at embedding_dim=512 produce larger contraction magnitudes → gradient explosion on the scalar NLC gate. Fix: reduce `text_lr` and tighten `max_grad_norm` to 0.1, or switch to linear contractions.
+**Observations:** FAILED (job 6979930). NLC gate became NaN during epoch 1 backward passes (gradient explosion at embedding_dim=512). `nonlinear_gate: nan` reported at end of epoch 1 train. Epoch 1 val was empty `{}` (gate already NaN → 100% of val samples dropped). Epoch 2 onward: all train metrics empty, completed in 20 min instead of ~70 min, confirming every batch was instantly skipped. Root cause: larger tensors at embedding_dim=512 produce larger contraction magnitudes → gradient explosion on the scalar NLC gate. Fixed in submit script: `ML_MAX_GRAD_NORM=0.1` added. Ready to resubmit.
 
 ### 6. coco_multi_caption_lr — left-to-right contraction path
 **Script:** `submit_coco_multi_caption_lr.sh`
