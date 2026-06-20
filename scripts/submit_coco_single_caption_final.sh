@@ -38,7 +38,7 @@ export XDG_CACHE_HOME=$CACHE_DIR/.xdg_cache
 # Native dataset dimensions — no tensor remapping occurs.
 export ML_EMBEDDING_DIM=512
 export ML_BOND_DIM=10
-export ML_USE_NON_LINEAR_CONTRACTIONS=false
+export ML_USE_NON_LINEAR_CONTRACTIONS=true
 export ML_TEXT_LR=0.003
 export ML_BATCH_SIZE=256
 
