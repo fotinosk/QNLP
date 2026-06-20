@@ -111,7 +111,15 @@ Remap at training time: `{constants.embedding_dim → cfg.embedding_dim, constan
   - Tied noun: ~600 params (512 shared + ~20 bond params per symbol form)
 **Observations:** Not yet run (as of 2026-06-20).
 
-### 11. coco_single_caption — final linear run (emb=512, bond=10, lr=0.003)
+### 11. coco_single_caption_frozen — frozen CLIP tower, NLC (emb=512, bond=10)
+**Script:** `submit_coco_single_caption_frozen.sh`
+**Model:** `EinsumModel`, NLC=true, frozen CLIP ViT-B/32 image encoder (in-memory cache).
+**Config:** embedding_dim=512, bond_dim=10, max_grad_norm=0.1, batch_size=256.
+**Dataset:** `coco_single_caption_nlc` (selected automatically when NLC=true).
+**What it does:** Only the text model and a linear text head are trained. Images encoded once with CLIP ViT-B/32 and cached in memory — subsequent epochs are instant lookups. max_grad_norm tightened to 0.1 to prevent the NLC gate gradient explosion seen in job 6979930.
+**Observations:** Not yet run (as of 2026-06-20).
+
+### 12. coco_single_caption — final linear run (emb=512, bond=10, lr=0.003)
 **Script:** `submit_coco_single_caption_final.sh`
 **Model:** `EinsumModel`, linear contractions, no NLC.
 **Config:** embedding_dim=512, bond_dim=10, text_lr=0.003, batch_size=256.

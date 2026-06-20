@@ -156,6 +156,7 @@ def _run_epoch(
     optimizer: torch.optim.Optimizer,
     device,
     train: bool,
+    max_grad_norm: float = 1.0,
 ) -> dict[str, float]:
     text_model.train(train)
     text_head.train(train)
@@ -182,7 +183,7 @@ def _run_epoch(
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(
                     list(text_model.parameters()) + list(text_head.parameters()),
-                    max_norm=1.0,
+                    max_norm=max_grad_norm,
                 )
                 optimizer.step()
 
@@ -247,7 +248,15 @@ def run() -> None:
     with setup_mlflow_run(EXPERIMENT_NAME, params, 8080) as run:
         for epoch in range(1, cfg.max_epochs + 1):
             train_metrics = _run_epoch(
-                text_model, text_head, image_cache, loaders["train"], loss_fn, optimizer, device, train=True
+                text_model,
+                text_head,
+                image_cache,
+                loaders["train"],
+                loss_fn,
+                optimizer,
+                device,
+                train=True,
+                max_grad_norm=cfg.max_grad_norm,
             )
             if mlflow.active_run():
                 mlflow.log_metrics({f"train/{k}": v for k, v in train_metrics.items()}, step=epoch)
