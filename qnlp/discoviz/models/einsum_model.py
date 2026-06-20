@@ -48,9 +48,9 @@ class EinsumModel(nn.Module):
 
         if non_linear_contractions:
             # Global scalar residual gate, clamped to ≥ 0.1 in the forward pass so
-            # the model always applies some non-linearity. Init 0 so the effective
-            # starting value is the clamp floor (0.1).
-            self.nonlinear_gate = nn.Parameter(torch.zeros(()))
+            # the model always applies some non-linearity. Init at the floor so
+            # gradients flow from the first step.
+            self.nonlinear_gate = nn.Parameter(torch.tensor(0.1))
 
         self._setup_contractions_function()
         self.reset_parameters()
