@@ -39,10 +39,7 @@ echo "========================================="
 
 cd $PROJECT_DIR
 
-echo "Step 1: Loading Winoground into atlas..."
-$PYTHON -m qnlp.scripts.load_winoground_to_atlas
-
-echo "Step 2: Compiling Winoground captions into CCG diagrams..."
+echo "Compiling Winoground captions into CCG diagrams..."
 $PYTHON qnlp/preprocessing_pipelines/winoground/pipeline.py
 
 echo "========================================="
