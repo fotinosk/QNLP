@@ -48,7 +48,7 @@ from qnlp.utils.logging import setup_logger
 logger = setup_logger(log_name="coco_aro_style_create_dataset")
 
 DATASETS_PATH = constants.datasets_path
-SOURCE_PREFIX = "coco_single_caption"
+SOURCE_PREFIX = "coco_single_caption_nlc"
 OUTPUT_PREFIX = "coco_aro_style"
 
 TFIDF_MAX_FEATURES = 30_000
