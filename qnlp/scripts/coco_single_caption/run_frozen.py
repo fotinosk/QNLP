@@ -356,12 +356,15 @@ def _run_epoch(
 
     with torch.set_grad_enabled(train):
         for batch in loader:
-            # Recover from NaN gate before each batch — can happen at large embedding_dim
+            # Recover from NaN gate — reset value AND clear Adam moments, otherwise
+            # poisoned first/second moments re-NaN the gate on the very next step.
             gate = getattr(text_model, "nonlinear_gate", None)
             if gate is not None and not gate.isfinite():
-                logger.warning("NLC gate is NaN — resetting to 0.1 and continuing.")
+                logger.warning("NLC gate is NaN — resetting to 0.1 and clearing optimizer state.")
                 with torch.no_grad():
                     gate.fill_(0.1)
+                if train and gate in optimizer.state:
+                    optimizer.state[gate].clear()
 
             if train:
                 optimizer.zero_grad()
@@ -383,6 +386,11 @@ def _run_epoch(
                     list(text_model.parameters()) + list(text_head.parameters()),
                     max_norm=max_grad_norm,
                 )
+                # Zero out NaN/inf gradients that arise from inf*0 during clipping
+                # when total_norm is inf. Leaving them poisons Adam's moments.
+                for p in list(text_model.parameters()) + list(text_head.parameters()):
+                    if p.grad is not None:
+                        p.grad.nan_to_num_(nan=0.0, posinf=0.0, neginf=0.0)
                 optimizer.step()
 
             bs = loss_inputs["image_embeddings"].shape[0]
