@@ -1,12 +1,13 @@
 #!/bin/bash
-#$ -l tmem=16G
-#$ -l h_vmem=16G
+#$ -l tmem=64G
 #$ -l h_rt=24:0:0
+#$ -l gpu=true
 #$ -S /bin/bash
 #$ -j y
 #$ -N coco_train_frozen
 #$ -M ucapfky@ucl.ac.uk
 #$ -m abe
+#$ -R y
 #$ -cwd
 #$ -o /SAN/intelsys/discoviz/fotinos/QNLP/job_outputs/
 #$ -e /SAN/intelsys/discoviz/fotinos/QNLP/job_outputs/
@@ -15,7 +16,6 @@
 mkdir -p /SAN/intelsys/discoviz/fotinos/QNLP/job_outputs
 mkdir -p /SAN/intelsys/discoviz/fotinos/cache/nltk_data
 mkdir -p /SAN/intelsys/discoviz/fotinos/cache/.pip_cache
-mkdir -p /SAN/intelsys/discoviz/fotinos/QNLP/mlflow_db
 
 # --- Set up all paths to project space (NOT home!) ---
 PROJECT_DIR=/SAN/intelsys/discoviz/fotinos/QNLP
@@ -34,12 +34,20 @@ export MPLCONFIGDIR=$CACHE_DIR/.matplotlib_cache
 export PYTHONPYCACHEPREFIX=$CACHE_DIR/pycache
 export XDG_CACHE_HOME=$CACHE_DIR/.xdg_cache
 
-# --- Experiment config (ML_ prefix maps to ExperimentConfig fields) ---
-export ML_BOND_DIM=30
+# --- Experiment config ---
+# embedding_dim=512 must match CLIP ViT-B/32 output dim.
+export ML_EMBEDDING_DIM=512
+export ML_BOND_DIM=${BOND_DIM:-10}
 export ML_USE_NON_LINEAR_CONTRACTIONS=${NON_LINEAR:-false}
+export ML_MAX_GRAD_NORM=0.1
+export ML_BATCH_SIZE=256
 
-# --- MLflow run name ---
-export MLFLOW_RUN_NAME="${RUN_NAME:-coco_frozen_linear_bond30}"
+# --- MLflow: disabled on cluster, metrics go to job output log ---
+export MLFLOW_DISABLED=true
+export MLFLOW_RUN_NAME="${RUN_NAME:-coco_sc_frozen_bond${BOND_DIM:-10}}"
+
+# --- Reduce fragmentation from CUDA allocations ---
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # --- Use full path to Python (no activation needed) ---
 PYTHON=$ENV_DIR/bin/python
@@ -49,26 +57,17 @@ echo "Job started: $(date)"
 echo "Job ID: $JOB_ID"
 echo "Running on: $(hostname)"
 echo "Using Python: $PYTHON"
+echo "Embedding dim: $ML_EMBEDDING_DIM"
 echo "Bond dim: $ML_BOND_DIM"
 echo "Non-linear: $ML_USE_NON_LINEAR_CONTRACTIONS"
-echo "MLflow run name: $MLFLOW_RUN_NAME"
+echo "Max grad norm: $ML_MAX_GRAD_NORM"
+echo "Batch size: $ML_BATCH_SIZE"
+echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
 echo "========================================="
 
 cd $PROJECT_DIR
 
-# Start mlflow server in the background
-$PYTHON -m mlflow server \
-    --backend-store-uri sqlite:///$PROJECT_DIR/mlflow_db/mlflow.db \
-    --default-artifact-root $PROJECT_DIR/mlflow_db/artifacts \
-    --port 8080 &
-MLFLOW_PID=$!
-echo "MLflow server started (PID $MLFLOW_PID)"
-
-sleep 5
-
 $PYTHON -m qnlp.scripts.coco_single_caption.run_frozen
-
-kill $MLFLOW_PID
 
 echo "========================================="
 echo "Job finished successfully at $(date)"

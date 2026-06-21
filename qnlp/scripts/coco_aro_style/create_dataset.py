@@ -39,7 +39,7 @@ from collections import defaultdict
 import numpy as np
 import polars as pl
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.neighbors import NearestNeighbors
 from tqdm import tqdm
 
 from qnlp.constants import constants
@@ -52,7 +52,7 @@ SOURCE_PREFIX = "coco_single_caption"
 OUTPUT_PREFIX = "coco_aro_style"
 
 TFIDF_MAX_FEATURES = 30_000
-CHUNK_SIZE = 1_000
+BATCH_SIZE = 5_000
 
 
 def _random_derangement(sample_ids: list[str], rng: np.random.Generator) -> list[int]:
@@ -85,6 +85,9 @@ def _tfidf_hard_negatives(
     For each row in df, find the top_k most TF-IDF-similar captions from
     DIFFERENT sample_ids and sample one uniformly as the hard negative.
 
+    Uses NearestNeighbors(n_jobs=-1) to parallelise the brute-force search
+    and avoid materialising the full N×N similarity matrix.
+
     Returns a list of row indices (one per row in df) pointing to the selected
     hard negative.
     """
@@ -99,30 +102,30 @@ def _tfidf_hard_negatives(
         sid_to_indices[sid].add(i)
 
     X = vectorizer.transform(texts)
+
+    # Request enough neighbours that after filtering same-image rows there
+    # are still at least top_k candidates. COCO has ~5 captions per image on
+    # average, so top_k * 10 + 50 gives a comfortable margin.
+    n_neighbors = min(top_k * 10 + 50, N - 1)
+    nn = NearestNeighbors(n_neighbors=n_neighbors, metric="cosine", algorithm="brute", n_jobs=-1)
+    nn.fit(X)
+
     neg_indices: list[int] = []
 
-    for start in tqdm(range(0, N, CHUNK_SIZE), desc="Hard negatives"):
-        end = min(start + CHUNK_SIZE, N)
-        # Dense [chunk, N] cosine similarity matrix
-        sims = cosine_similarity(X[start:end], X)
+    for start in tqdm(range(0, N, BATCH_SIZE), desc="Hard negatives"):
+        end = min(start + BATCH_SIZE, N)
+        knn = nn.kneighbors(X[start:end], return_distance=False)  # [batch, n_neighbors]
 
         for local_i, global_i in enumerate(range(start, end)):
             sid = sample_ids[global_i]
             exclude = sid_to_indices[sid]
 
-            row_sims = sims[local_i].copy()
-            row_sims[list(exclude)] = -1.0  # mask out same-image captions
-
-            # Top-K candidates from different images (sorted by similarity desc)
-            ranked = np.argsort(row_sims)[::-1]
-            candidates = [int(j) for j in ranked if j not in exclude][:top_k]
+            candidates = [int(j) for j in knn[local_i] if j not in exclude][:top_k]
 
             if not candidates:
-                # Edge case: all other rows are from the same sample_id
                 candidates = [j for j in range(N) if j not in exclude]
 
-            chosen = int(rng.choice(candidates))
-            neg_indices.append(chosen)
+            neg_indices.append(int(rng.choice(candidates)))
 
     return neg_indices
 
