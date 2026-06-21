@@ -37,6 +37,7 @@ from qnlp.domain.datasets.dataset import VLMDataset, collect_symbol_sizes
 from qnlp.domain.models.vlm.contrastive_vlm import ContrastiveVLM
 from qnlp.scripts.aro_contrastive.step import AROContrastiveStep
 from qnlp.scripts.coco_aro_style.config import ExperimentConfig
+from qnlp.scripts.coco_multi_caption.evaluate import evaluate_aro, evaluate_sugarcrepe, evaluate_winoground
 from qnlp.utils.logging import setup_logger
 from qnlp.utils.mlflow_utils import setup_mlflow_run
 from qnlp.utils.seeding import set_seed
@@ -59,14 +60,17 @@ SYMBOL_COLS = ["true_symbols", "false_symbols"]
 _SINGLE_COMPILED = [("diagram", "symbols", "caption", "path")]
 
 
+RETRIEVAL_MAX_IMAGES = 5000
+
+
 def _coco_retrieval_eval(model: ContrastiveVLM, device: torch.device, batch_size: int, nlc: bool) -> dict[str, float]:
     """
-    Evaluate COCO val retrieval using deduplicated coco_single_caption_val.parquet.
-    One caption per unique sample_id; diagonal of similarity matrix = true pair.
+    COCO test retrieval using coco_single_caption_test.parquet, capped at
+    RETRIEVAL_MAX_IMAGES unique images for a fair comparison across runs.
     """
-    val_path = DATASETS_PATH / "coco_single_caption_val.parquet"
-    if not val_path.exists():
-        logger.warning(f"Retrieval eval skipped — {val_path} not found.")
+    test_path = DATASETS_PATH / "coco_single_caption_test.parquet"
+    if not test_path.exists():
+        logger.warning(f"Retrieval eval skipped — {test_path} not found.")
         return {}
 
     size = image_model_hyperparams.image_size
@@ -77,16 +81,18 @@ def _coco_retrieval_eval(model: ContrastiveVLM, device: torch.device, batch_size
         ]
     )
     ds = VLMDataset(
-        val_path, compiled_columns=_SINGLE_COMPILED, image_transform=transform, use_non_linear_contractions=nlc
+        test_path, compiled_columns=_SINGLE_COMPILED, image_transform=transform, use_non_linear_contractions=nlc
     )
 
-    # Deduplicate to one caption per image for retrieval evaluation
+    # One caption per unique image, capped at RETRIEVAL_MAX_IMAGES
     seen: set[str] = set()
     indices: list[int] = []
     for i, sid in enumerate(ds.df["sample_id"].to_list()):
         if sid not in seen:
             seen.add(sid)
             indices.append(i)
+            if len(indices) >= RETRIEVAL_MAX_IMAGES:
+                break
 
     loader = DataLoader(
         Subset(ds, indices),
@@ -113,9 +119,40 @@ def _coco_retrieval_eval(model: ContrastiveVLM, device: torch.device, batch_size
     if not img_embs:
         return {}
 
-    metrics = retrieval_metrics(torch.cat(img_embs), torch.cat(txt_embs))
-    logger.info(f"COCO val retrieval ({len(indices)} images): {metrics}")
-    return metrics
+    return retrieval_metrics(torch.cat(img_embs), torch.cat(txt_embs))
+
+
+def _print_final_summary(
+    retrieval: dict[str, float],
+    wino: dict,
+    aro: dict,
+    sc: dict,
+) -> None:
+    sep = "=" * 60
+    logger.info(sep)
+    logger.info("FINAL RESULTS")
+    logger.info(sep)
+
+    if retrieval:
+        logger.info(f"COCO Retrieval (test, {RETRIEVAL_MAX_IMAGES} images)")
+        for k in sorted(retrieval):
+            logger.info(f"  {k}: {retrieval[k]:.4f}")
+
+    logger.info("Winoground")
+    logger.info(f"  text:  {wino['text_score']:.4f}")
+    logger.info(f"  image: {wino['image_score']:.4f}")
+    logger.info(f"  group: {wino['group_score']:.4f}")
+    logger.info(f"  pairs: {wino['n_pairs']}  skipped: {wino['n_skipped']}")
+
+    logger.info("ARO")
+    logger.info(f"  {'task':<14}{'N':>7}{'acc':>9}{'true_cos':>10}{'false_cos':>11}")
+    for task in [*sorted(k for k in aro if k != "overall"), "overall"]:
+        r = aro[task]
+        logger.info(f"  {task:<14}{r['n']:>7}{r['hard_neg_acc']:>9.4f}{r['true_cos']:>10.4f}{r['false_cos']:>11.4f}")
+
+    logger.info("SugarCREPE (swap_obj)")
+    logger.info(f"  acc: {sc['hard_neg_acc']:.4f}  evaluated: {sc['n_evaluated']}  skipped: {sc['n_skipped']}")
+    logger.info(sep)
 
 
 def run() -> None:
@@ -226,10 +263,33 @@ def run() -> None:
         # fit() restores best checkpoint in-memory before returning
         test_metrics = trainer.fit()
 
+        logger.info("--- COCO Retrieval ---")
         retrieval = _coco_retrieval_eval(model, device, cfg.batch_size, nlc)
 
+        logger.info("--- Winoground ---")
+        wino = evaluate_winoground(model, device, cfg.batch_size)
+
+        logger.info("--- ARO ---")
+        aro = evaluate_aro(model, device, cfg.batch_size)
+
+        logger.info("--- SugarCREPE (swap_obj) ---")
+        sc = evaluate_sugarcrepe(model, device, cfg.batch_size)
+
+        _print_final_summary(retrieval, wino, aro, sc)
+
         if mlflow.active_run():
-            mlflow.log_metrics({f"coco_retrieval/{k}": v for k, v in retrieval.items()})
+            mlflow.log_metrics({f"retrieval/{k}": v for k, v in retrieval.items()})
+            mlflow.log_metrics(
+                {
+                    "wino/text": wino["text_score"],
+                    "wino/image": wino["image_score"],
+                    "wino/group": wino["group_score"],
+                }
+            )
+            mlflow.log_metrics(
+                {f"aro/{task}/acc": res["hard_neg_acc"] for task, res in aro.items() if isinstance(res, dict)}
+            )
+            mlflow.log_metrics({"sugarcrepe/swap_obj": sc["hard_neg_acc"]})
             mlflow.log_artifact(str(checkpoint_path))
 
         send_training_finished_notification(
@@ -238,14 +298,13 @@ def run() -> None:
                 "run": mlflow_run.info.run_name,
                 **test_metrics,
                 **{f"retrieval/{k}": v for k, v in retrieval.items()},
+                "wino_group": wino["group_score"],
+                "aro_overall": aro.get("overall", {}).get("hard_neg_acc", float("nan")),
+                "sugarcrepe": sc["hard_neg_acc"],
             }
         )
 
     logger.info(f"Checkpoint: {checkpoint_path}")
-    logger.info(
-        "To evaluate on Winoground/ARO/SugarCREPE run:\n"
-        f"  python -m qnlp.scripts.coco_multi_caption.evaluate {checkpoint_path}"
-    )
 
 
 if __name__ == "__main__":

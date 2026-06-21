@@ -1,7 +1,6 @@
 #!/bin/bash
 #$ -l tmem=32G
-#$ -l h_rt=4:0:0
-#$ -l gpu=false
+#$ -l h_rt=16:0:0
 #$ -S /bin/bash
 #$ -j y
 #$ -N coco_aro_style_create_dataset

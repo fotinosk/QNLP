@@ -49,12 +49,14 @@ class VLMDataset(Dataset):
         compiled_columns: list[tuple] | None = None,
         image_transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
         use_non_linear_contractions: bool = False,
+        return_image_paths: bool = False,
     ):
         self.df = pl.read_parquet(parquet_path)
         self.image_columns = image_columns or ["local_image_path"]
         self.compiled_columns = compiled_columns or [("diagram", "symbols", "caption")]
         self.image_transform = image_transform
         self.use_non_linear_contractions = use_non_linear_contractions
+        self.return_image_paths = return_image_paths
 
         # compiled_columns entries are (diagram_col, symbols_col, output_key) or, for
         # non-linear contractions, (diagram_col, symbols_col, output_key, path_col).
@@ -78,12 +80,15 @@ class VLMDataset(Dataset):
 
         result: dict[str, Any] = {}
 
-        # Load images
+        # Load images (or return raw paths when return_image_paths=True)
         for col in self.image_columns:
-            img = torchvision.io.read_image(row[col], mode=torchvision.io.ImageReadMode.RGB).float().div(255.0)
-            if self.image_transform is not None:
-                img = self.image_transform(img)
-            result[col] = img
+            if self.return_image_paths:
+                result[col] = row[col]
+            else:
+                img = torchvision.io.read_image(row[col], mode=torchvision.io.ImageReadMode.RGB).float().div(255.0)
+                if self.image_transform is not None:
+                    img = self.image_transform(img)
+                result[col] = img
 
         # Bundle compiled (diagram, symbols[, path]) tuples
         for spec in self.compiled_columns:

@@ -28,6 +28,7 @@ from qnlp.domain.datasets.dataloader import get_dataloaders, vlm_collate_fn
 from qnlp.domain.datasets.dataset import VLMDataset, collect_symbol_sizes
 from qnlp.domain.models.vlm.contrastive_vlm import ContrastiveVLM
 from qnlp.scripts.coco_multi_caption.config import ExperimentConfig
+from qnlp.scripts.coco_multi_caption.evaluate import evaluate_aro, evaluate_sugarcrepe, evaluate_winoground
 from qnlp.utils.logging import setup_logger
 from qnlp.utils.mlflow_utils import setup_mlflow_run
 from qnlp.utils.seeding import set_seed
@@ -72,6 +73,30 @@ class SimpleCaptionStep:
             metrics["nonlinear_gate"] = gate.detach()
 
         return loss, metrics
+
+
+def _print_final_summary(retrieval: dict, wino: dict, aro: dict, sc: dict) -> None:
+    sep = "=" * 60
+    logger.info(sep)
+    logger.info("FINAL RESULTS")
+    logger.info(sep)
+    if retrieval:
+        logger.info("COCO Retrieval (test, 5000 images)")
+        for k in sorted(retrieval):
+            logger.info(f"  {k}: {retrieval[k]:.4f}")
+    logger.info("Winoground")
+    logger.info(f"  text:  {wino['text_score']:.4f}")
+    logger.info(f"  image: {wino['image_score']:.4f}")
+    logger.info(f"  group: {wino['group_score']:.4f}")
+    logger.info(f"  pairs: {wino['n_pairs']}  skipped: {wino['n_skipped']}")
+    logger.info("ARO")
+    logger.info(f"  {'task':<14}{'N':>7}{'acc':>9}{'true_cos':>10}{'false_cos':>11}")
+    for task in [*sorted(k for k in aro if k != "overall"), "overall"]:
+        r = aro[task]
+        logger.info(f"  {task:<14}{r['n']:>7}{r['hard_neg_acc']:>9.4f}{r['true_cos']:>10.4f}{r['false_cos']:>11.4f}")
+    logger.info("SugarCREPE (swap_obj)")
+    logger.info(f"  acc: {sc['hard_neg_acc']:.4f}  evaluated: {sc['n_evaluated']}  skipped: {sc['n_skipped']}")
+    logger.info(sep)
 
 
 def _dedup_loader(ds: VLMDataset, batch_size: int, num_workers: int = 4, max_images: int | None = None) -> DataLoader:
@@ -222,16 +247,44 @@ def run():
 
         test_metrics = trainer.fit()
 
+        logger.info("--- COCO Retrieval (test, 5000 images) ---")
         retrieval = _collect_retrieval_metrics(model, test_loader_dedup, device)
+
+        logger.info("--- Winoground ---")
+        wino = evaluate_winoground(model, device, cfg.batch_size)
+
+        logger.info("--- ARO ---")
+        aro = evaluate_aro(model, device, cfg.batch_size)
+
+        logger.info("--- SugarCREPE (swap_obj) ---")
+        sc = evaluate_sugarcrepe(model, device, cfg.batch_size)
+
+        _print_final_summary(retrieval, wino, aro, sc)
+
         if mlflow.active_run():
-            mlflow.log_metrics({f"test/{k}": v for k, v in retrieval.items()})
+            mlflow.log_metrics({f"retrieval/{k}": v for k, v in retrieval.items()})
+            mlflow.log_metrics(
+                {
+                    "wino/text": wino["text_score"],
+                    "wino/image": wino["image_score"],
+                    "wino/group": wino["group_score"],
+                }
+            )
+            mlflow.log_metrics(
+                {f"aro/{task}/acc": res["hard_neg_acc"] for task, res in aro.items() if isinstance(res, dict)}
+            )
+            mlflow.log_metrics({"sugarcrepe/swap_obj": sc["hard_neg_acc"]})
             mlflow.log_artifact(str(checkpoint_path))
-        logger.info(f"Test retrieval: {retrieval}")
+
         send_training_finished_notification(
             {
                 "experiment": EXPERIMENT_NAME,
                 "run": run.info.run_name,
                 **test_metrics,
+                **{f"retrieval/{k}": v for k, v in retrieval.items()},
+                "wino_group": wino["group_score"],
+                "aro_overall": aro.get("overall", {}).get("hard_neg_acc", float("nan")),
+                "sugarcrepe": sc["hard_neg_acc"],
             }
         )
 

@@ -40,11 +40,13 @@ class WinogroundDataset(Dataset):
         mode: str = "train",
         image_transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
         use_non_linear_contractions: bool = False,
+        return_image_paths: bool = False,
     ):
         assert mode in ("train", "eval"), f"mode must be 'train' or 'eval', got '{mode}'"
         self.mode = mode
         self.image_transform = image_transform
         self.use_non_linear_contractions = use_non_linear_contractions
+        self.return_image_paths = return_image_paths
         self.df = pl.read_parquet(parquet_path)
 
         if use_non_linear_contractions and "cap0_path" not in self.df.columns:
@@ -56,7 +58,9 @@ class WinogroundDataset(Dataset):
     def __len__(self) -> int:
         return 2 * len(self.df) if self.mode == "train" else len(self.df)
 
-    def _load_image(self, path: str) -> torch.Tensor:
+    def _load_image(self, path: str) -> "torch.Tensor | str":
+        if self.return_image_paths:
+            return path
         img = torchvision.io.read_image(path, mode=torchvision.io.ImageReadMode.RGB).float().div(255.0)
         if self.image_transform is not None:
             img = self.image_transform(img)
@@ -104,9 +108,16 @@ class WinogroundDataset(Dataset):
             }
 
 
+def _stack_or_list(items: list) -> "torch.Tensor | list":
+    """Stack tensors; pass strings through as a list (return_image_paths=True)."""
+    if items and isinstance(items[0], torch.Tensor):
+        return torch.stack(items)
+    return items
+
+
 def winoground_train_collate_fn(batch: list[dict]) -> dict:
     return {
-        "images": torch.stack([item["image"] for item in batch]),
+        "images": _stack_or_list([item["image"] for item in batch]),
         "true_captions": [item["true_caption"] for item in batch],
         "false_captions": [item["false_caption"] for item in batch],
         "pair_ids": [item["pair_id"] for item in batch],
@@ -115,8 +126,8 @@ def winoground_train_collate_fn(batch: list[dict]) -> dict:
 
 def winoground_eval_collate_fn(batch: list[dict]) -> dict:
     return {
-        "images_0": torch.stack([item["image_0"] for item in batch]),
-        "images_1": torch.stack([item["image_1"] for item in batch]),
+        "images_0": _stack_or_list([item["image_0"] for item in batch]),
+        "images_1": _stack_or_list([item["image_1"] for item in batch]),
         "captions_0": [item["caption_0"] for item in batch],
         "captions_1": [item["caption_1"] for item in batch],
         "pair_ids": [item["pair_id"] for item in batch],

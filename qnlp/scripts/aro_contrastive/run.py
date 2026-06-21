@@ -14,6 +14,7 @@ from qnlp.domain.datasets.dataset import collect_symbol_sizes
 from qnlp.domain.models.vlm.contrastive_vlm import ContrastiveVLM
 from qnlp.scripts.aro_contrastive.config import ExperimentConfig
 from qnlp.scripts.aro_contrastive.step import AROContrastiveStep
+from qnlp.scripts.coco_multi_caption.evaluate import evaluate_aro, evaluate_sugarcrepe, evaluate_winoground
 from qnlp.utils.logging import setup_logger
 from qnlp.utils.mlflow_utils import setup_mlflow_run
 from qnlp.utils.seeding import set_seed
@@ -145,12 +146,57 @@ def run():
 
         test_metrics = trainer.fit()
 
-        mlflow.log_artifact(checkpoint_path)
+        logger.info("--- Winoground ---")
+        wino = evaluate_winoground(model, device, cfg.batch_size)
+
+        logger.info("--- ARO ---")
+        aro = evaluate_aro(model, device, cfg.batch_size)
+
+        logger.info("--- SugarCREPE (swap_obj) ---")
+        sc = evaluate_sugarcrepe(model, device, cfg.batch_size)
+
+        sep = "=" * 60
+        logger.info(sep)
+        logger.info("FINAL RESULTS")
+        logger.info(sep)
+        logger.info("Winoground")
+        logger.info(f"  text:  {wino['text_score']:.4f}")
+        logger.info(f"  image: {wino['image_score']:.4f}")
+        logger.info(f"  group: {wino['group_score']:.4f}")
+        logger.info(f"  pairs: {wino['n_pairs']}  skipped: {wino['n_skipped']}")
+        logger.info("ARO")
+        logger.info(f"  {'task':<14}{'N':>7}{'acc':>9}{'true_cos':>10}{'false_cos':>11}")
+        for task in [*sorted(k for k in aro if k != "overall"), "overall"]:
+            r = aro[task]
+            logger.info(
+                f"  {task:<14}{r['n']:>7}{r['hard_neg_acc']:>9.4f}{r['true_cos']:>10.4f}{r['false_cos']:>11.4f}"
+            )
+        logger.info("SugarCREPE (swap_obj)")
+        logger.info(f"  acc: {sc['hard_neg_acc']:.4f}  evaluated: {sc['n_evaluated']}  skipped: {sc['n_skipped']}")
+        logger.info(sep)
+
+        if mlflow.active_run():
+            mlflow.log_metrics(
+                {
+                    "wino/text": wino["text_score"],
+                    "wino/image": wino["image_score"],
+                    "wino/group": wino["group_score"],
+                }
+            )
+            mlflow.log_metrics(
+                {f"aro/{task}/acc": res["hard_neg_acc"] for task, res in aro.items() if isinstance(res, dict)}
+            )
+            mlflow.log_metrics({"sugarcrepe/swap_obj": sc["hard_neg_acc"]})
+            mlflow.log_artifact(checkpoint_path)
+
         send_training_finished_notification(
             {
                 "experiment": EXPERIMENT_NAME,
                 "run": run.info.run_name,
                 **test_metrics,
+                "wino_group": wino["group_score"],
+                "aro_overall": aro.get("overall", {}).get("hard_neg_acc", float("nan")),
+                "sugarcrepe": sc["hard_neg_acc"],
             }
         )
 
