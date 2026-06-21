@@ -356,6 +356,13 @@ def _run_epoch(
 
     with torch.set_grad_enabled(train):
         for batch in loader:
+            # Recover from NaN gate before each batch — can happen at large embedding_dim
+            gate = getattr(text_model, "nonlinear_gate", None)
+            if gate is not None and not gate.isfinite():
+                logger.warning("NLC gate is NaN — resetting to 0.1 and continuing.")
+                with torch.no_grad():
+                    gate.fill_(0.1)
+
             if train:
                 optimizer.zero_grad()
 
