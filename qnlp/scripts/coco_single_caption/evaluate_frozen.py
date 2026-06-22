@@ -47,12 +47,14 @@ def evaluate(checkpoint_path: str, batch_size: int = 256) -> None:
     logger.info(f"Loading checkpoint: {checkpoint_path}")
     ckpt = torch.load(checkpoint_path, map_location=device)
 
-    # Reconstruct EinsumModel from stored symbols/sizes/nlc flag
-    text_model = EinsumModel().to(device)
-    text_model.load_state_dict(ckpt["text_model_state_dict"])
-    text_model.eval()
+    # Peek at the nlc flag before constructing so the gate parameter exists
+    # before load_state_dict tries to populate it.
+    sd = ckpt["text_model_state_dict"]
+    nlc = bool(sd.get("non_linear_contractions", False))
 
-    nlc = text_model.non_linear_contractions
+    text_model = EinsumModel(non_linear_contractions=nlc).to(device)
+    text_model.load_state_dict(sd)
+    text_model.eval()
     epoch = ckpt.get("epoch", "?")
     logger.info(f"Epoch: {epoch}  non_linear_contractions: {nlc}  symbols: {len(text_model.symbols)}")
 
