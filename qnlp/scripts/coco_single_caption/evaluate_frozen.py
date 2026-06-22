@@ -52,8 +52,11 @@ def evaluate(checkpoint_path: str, batch_size: int = 256) -> None:
     sd = ckpt["text_model_state_dict"]
     nlc = bool(sd.get("non_linear_contractions", False))
 
-    text_model = EinsumModel(non_linear_contractions=nlc).to(device)
+    # load_state_dict recreates self.weights as new CPU tensors, so .to(device)
+    # must come AFTER load_state_dict to move everything consistently.
+    text_model = EinsumModel(non_linear_contractions=nlc)
     text_model.load_state_dict(sd)
+    text_model = text_model.to(device)
     text_model.eval()
     epoch = ckpt.get("epoch", "?")
     logger.info(f"Epoch: {epoch}  non_linear_contractions: {nlc}  symbols: {len(text_model.symbols)}")
@@ -61,8 +64,9 @@ def evaluate(checkpoint_path: str, batch_size: int = 256) -> None:
     # Infer embedding_dim from the linear head weight shape
     head_sd = ckpt["text_head_state_dict"]
     embedding_dim = head_sd["weight"].shape[0]
-    text_head = nn.Linear(embedding_dim, embedding_dim).to(device)
+    text_head = nn.Linear(embedding_dim, embedding_dim)
     text_head.load_state_dict(head_sd)
+    text_head = text_head.to(device)
     text_head.eval()
 
     logger.info(f"embedding_dim: {embedding_dim}")
