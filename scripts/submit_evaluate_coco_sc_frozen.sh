@@ -1,10 +1,10 @@
 #!/bin/bash
 #$ -l tmem=32G
-#$ -l h_rt=48:0:0
+#$ -l h_rt=4:0:0
 #$ -l gpu=true
 #$ -S /bin/bash
 #$ -j y
-#$ -N coco_sc_frozen
+#$ -N coco_sc_frozen_eval
 #$ -M ucapfky@ucl.ac.uk
 #$ -m abe
 #$ -R y
@@ -12,19 +12,13 @@
 #$ -o /SAN/intelsys/discoviz/fotinos/QNLP/job_outputs/
 #$ -e /SAN/intelsys/discoviz/fotinos/QNLP/job_outputs/
 
-# --- Create all directories BEFORE any file operations ---
 mkdir -p /SAN/intelsys/discoviz/fotinos/QNLP/job_outputs
-mkdir -p /SAN/intelsys/discoviz/fotinos/cache/nltk_data
-mkdir -p /SAN/intelsys/discoviz/fotinos/cache/.pip_cache
 
-# --- Set up all paths to project space (NOT home!) ---
 PROJECT_DIR=/SAN/intelsys/discoviz/fotinos/QNLP
 ENV_DIR=/SAN/intelsys/discoviz/envs/qnlp311
 CACHE_DIR=/SAN/intelsys/discoviz/fotinos/cache
 
-# --- Redirect ALL environment variables to project space ---
 export PYTHONPATH=$PROJECT_DIR
-
 export HF_HOME=$CACHE_DIR/huggingface_cache
 export TRANSFORMERS_CACHE=$CACHE_DIR/transformers_cache
 export TORCH_HOME=$CACHE_DIR/torch_cache
@@ -34,40 +28,33 @@ export MPLCONFIGDIR=$CACHE_DIR/.matplotlib_cache
 export PYTHONPYCACHEPREFIX=$CACHE_DIR/pycache
 export XDG_CACHE_HOME=$CACHE_DIR/.xdg_cache
 
-# --- Experiment config ---
-# embedding_dim=512 must match CLIP ViT-B/32 output dim.
-export ML_EMBEDDING_DIM=512
-export ML_BOND_DIM=10
-export ML_USE_NON_LINEAR_CONTRACTIONS=true
-export ML_MAX_GRAD_NORM=0.1  # tight clip — NLC gate explodes at 1.0 with emb=512
-export ML_BATCH_SIZE=128
+# Path to the checkpoint to evaluate. Pass via environment variable:
+#   ML_CHECKPOINT=/path/to/best_model.pt qsub scripts/submit_evaluate_coco_sc_frozen.sh
+CHECKPOINT=${ML_CHECKPOINT:-""}
+BATCH_SIZE=${ML_BATCH_SIZE:-256}
 
-# --- Reduce fragmentation from CUDA allocations ---
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-
-# --- MLflow: disabled on cluster, metrics go to job output log ---
-export MLFLOW_DISABLED=true
-export MLFLOW_RUN_NAME="${RUN_NAME:-coco_sc_frozen_nlc_bond10}"
-
-# --- Use full path to Python (no activation needed) ---
 PYTHON=$ENV_DIR/bin/python
 
 echo "========================================="
 echo "Job started: $(date)"
 echo "Job ID: $JOB_ID"
 echo "Running on: $(hostname)"
-echo "Using Python: $PYTHON"
-echo "Embedding dim: $ML_EMBEDDING_DIM"
-echo "Bond dim: $ML_BOND_DIM"
-echo "Non-linear: $ML_USE_NON_LINEAR_CONTRACTIONS"
-echo "Max grad norm: $ML_MAX_GRAD_NORM"
-echo "Batch size: $ML_BATCH_SIZE"
+echo "Checkpoint: $CHECKPOINT"
+echo "Batch size: $BATCH_SIZE"
 echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
 echo "========================================="
 
+if [ -z "$CHECKPOINT" ]; then
+    echo "ERROR: set ML_CHECKPOINT to the path of best_model.pt before submitting."
+    echo "  ML_CHECKPOINT=/path/to/best_model.pt qsub scripts/submit_evaluate_coco_sc_frozen.sh"
+    exit 1
+fi
+
 cd $PROJECT_DIR
 
-$PYTHON -m qnlp.scripts.coco_single_caption.run_frozen
+$PYTHON -m qnlp.scripts.coco_single_caption.evaluate_frozen \
+    --checkpoint "$CHECKPOINT" \
+    --batch_size $BATCH_SIZE
 
 echo "========================================="
 echo "Job finished successfully at $(date)"
