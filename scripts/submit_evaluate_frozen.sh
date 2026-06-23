@@ -4,7 +4,7 @@
 #$ -l gpu=true
 #$ -S /bin/bash
 #$ -j y
-#$ -N coco_sc_frozen_eval
+#$ -N eval_frozen
 #$ -M ucapfky@ucl.ac.uk
 #$ -m abe
 #$ -R y
@@ -28,8 +28,9 @@ export MPLCONFIGDIR=$CACHE_DIR/.matplotlib_cache
 export PYTHONPYCACHEPREFIX=$CACHE_DIR/pycache
 export XDG_CACHE_HOME=$CACHE_DIR/.xdg_cache
 
-# Path to the checkpoint to evaluate. Pass via environment variable:
-#   ML_CHECKPOINT=/path/to/best_model.pt qsub scripts/submit_evaluate_coco_sc_frozen.sh
+# Path to the checkpoint to evaluate. Pass via -v:
+#   qsub -v ML_CHECKPOINT=/path/to/best_model.pt scripts/submit_evaluate_frozen.sh
+#   qsub -v ML_CHECKPOINT=/path/to/best_model.pt,ML_BATCH_SIZE=128 scripts/submit_evaluate_frozen.sh
 CHECKPOINT=${ML_CHECKPOINT:-""}
 BATCH_SIZE=${ML_BATCH_SIZE:-256}
 
@@ -46,7 +47,7 @@ echo "========================================="
 
 if [ -z "$CHECKPOINT" ]; then
     echo "ERROR: set ML_CHECKPOINT to the path of best_model.pt before submitting."
-    echo "  ML_CHECKPOINT=/path/to/best_model.pt qsub scripts/submit_evaluate_coco_sc_frozen.sh"
+    echo "  qsub -v ML_CHECKPOINT=/path/to/best_model.pt scripts/submit_evaluate_frozen.sh"
     exit 1
 fi
 
