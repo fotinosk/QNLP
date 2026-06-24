@@ -1,8 +1,9 @@
 """Load the SugarCrepe++ dataset (AsphyXIA/sugarcrepepp) into an Atlas.
 
-Each row has two positive captions (positive_caption_1, positive_caption_2) and one
-negative (negative_caption). We expand each row into two contrastive pairs so both
-positives are evaluated:
+All HF columns are stored as lists of length 1 — images and captions are
+extracted with list.first() before ingestion.
+
+Each row has two positive captions. We expand into two contrastive pairs:
   (positive_caption_1, negative_caption)
   (positive_caption_2, negative_caption)
 
@@ -21,11 +22,6 @@ from qnlp.core.data_engine.atlas.hf_utils import fetch_hf_batch_lazily, save_ima
 HF_PARQUET = "hf://datasets/AsphyXIA/sugarcrepepp/data/test-*.parquet"
 ATLAS_NAME = "sugarcrepepp"
 ATLAS_DIR = constants.atlases_path / ATLAS_NAME
-_MANIFEST_SCHEMA = {
-    "true_caption": pl.String,
-    "false_caption": pl.String,
-    "local_image_path": pl.String,
-}
 
 
 def run() -> None:
@@ -42,7 +38,6 @@ def run() -> None:
         print("No data to ingest.")
         return
 
-    # Save images to disk, replacing 'images' bytes column with 'local_image_path'
     df = save_images_and_clear_df(
         df=df,
         image_column="images",
@@ -50,24 +45,24 @@ def run() -> None:
         image_storage_path=atlas.image_path,
     )
 
-    # Expand each row into two pairs: one per positive caption
+    neg = pl.col("negative_caption").list.first().alias("false_caption")
     pairs1 = df.select(
         [
-            pl.col("positive_caption_1").alias("true_caption"),
-            pl.col("negative_caption").alias("false_caption"),
+            pl.col("positive_caption_1").list.first().alias("true_caption"),
+            neg,
             pl.col("local_image_path"),
         ]
     )
     pairs2 = df.select(
         [
-            pl.col("positive_caption_2").alias("true_caption"),
-            pl.col("negative_caption").alias("false_caption"),
+            pl.col("positive_caption_2").list.first().alias("true_caption"),
+            neg,
             pl.col("local_image_path"),
         ]
     )
     expanded = pl.concat([pairs1, pairs2], how="vertical")
 
-    atlas.ingest_dataframe(expanded.cast(_MANIFEST_SCHEMA))
+    atlas.ingest_dataframe(expanded)
     print(f"Ingested {len(expanded)} pairs ({len(df)} original rows × 2 positives).")
 
 

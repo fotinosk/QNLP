@@ -1,7 +1,7 @@
 """Load the full SugarCrepe dataset (AsphyXIA/sugarcrepe, all subsets) into an Atlas.
 
-Images are stored in the HuggingFace parquet as structs {"bytes": ..., "path": ...}.
-Caption columns: `pos` (positive/true) and `neg` (negative/false).
+All HF columns are stored as lists of length 1 — images and captions are
+extracted with list.first() before ingestion.
 
 Usage:
     HF_TOKEN=hf_... python -m qnlp.scripts.load_sugarcrepe_full_to_atlas
@@ -9,8 +9,11 @@ Usage:
 
 import os
 
+import polars as pl
+
 from qnlp.constants import constants
 from qnlp.core.data_engine.atlas.atlas import Atlas
+from qnlp.core.data_engine.atlas.hf_utils import fetch_hf_batch_lazily, save_images_and_clear_df
 
 HF_PARQUET = "hf://datasets/AsphyXIA/sugarcrepe/data/test-*.parquet"
 ATLAS_NAME = "sugarcrepe_full"
@@ -26,11 +29,28 @@ def run() -> None:
     else:
         atlas = Atlas.create_atlas(name=ATLAS_NAME, source_path_or_url=HF_PARQUET, image_column="images")
 
-    atlas.ingest_data_from_remote(
-        n=100_000,
-        storage_options=storage_options,
-        column_rename={"positive_caption": "true_caption", "negative_caption": "false_caption"},
+    df = fetch_hf_batch_lazily(HF_PARQUET, cursor_location=0, n_to_fetch=100_000, storage_options=storage_options)
+    if df.is_empty():
+        print("No data to ingest.")
+        return
+
+    df = save_images_and_clear_df(
+        df=df,
+        image_column="images",
+        image_file_path_column=None,
+        image_storage_path=atlas.image_path,
     )
+
+    manifest = df.select(
+        [
+            pl.col("positive_caption").list.first().alias("true_caption"),
+            pl.col("negative_caption").list.first().alias("false_caption"),
+            pl.col("local_image_path"),
+        ]
+    )
+
+    atlas.ingest_dataframe(manifest)
+    print(f"Ingested {len(manifest)} rows into atlas '{ATLAS_NAME}'.")
 
 
 if __name__ == "__main__":
