@@ -23,7 +23,12 @@ def run() -> None:
         device=DEVICE,
         max_workers=MAX_WORKERS,
     )
-    steps = [FlattenContrastivePairStep(), RemoveTrailingDotsStep(), compiler, UnifyEinsumRankStep()]
+    steps = [
+        FlattenContrastivePairStep(true_column="pos", false_column="neg"),
+        RemoveTrailingDotsStep(),
+        compiler,
+        UnifyEinsumRankStep(),
+    ]
     pipeline = Pipeline(
         atlas_dir=ATLAS_DIR,
         steps=steps,
