@@ -24,12 +24,12 @@ def run() -> None:
         atlas = Atlas.load_atlas(ATLAS_DIR / "metadata.json")
         print(f"Resuming atlas '{ATLAS_NAME}' from cursor {atlas.cursor_location}.")
     else:
-        atlas = Atlas.create_atlas(name=ATLAS_NAME, source_path_or_url=HF_PARQUET, image_column="image")
+        atlas = Atlas.create_atlas(name=ATLAS_NAME, source_path_or_url=HF_PARQUET, image_column="images")
 
     atlas.ingest_data_from_remote(
-        n=9_000,
+        n=100_000,
         storage_options=storage_options,
-        column_rename={"pos": "true_caption", "neg": "false_caption"},
+        column_rename={"positive_caption": "true_caption", "negative_caption": "false_caption"},
     )
 
 
