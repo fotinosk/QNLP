@@ -8,10 +8,13 @@ def fetch_hf_batch_lazily(
     hf_parquet_glob: str,
     cursor_location: int,
     n_to_fetch: int,
+    storage_options: dict | None = None,
 ) -> pl.DataFrame:
     print(f"Scanning {hf_parquet_glob} for rows {cursor_location} to {cursor_location + n_to_fetch}...")
 
-    batch_df = pl.scan_parquet(hf_parquet_glob).slice(cursor_location, n_to_fetch).collect()
+    batch_df = (
+        pl.scan_parquet(hf_parquet_glob, storage_options=storage_options).slice(cursor_location, n_to_fetch).collect()
+    )
     return batch_df
 
 

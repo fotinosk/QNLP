@@ -178,12 +178,20 @@ class Atlas:
         self._save_metadata()
         print(f"Successfully ingested {n_rows} records. Cursor at {self.cursor_location}.")
 
-    def ingest_data_from_remote(self, n: int = 100) -> None:
+    def ingest_data_from_remote(
+        self,
+        n: int = 100,
+        storage_options: dict | None = None,
+        column_rename: dict[str, str] | None = None,
+    ) -> None:
         if not self._is_hf:
             raise NotImplementedError("Loading for local files not implemented yet")
 
         new_dataset = fetch_hf_batch_lazily(
-            hf_parquet_glob=self.remote_location, cursor_location=self.cursor_location, n_to_fetch=n
+            hf_parquet_glob=self.remote_location,
+            cursor_location=self.cursor_location,
+            n_to_fetch=n,
+            storage_options=storage_options,
         )
 
         if new_dataset.is_empty():
@@ -196,6 +204,9 @@ class Atlas:
             image_file_path_column=self.image_file_path_column,
             image_storage_path=self.image_path,
         )
+
+        if column_rename:
+            processed = processed.rename({k: v for k, v in column_rename.items() if k in processed.columns})
 
         n_rows = len(processed)
         sample_ids = [f"{self.name}_{i}" for i in range(self.cursor_location, self.cursor_location + n_rows)]
