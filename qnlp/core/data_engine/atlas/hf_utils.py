@@ -19,6 +19,8 @@ def fetch_hf_batch_lazily(
 
 
 def _write_single_file(image_data, original_filepath: str | None, storage_dir: Path) -> str:
+    if isinstance(image_data, list):
+        image_data = image_data[0]
     if isinstance(image_data, dict):
         img_bytes: bytes = image_data.get("bytes") or b""
         if original_filepath is None:
