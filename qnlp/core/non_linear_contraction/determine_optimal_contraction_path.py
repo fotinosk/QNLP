@@ -32,6 +32,41 @@ def get_contraction_path(einsum_str: str, shapes: TensorShapes) -> ContractionPa
     return path
 
 
+def get_right_to_left_path(n_operands: int) -> ContractionPath:
+    """Fold-right contraction: always contract the two rightmost remaining operands.
+
+    Produces t0 ⊗ (t1 ⊗ (t2 ⊗ t3)) working from the end of the sentence inward.
+    Used as a controlled suboptimal baseline to test path sensitivity.
+
+    In opt_einsum path notation, after contracting (i,j) both operands are removed
+    and the result is appended — so indices must account for shrinking list size.
+    """
+    if n_operands <= 1:
+        return []
+    return [(i, i + 1) for i in range(n_operands - 2, -1, -1)]
+
+
+def get_random_path(n_operands: int, seed: int | None = None) -> ContractionPath:
+    """Random pairwise contraction order.
+
+    Generates a uniformly random valid path. Memory safety is NOT guaranteed here —
+    callers should validate the path with opt_einsum and discard if intermediates
+    exceed MAX_INTERMEDIATE_ELEMENTS.
+    """
+    import random
+
+    rng = random.Random(seed)
+    if n_operands <= 1:
+        return []
+    path = []
+    current_n = n_operands
+    for _ in range(n_operands - 1):
+        i, j = sorted(rng.sample(range(current_n), 2))
+        path.append((i, j))
+        current_n -= 1
+    return path
+
+
 def get_left_to_right_path(n_operands: int) -> ContractionPath:
     """Fold-left contraction: always contract the running result with the next operand.
 

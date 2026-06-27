@@ -32,21 +32,30 @@ def _time_limit(seconds: float):
         signal.signal(signal.SIGALRM, old)
 
 
-def add_contraction_paths(atoms: pl.DataFrame, timeout_seconds: float = 10.0, max_symbols: int = 200) -> pl.DataFrame:
+def add_contraction_paths(
+    atoms: pl.DataFrame,
+    timeout_seconds: float = 10.0,
+    max_symbols: int = 200,
+    strategy: str = "optimal",
+) -> pl.DataFrame:
     """Compute the non-linear contraction path for each atom's diagram and add it
     as a JSON-serialised `path` column.
 
-    Derived purely from the already-fetched `diagram` and `symbols` (no LMDB cache
-    changes). Atoms get `path = None` (excluded later via require_path) when they
-    have more than `max_symbols` operands (branch-2 path search is exponential in
-    operand count, so long diagrams are skipped outright), time out, or would
-    produce an intermediate larger than MAX_INTERMEDIATE_ELEMENTS.
+    strategy:
+      "optimal"      — branch-2 opt_einsum (default)
+      "right_to_left" — fold right; t0⊗(t1⊗(t2⊗t3))
+      "random"       — uniformly random pairwise order (memory-checked, retried up to 10x)
+
+    Atoms get `path = None` when they exceed max_symbols, time out (optimal only),
+    or produce an intermediate larger than MAX_INTERMEDIATE_ELEMENTS.
     """
     from tqdm import tqdm
 
     from qnlp.core.non_linear_contraction.determine_optimal_contraction_path import (
         MAX_INTERMEDIATE_ELEMENTS,
         get_contraction_path_and_cost,
+        get_random_path,
+        get_right_to_left_path,
     )
 
     diagrams = atoms["diagram"].to_list()
@@ -77,9 +86,41 @@ def add_contraction_paths(atoms: pl.DataFrame, timeout_seconds: float = 10.0, ma
             continue
 
         if len(shapes) > max_symbols:
-            # Skip outright — branch-2 cost is exponential in operand count.
             result = None
             n_failed += 1
+        elif strategy == "right_to_left":
+            try:
+                import opt_einsum
+
+                path = get_right_to_left_path(len(shapes))
+                _, info = opt_einsum.contract_path(diagram, *shapes, shapes=True, optimize=path)
+                if info.largest_intermediate > MAX_INTERMEDIATE_ELEMENTS:
+                    raise ValueError(
+                        f"largest intermediate {info.largest_intermediate:,} > {MAX_INTERMEDIATE_ELEMENTS:,}"
+                    )
+                result = orjson.dumps(path).decode()
+                n_ok += 1
+            except Exception as e:
+                result = None
+                n_failed += 1
+                logger.warning(f"RTL path failed for diagram '{diagram[:60]}...': {e}")
+        elif strategy == "random":
+            result = None
+            for attempt in range(10):
+                try:
+                    import opt_einsum
+
+                    path = get_random_path(len(shapes), seed=attempt)
+                    _, info = opt_einsum.contract_path(diagram, *shapes, shapes=True, optimize=path)
+                    if info.largest_intermediate <= MAX_INTERMEDIATE_ELEMENTS:
+                        result = orjson.dumps(path).decode()
+                        n_ok += 1
+                        break
+                except Exception:
+                    pass
+            else:
+                n_failed += 1
+                logger.warning(f"Random path failed (all 10 attempts) for diagram '{diagram[:60]}...'")
         else:
             try:
                 with _time_limit(timeout_seconds):
@@ -171,6 +212,7 @@ def enrich_atoms(
     filter_2d_outputs: bool = True,
     compute_contraction_paths: bool = False,
     path_timeout_seconds: float = 10.0,
+    path_strategy: str = "optimal",
 ) -> pl.DataFrame:
     """
     Read all chunk_*.parquet files from the given derived dirs, concatenate,
@@ -211,8 +253,8 @@ def enrich_atoms(
             logger.warning(f"Dropped {dropped_2d} atoms with 2D diagram outputs.")
 
     if compute_contraction_paths:
-        logger.info(f"Computing contraction paths for {len(atoms)} atoms...")
-        atoms = add_contraction_paths(atoms, path_timeout_seconds, max_symbols=20)
+        logger.info(f"Computing contraction paths for {len(atoms)} atoms (strategy={path_strategy})...")
+        atoms = add_contraction_paths(atoms, path_timeout_seconds, max_symbols=20, strategy=path_strategy)
         before = len(atoms)
         atoms = atoms.filter(pl.col("path").is_not_null())
         dropped_path = before - len(atoms)
