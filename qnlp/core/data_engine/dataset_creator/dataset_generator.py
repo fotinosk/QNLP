@@ -110,7 +110,7 @@ def add_contraction_paths(
                 try:
                     import opt_einsum
 
-                    path = get_random_path(len(shapes), seed=attempt)
+                    path = get_random_path(diagram, seed=attempt)
                     _, info = opt_einsum.contract_path(diagram, *shapes, shapes=True, optimize=path)
                     if info.largest_intermediate <= MAX_INTERMEDIATE_ELEMENTS:
                         result = orjson.dumps(path).decode()

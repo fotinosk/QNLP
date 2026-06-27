@@ -46,24 +46,48 @@ def get_right_to_left_path(n_operands: int) -> ContractionPath:
     return [(i, i + 1) for i in range(n_operands - 2, -1, -1)]
 
 
-def get_random_path(n_operands: int, seed: int | None = None) -> ContractionPath:
-    """Random pairwise contraction order.
+def get_random_path(einsum_str: str, seed: int | None = None) -> ContractionPath:
+    """Random contraction order, restricted to pairs that share a bond index.
 
-    Generates a uniformly random valid path. Memory safety is NOT guaranteed here —
-    callers should validate the path with opt_einsum and discard if intermediates
-    exceed MAX_INTERMEDIATE_ELEMENTS.
+    At each step, builds the set of connected pairs (those with at least one
+    shared index in the current network) and picks uniformly at random from them.
+    After each contraction the result's index set is tracked: an index is summed
+    away if it appears in both contracted tensors but nowhere else in the remaining
+    network; all other indices survive into the result.
+
+    Falls back to a random unconnected pair only if no connected pair exists
+    (e.g. disconnected sub-networks), which should not occur in valid CCG diagrams.
+
+    Memory safety is NOT guaranteed here — callers should validate with opt_einsum
+    and discard if intermediates exceed MAX_INTERMEDIATE_ELEMENTS.
     """
     import random
 
     rng = random.Random(seed)
-    if n_operands <= 1:
+    input_part = einsum_str.split("->")[0]
+    index_sets: list[set[str]] = [set(op) for op in input_part.split(",")]
+    n = len(index_sets)
+
+    if n <= 1:
         return []
-    path = []
-    current_n = n_operands
-    for _ in range(n_operands - 1):
-        i, j = sorted(rng.sample(range(current_n), 2))
+
+    path: ContractionPath = []
+    for _ in range(n - 1):
+        current_n = len(index_sets)
+        connected = [(i, j) for i in range(current_n) for j in range(i + 1, current_n) if index_sets[i] & index_sets[j]]
+        i, j = rng.choice(connected) if connected else tuple(sorted(rng.sample(range(current_n), 2)))
+
+        # Indices that survive into the result: union minus those summed away.
+        # An index is summed if it appears only in tensors i and j (not elsewhere).
+        other = set().union(*(s for k, s in enumerate(index_sets) if k != i and k != j))
+        summed = (index_sets[i] & index_sets[j]) - other
+        result_indices = (index_sets[i] | index_sets[j]) - summed
+
+        # opt_einsum convention: remove both operands, append result at end.
+        index_sets = [s for k, s in enumerate(index_sets) if k != i and k != j]
+        index_sets.append(result_indices)
         path.append((i, j))
-        current_n -= 1
+
     return path
 
 
