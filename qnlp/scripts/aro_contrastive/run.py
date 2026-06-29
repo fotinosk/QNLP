@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 
 import mlflow
@@ -44,6 +45,16 @@ def run():
     val_parquet = DATASETS_PATH / f"aro_val{suffix}.parquet"
     test_parquet = DATASETS_PATH / f"aro_test{suffix}.parquet"
     logger.info(f"Datasets (suffix='{suffix}'): {train_parquet.name}, {val_parquet.name}, {test_parquet.name}")
+
+    # Checkpoint dir includes the suffix and PID so concurrent runs (e.g. _rtl and
+    # _random launched in the same second) never collide on the same path.
+    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    run_tag = f"{ts}{suffix or '_optimal'}_pid{os.getpid()}"
+    checkpoint_path = constants.checkpoints_path / EXPERIMENT_NAME / run_tag / "best_model.pt"
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    logger.info("=" * 70)
+    logger.info(f"MODEL CHECKPOINT PATH: {checkpoint_path}")
+    logger.info("=" * 70)
 
     size = image_model_hyperparams.image_size
     train_transform = transforms.Compose(
@@ -118,10 +129,6 @@ def run():
         ]
     )
 
-    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    checkpoint_path = constants.checkpoints_path / EXPERIMENT_NAME / ts / "best_model.pt"
-    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-
     params = {
         **cfg.model_dump(),
         **image_model_hyperparams.model_dump(),
@@ -151,8 +158,12 @@ def run():
         logger.info("--- Winoground ---")
         wino = evaluate_winoground(model, device, cfg.batch_size)
 
-        logger.info("--- ARO ---")
-        aro = evaluate_aro(model, device, cfg.batch_size)
+        # ARO on the HELD-OUT test split only (matching path suffix). The shared
+        # aro_eval.parquet pools all splits, so it contains this run's training
+        # rows — evaluating on it would be leakage. test_parquet is disjoint from
+        # train/val and uses the same contraction paths the model trained on.
+        logger.info("--- ARO (held-out test split) ---")
+        aro = evaluate_aro(model, device, cfg.batch_size, parquet=test_parquet)
 
         logger.info("--- SugarCREPE (swap_obj) ---")
         sc = evaluate_sugarcrepe(model, device, cfg.batch_size)

@@ -18,6 +18,7 @@ Usage:
     ML_USE_NON_LINEAR_CONTRACTIONS=true python -m qnlp.scripts.aro_contrastive.run_frozen
 """
 
+import os
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -222,9 +223,14 @@ def run() -> None:
     # Only the text model is trainable; the image tower is frozen.
     optimizer = torch.optim.AdamW(text_model.parameters(), lr=cfg.text_lr, weight_decay=cfg.text_weight_decay)
 
+    # Checkpoint dir includes the suffix and PID so concurrent runs never collide.
     ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    checkpoint_path = constants.checkpoints_path / EXPERIMENT_NAME / ts / "best_text_model.pt"
+    run_tag = f"{ts}{cfg.dataset_suffix or '_optimal'}_pid{os.getpid()}"
+    checkpoint_path = constants.checkpoints_path / EXPERIMENT_NAME / run_tag / "best_text_model.pt"
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    logger.info("=" * 70)
+    logger.info(f"MODEL CHECKPOINT PATH: {checkpoint_path}")
+    logger.info("=" * 70)
 
     early_stopping = EarlyStopping(patience=cfg.patience, min_delta=cfg.min_delta, minimize=False)
     params = {
