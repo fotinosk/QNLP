@@ -26,10 +26,6 @@ logger = setup_logger(log_name=EXPERIMENT_NAME)
 
 DATASETS_PATH = constants.datasets_path
 
-TRAIN_PARQUET = DATASETS_PATH / "aro_train.parquet"
-VAL_PARQUET = DATASETS_PATH / "aro_val.parquet"
-TEST_PARQUET = DATASETS_PATH / "aro_test.parquet"
-
 # 4th element is the pre-computed contraction path column (used only in non-linear mode).
 COMPILED_COLUMNS = [
     ("true_diagram", "true_symbols", "true_caption", "true_path"),
@@ -42,6 +38,12 @@ def run():
     cfg = ExperimentConfig()
     set_seed()
     device = get_device()
+
+    suffix = cfg.dataset_suffix
+    train_parquet = DATASETS_PATH / f"aro_train{suffix}.parquet"
+    val_parquet = DATASETS_PATH / f"aro_val{suffix}.parquet"
+    test_parquet = DATASETS_PATH / f"aro_test{suffix}.parquet"
+    logger.info(f"Datasets (suffix='{suffix}'): {train_parquet.name}, {val_parquet.name}, {test_parquet.name}")
 
     size = image_model_hyperparams.image_size
     train_transform = transforms.Compose(
@@ -62,9 +64,9 @@ def run():
     nlc = cfg.use_non_linear_contractions
 
     loaders, datasets = get_dataloaders(
-        train_parquet=TRAIN_PARQUET,
-        val_parquet=VAL_PARQUET,
-        test_parquet=TEST_PARQUET,
+        train_parquet=train_parquet,
+        val_parquet=val_parquet,
+        test_parquet=test_parquet,
         batch_size=cfg.batch_size,
         train_transform=train_transform,
         val_transform=val_transform,

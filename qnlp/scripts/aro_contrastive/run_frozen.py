@@ -47,11 +47,6 @@ EXPERIMENT_NAME = "aro_frozen"
 logger = setup_logger(log_name=EXPERIMENT_NAME)
 
 DATASETS_PATH = constants.datasets_path
-SPLIT_PARQUETS = {
-    "train": DATASETS_PATH / "aro_train.parquet",
-    "val": DATASETS_PATH / "aro_val.parquet",
-    "test": DATASETS_PATH / "aro_test.parquet",
-}
 LOOKUP_PATH = "models/lookup_embedding_ViT-B_32.pt"
 SYMBOL_COLS = ["true_symbols", "false_symbols"]
 
@@ -91,8 +86,15 @@ def _collate(batch: list[dict]) -> dict:
 
 
 def _build_loaders(cfg) -> dict[str, DataLoader]:
+    suffix = cfg.dataset_suffix
+    split_parquets = {
+        "train": DATASETS_PATH / f"aro_train{suffix}.parquet",
+        "val": DATASETS_PATH / f"aro_val{suffix}.parquet",
+        "test": DATASETS_PATH / f"aro_test{suffix}.parquet",
+    }
+    logger.info(f"Datasets (suffix='{suffix}'): {[p.name for p in split_parquets.values()]}")
     loaders = {}
-    for split, path in SPLIT_PARQUETS.items():
+    for split, path in split_parquets.items():
         ds = FrozenARODataset(path, cfg.use_non_linear_contractions)
         loaders[split] = DataLoader(
             ds,

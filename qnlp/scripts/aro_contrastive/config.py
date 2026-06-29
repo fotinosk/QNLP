@@ -11,6 +11,10 @@ class ExperimentConfig(BaseSettings):
     # to have been created with compute_contraction_paths=True.
     use_non_linear_contractions: bool = True
 
+    # Selects which aro_{split}{suffix}.parquet files to train on. Empty = the
+    # optimal-path datasets; "_rtl" / "_random" select the path-ablation variants.
+    dataset_suffix: str = ""
+
     batch_size: int = 128
     text_lr: float = 0.001
     text_weight_decay: float = 0.001

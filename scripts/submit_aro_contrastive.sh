@@ -39,6 +39,12 @@ export ML_BOND_DIM=10
 export ML_USE_NON_LINEAR_CONTRACTIONS=true
 export ML_BATCH_SIZE=128
 
+# --- Contraction-path ablation: select dataset variant via -v ML_DATASET_SUFFIX=_rtl ---
+#   ""        optimal-path datasets (default)
+#   "_rtl"    right-to-left path datasets
+#   "_random" random connected-path datasets
+export ML_DATASET_SUFFIX=${ML_DATASET_SUFFIX:-""}
+
 # --- Reduce fragmentation from CUDA allocations ---
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
@@ -56,6 +62,7 @@ echo "Running on: $(hostname)"
 echo "Using Python: $PYTHON"
 echo "Bond dim: $ML_BOND_DIM"
 echo "Non-linear: $ML_USE_NON_LINEAR_CONTRACTIONS"
+echo "Dataset suffix: '$ML_DATASET_SUFFIX'"
 echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
 echo "========================================="
 
