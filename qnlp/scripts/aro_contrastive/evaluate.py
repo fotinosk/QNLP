@@ -14,8 +14,14 @@ Leakage safety:
     loading and the model architecture always match what was trained.
 
 Usage:
-    python -m qnlp.scripts.aro_contrastive.evaluate <checkpoint>
-    python -m qnlp.scripts.aro_contrastive.evaluate <checkpoint> --split val
+    python -m qnlp.scripts.aro_contrastive.evaluate --checkpoint <path>
+    python -m qnlp.scripts.aro_contrastive.evaluate --checkpoint <path> --split val
+    python -m qnlp.scripts.aro_contrastive.evaluate --checkpoint <path> --suffix _random
+
+The --suffix selects the path-ablation dataset variant (aro_{split}{suffix}.parquet):
+  ""        optimal-path datasets (default)
+  "_rtl"    right-to-left path datasets
+  "_random" random connected-path datasets
 """
 
 from collections import defaultdict
@@ -41,11 +47,10 @@ logger = setup_logger(log_name="aro_evaluate")
 
 ARO_MANIFEST = constants.atlases_path / "aro" / "data_manifest.parquet"
 
-SPLIT_PARQUETS = {
-    "train": constants.datasets_path / "aro_train.parquet",
-    "val": constants.datasets_path / "aro_val.parquet",
-    "test": constants.datasets_path / "aro_test.parquet",
-}
+
+def _split_parquet(split: str, suffix: str = "") -> Path:
+    return constants.datasets_path / f"aro_{split}{suffix}.parquet"
+
 
 COMPILED_COLUMNS = [
     ("true_diagram", "true_symbols", "true_caption", "true_path"),
@@ -74,10 +79,10 @@ def _infer_non_linear(state_dict: dict) -> bool:
     return any("nonlinear_gate" in k for k in state_dict)
 
 
-def evaluate(checkpoint_path: Path, split: str = "test", batch_size: int | None = None) -> dict:
+def evaluate(checkpoint_path: Path, split: str = "test", batch_size: int | None = None, suffix: str = "") -> dict:
     cfg = ExperimentConfig()
     device = get_device()
-    parquet = SPLIT_PARQUETS[split]
+    parquet = _split_parquet(split, suffix)
     batch_size = batch_size or cfg.batch_size
 
     checkpoint = torch.load(checkpoint_path, map_location=device)
@@ -206,12 +211,19 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
+    parser.add_argument("--checkpoint", required=True, help="Path to best_model.pt")
     parser.add_argument("--split", choices=["train", "val", "test"], default="test")
     parser.add_argument("--batch_size", type=int, default=None)
+    parser.add_argument(
+        "--suffix",
+        default="",
+        help="Dataset variant suffix, e.g. '_rtl' or '_random'. Default: optimal-path datasets.",
+    )
     args = parser.parse_args()
 
     evaluate(
-        "runs/checkpoints/aro_contrastive/2026-06-11_10-25-56/best_model.pt",
+        Path(args.checkpoint),
         split=args.split,
         batch_size=args.batch_size,
+        suffix=args.suffix,
     )
