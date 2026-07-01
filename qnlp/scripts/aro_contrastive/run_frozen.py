@@ -259,9 +259,12 @@ def run() -> None:
                 logger.info(f"Early stopping at epoch {epoch}.")
                 break
 
-        # Test with best checkpoint, broken down by task.
+        # Test with best checkpoint, broken down by task. load_state_dict rebuilds
+        # EinsumModel weights (incl. nonlinear_gate) as CPU tensors, so .to(device)
+        # must come AFTER loading to keep the whole model on one device.
         best = torch.load(checkpoint_path, map_location=device)
         text_model.load_state_dict(best["text_model_state_dict"])
+        text_model.to(device)
 
         task_results = _evaluate_by_task(text_model, image_lookup, loaders["test"], device)
         logger.info("=== Frozen-image test hard-negative accuracy by task ===")

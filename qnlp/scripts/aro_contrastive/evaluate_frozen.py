@@ -11,9 +11,13 @@ Leakage safety (identical to evaluate.py):
     reading only [sample_id, task]; no other-split data is loaded.
   * Non-linear mode is inferred from the checkpoint.
 
+The --suffix selects the path-ablation dataset variant (aro_{split}{suffix}.parquet),
+and must match the suffix the checkpoint was trained on so the contraction paths agree.
+
 Usage:
-    python -m qnlp.scripts.aro_contrastive.evaluate_frozen <checkpoint>
-    python -m qnlp.scripts.aro_contrastive.evaluate_frozen <checkpoint> --split val
+    python -m qnlp.scripts.aro_contrastive.evaluate_frozen --checkpoint <path>
+    python -m qnlp.scripts.aro_contrastive.evaluate_frozen --checkpoint <path> --suffix _random
+    python -m qnlp.scripts.aro_contrastive.evaluate_frozen --checkpoint <path> --split val
 """
 
 from collections import defaultdict
@@ -27,8 +31,8 @@ from qnlp.discoviz.models.einsum_model import EinsumModel
 from qnlp.discoviz.models.lookup_embeddings import LookupEmbedding
 from qnlp.scripts.aro_contrastive.evaluate import _load_task_map
 from qnlp.scripts.aro_contrastive.run_frozen import (
+    DATASETS_PATH,
     LOOKUP_PATH,
-    SPLIT_PARQUETS,
     FrozenARODataset,
     _collate,
     _embed,
@@ -43,15 +47,16 @@ def _infer_non_linear(state_dict: dict) -> bool:
     return any("nonlinear_gate" in k for k in state_dict)
 
 
-def evaluate(checkpoint_path: Path, split: str = "test", batch_size: int = 128) -> dict:
+def evaluate(checkpoint_path: Path, split: str = "test", batch_size: int = 128, suffix: str = "") -> dict:
     device = get_device()
-    parquet = SPLIT_PARQUETS[split]
+    parquet = DATASETS_PATH / f"aro_{split}{suffix}.parquet"
 
     checkpoint = torch.load(checkpoint_path, map_location=device)
     state_dict = checkpoint["text_model_state_dict"]
     non_linear = _infer_non_linear(state_dict)
     logger.info(
-        f"Checkpoint epoch {checkpoint.get('epoch', '?')} | non_linear_contractions={non_linear} | split={split}"
+        f"Checkpoint epoch {checkpoint.get('epoch', '?')} | non_linear_contractions={non_linear} | "
+        f"split={split} | suffix='{suffix}'"
     )
 
     # Text model: load_state_dict rebuilds the symbol table on CPU, so move to
@@ -132,11 +137,11 @@ def evaluate(checkpoint_path: Path, split: str = "test", batch_size: int = 128) 
 if __name__ == "__main__":
     import argparse
 
-    checkpoint = "runs/checkpoints/aro_frozen/2026-06-12_22-32-36/best_text_model.pt"
-
     parser = argparse.ArgumentParser()
+    parser.add_argument("--checkpoint", required=True, help="Path to best_text_model.pt")
     parser.add_argument("--split", choices=["train", "val", "test"], default="test")
     parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--suffix", default="", help="Dataset variant suffix, e.g. '_rtl' or '_random'.")
     args = parser.parse_args()
 
-    evaluate(checkpoint, split=args.split, batch_size=args.batch_size)
+    evaluate(Path(args.checkpoint), split=args.split, batch_size=args.batch_size, suffix=args.suffix)
