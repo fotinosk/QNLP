@@ -59,7 +59,8 @@ def run() -> None:
 
             _decode_image(row["image"]).save(image_path)
 
-            n_objects = len(row["color"])
+            objects = row["objects"]
+            n_objects = len(objects["color"])
 
             rows.append(
                 {
@@ -67,12 +68,12 @@ def run() -> None:
                     "split": split,
                     "local_image_path": str(image_path),
                     "n_objects": n_objects,
-                    "color": row["color"],
-                    "shape": row["shape"],
-                    "material": row["material"],
-                    "size": row["size"],
-                    "coords_3d": orjson.dumps(row["3d_coords"]).decode(),
-                    "pixel_coords": orjson.dumps(row["pixel_coords"]).decode(),
+                    "color": objects["color"],
+                    "shape": objects["shape"],
+                    "material": objects["material"],
+                    "size": objects["size"],
+                    "coords_3d": orjson.dumps(objects["3d_coords"]).decode(),
+                    "pixel_coords": orjson.dumps(objects["pixel_coords"]).decode(),
                 }
             )
 
