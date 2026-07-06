@@ -35,7 +35,11 @@ export XDG_CACHE_HOME=$CACHE_DIR/.xdg_cache
 export ML_EMBEDDING_DIM=512
 export ML_BOND_DIM=10
 export ML_USE_NON_LINEAR_CONTRACTIONS=false
-export ML_TEXT_LR=0.003
+# Linear multilinear contraction is prone to weight-norm drift → overflow. Use a
+# lower text LR and a higher text weight decay (the restoring force on the norms)
+# to keep the model in its well-conditioned regime and avoid non-finite embeddings.
+export ML_TEXT_LR=0.0005
+export ML_TEXT_WEIGHT_DECAY=0.01
 export ML_BATCH_SIZE=256
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
@@ -50,7 +54,7 @@ echo "Job ID: $JOB_ID"
 echo "Running on: $(hostname)"
 echo "Embedding dim: $ML_EMBEDDING_DIM"
 echo "Bond dim: $ML_BOND_DIM"
-echo "Text LR: $ML_TEXT_LR"
+echo "Text LR: $ML_TEXT_LR  Text weight decay: $ML_TEXT_WEIGHT_DECAY"
 echo "Non-linear: $ML_USE_NON_LINEAR_CONTRACTIONS"
 echo "Batch size: $ML_BATCH_SIZE"
 echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
