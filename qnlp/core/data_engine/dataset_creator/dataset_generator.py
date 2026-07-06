@@ -208,7 +208,7 @@ def _split_ids(
 
 def enrich_atoms(
     derived_dirs: list[Path],
-    lmdb_path: Path = constants.lmdb_path,
+    lmdb_path: Path | None = None,
     filter_2d_outputs: bool = True,
     compute_contraction_paths: bool = False,
     path_timeout_seconds: float = 10.0,
@@ -224,6 +224,7 @@ def enrich_atoms(
     non-linear contraction path could not be computed (timeout / too-large
     intermediate) are excluded.
     """
+    lmdb_path = lmdb_path or constants.lmdb_path
     chunk_files = []
     for d in derived_dirs:
         chunk_files.extend(sorted(Path(d).glob("chunk_*.parquet")))
@@ -292,7 +293,7 @@ def create_dataset(
     derived_dirs: list[Path],
     strategy: CompositionStrategy,
     output_name: str,
-    lmdb_path: Path = constants.lmdb_path,
+    lmdb_path: Path | None = None,
     excluded_sample_ids: set[str] | None = None,
     filter_2d_outputs: bool = True,
     compute_contraction_paths: bool = False,
@@ -322,10 +323,12 @@ def create_dataset(
 
     composed = strategy.compose(atoms)
 
-    out_path = Path(constants.datasets_path) / f"{output_name}.parquet"
+    # artifact_suffix keeps new-parser datasets parallel to the bobcat ones.
+    out_name = f"{output_name}{constants.artifact_suffix}"
+    out_path = Path(constants.datasets_path) / f"{out_name}.parquet"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     composed.write_parquet(out_path)
-    logger.info(f"Dataset '{output_name}' written to {out_path} ({len(composed)} rows).")
+    logger.info(f"Dataset '{out_name}' written to {out_path} ({len(composed)} rows).")
     return out_path
 
 
@@ -333,7 +336,7 @@ def create_train_val_test_datasets(
     derived_dirs: list[Path],
     strategy: CompositionStrategy,
     output_name: str,
-    lmdb_path: Path = constants.lmdb_path,
+    lmdb_path: Path | None = None,
     ratios: tuple[float, float, float] = (0.8, 0.1, 0.1),
     seed: int = 42,
     filter_2d_outputs: bool = True,
@@ -365,7 +368,7 @@ def create_train_val_test_datasets(
     paths = []
     for split_name, split_atoms in [("train", train_atoms), ("val", val_atoms), ("test", test_atoms)]:
         composed = strategy.compose(split_atoms)
-        out_path = Path(constants.datasets_path) / f"{output_name}_{split_name}.parquet"
+        out_path = Path(constants.datasets_path) / f"{output_name}{constants.artifact_suffix}_{split_name}.parquet"
         out_path.parent.mkdir(parents=True, exist_ok=True)
         composed.write_parquet(out_path)
         logger.info(f"{split_name} split written to {out_path} ({len(composed)} rows).")

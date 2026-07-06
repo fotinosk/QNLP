@@ -16,6 +16,7 @@ Usage:
 """
 
 import argparse
+import json
 from collections import defaultdict
 from pathlib import Path
 
@@ -113,12 +114,23 @@ def _make_loader(ds, batch_size: int, collate_fn) -> DataLoader:
 # ---------------------------------------------------------------------------
 
 
-def evaluate_winoground(
+# Per-item tag classes for Winoground. Keys are the manifest `id` (0-399); an
+# empty list means the item carries no special tag and is bucketed as "normal".
+WINO_TAG_PATH = constants.atlases_path / "winoground" / "new_tag_assignments.json"
+NORMAL_CLASS = "normal"
+
+
+def _winoground_pair_results(
     model: ContrastiveVLM,
     device: torch.device,
     batch_size: int,
     parquet: Path | None = None,
-) -> dict[str, float]:
+) -> tuple[dict[str, tuple[bool, bool, bool]], int]:
+    """Run Winoground once and return per-pair (text, image, group) correctness.
+
+    Keyed by pair_id (e.g. 'winoground_123'). Pairs with unknown symbols or
+    non-finite scores are omitted and counted in n_skipped.
+    """
     parquet = parquet or constants.datasets_path / "winoground_eval.parquet"
     non_linear = model.text_model.non_linear_contractions
     size = image_model_hyperparams.image_size
@@ -132,11 +144,13 @@ def evaluate_winoground(
     def _all_known(cap) -> bool:
         return all(s in known for s in cap[1])
 
-    text_correct = image_correct = group_correct = n_total = n_skipped = 0
+    per_pair: dict[str, tuple[bool, bool, bool]] = {}
+    n_skipped = 0
 
     with torch.no_grad():
         for batch in loader:
             caps0, caps1 = batch["captions_0"], batch["captions_1"]
+            pair_ids = batch["pair_ids"]
             valid = [i for i in range(len(caps0)) if _all_known(caps0[i]) and _all_known(caps1[i])]
             n_skipped += len(caps0) - len(valid)
             if not valid:
@@ -161,23 +175,86 @@ def evaluate_winoground(
             s11 = F.cosine_similarity(img1, cap1, dim=-1)
 
             finite = torch.isfinite(s00) & torch.isfinite(s01) & torch.isfinite(s10) & torch.isfinite(s11)
-            n_skipped += (~finite).sum().item()
+            text = (s00 > s01) & (s11 > s10)
+            image = (s00 > s10) & (s11 > s01)
+            group = text & image
 
-            text_correct += ((s00 > s01) & (s11 > s10) & finite).sum().item()
-            image_correct += ((s00 > s10) & (s11 > s01) & finite).sum().item()
-            group_correct += ((s00 > s01) & (s11 > s10) & (s00 > s10) & (s11 > s01) & finite).sum().item()
-            n_total += finite.sum().item()
+            for j, i in enumerate(valid):
+                if not bool(finite[j]):
+                    n_skipped += 1
+                    continue
+                per_pair[pair_ids[i]] = (bool(text[j]), bool(image[j]), bool(group[j]))
 
-    metrics = {
-        "text_score": text_correct / n_total if n_total else float("nan"),
-        "image_score": image_correct / n_total if n_total else float("nan"),
-        "group_score": group_correct / n_total if n_total else float("nan"),
-        "n_pairs": n_total,
-        "n_skipped": n_skipped,
+    return per_pair, n_skipped
+
+
+def _agg_winoground(results: list[tuple[bool, bool, bool]]) -> dict[str, float]:
+    n = len(results)
+    if n == 0:
+        return {"text_score": float("nan"), "image_score": float("nan"), "group_score": float("nan"), "n_pairs": 0}
+    return {
+        "text_score": sum(r[0] for r in results) / n,
+        "image_score": sum(r[1] for r in results) / n,
+        "group_score": sum(r[2] for r in results) / n,
+        "n_pairs": n,
     }
+
+
+def evaluate_winoground(
+    model: ContrastiveVLM,
+    device: torch.device,
+    batch_size: int,
+    parquet: Path | None = None,
+) -> dict[str, float]:
+    per_pair, n_skipped = _winoground_pair_results(model, device, batch_size, parquet)
+    metrics = _agg_winoground(list(per_pair.values()))
+    metrics["n_skipped"] = n_skipped
     if n_skipped:
         logger.warning(f"Winoground: skipped {n_skipped} pairs with unknown/NaN symbols.")
     return metrics
+
+
+def _load_wino_tags(tag_path: Path) -> dict[int, list[str]]:
+    """Load {manifest_id -> [tag, ...]} from the tag-assignment JSON."""
+    raw = json.loads(Path(tag_path).read_text())
+    return {int(k): v for k, v in raw.items()}
+
+
+def _pair_id_to_index(pair_id: str) -> int:
+    """'winoground_123' -> 123."""
+    return int(str(pair_id).rsplit("_", 1)[-1])
+
+
+def evaluate_winoground_by_tag(
+    model: ContrastiveVLM,
+    device: torch.device,
+    batch_size: int,
+    parquet: Path | None = None,
+    tag_path: Path | None = None,
+) -> dict[str, dict]:
+    """Winoground scores broken down by tag class, plus overall.
+
+    Tags are multi-label, so a pair contributes to every class it carries; the
+    per-class n_pairs therefore sum to more than the overall total. Pairs with no
+    tag are bucketed under 'normal'. Returns {class: {text/image/group/n_pairs},
+    ..., 'overall': {...}}.
+    """
+    tag_path = tag_path or WINO_TAG_PATH
+    per_pair, n_skipped = _winoground_pair_results(model, device, batch_size, parquet)
+    tags_by_id = _load_wino_tags(tag_path)
+
+    by_class: dict[str, list[tuple[bool, bool, bool]]] = defaultdict(list)
+    for pair_id, res in per_pair.items():
+        classes = tags_by_id.get(_pair_id_to_index(pair_id), [])
+        for c in classes or [NORMAL_CLASS]:
+            by_class[c].append(res)
+
+    results: dict[str, dict] = {cls: _agg_winoground(vals) for cls, vals in by_class.items()}
+    results["overall"] = _agg_winoground(list(per_pair.values()))
+    results["overall"]["n_skipped"] = n_skipped
+    if n_skipped:
+        logger.warning(f"Winoground (tagged): skipped {n_skipped} pairs with unknown/NaN symbols.")
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -376,6 +453,21 @@ def _print_summary(wino: dict, aro: dict, sc: dict) -> None:
     logger.info(sep)
 
 
+def _print_winoground_by_tag(by_tag: dict[str, dict]) -> None:
+    sep = "=" * 60
+    logger.info(sep)
+    logger.info("WINOGROUND BY TAG (multi-label; 'normal' = untagged)")
+    logger.info(sep)
+    logger.info(f"  {'class':<22}{'N':>6}{'text':>9}{'image':>9}{'group':>9}")
+    logger.info(f"  {'-' * 55}")
+    for cls in [*sorted(k for k in by_tag if k != "overall"), "overall"]:
+        r = by_tag[cls]
+        logger.info(
+            f"  {cls:<22}{r['n_pairs']:>6}{r['text_score']:>9.4f}{r['image_score']:>9.4f}{r['group_score']:>9.4f}"
+        )
+    logger.info(sep)
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -391,6 +483,9 @@ def evaluate_all(
     logger.info("--- Winoground ---")
     wino = evaluate_winoground(model, device, batch_size)
 
+    logger.info("--- Winoground by tag ---")
+    wino_by_tag = evaluate_winoground_by_tag(model, device, batch_size)
+
     logger.info("--- ARO ---")
     aro = evaluate_aro(model, device, batch_size)
 
@@ -398,8 +493,9 @@ def evaluate_all(
     sc = evaluate_sugarcrepe(model, device, batch_size)
 
     _print_summary(wino, aro, sc)
+    _print_winoground_by_tag(wino_by_tag)
 
-    return {"winoground": wino, "aro": aro, "sugarcrepe": sc}
+    return {"winoground": wino, "winoground_by_tag": wino_by_tag, "aro": aro, "sugarcrepe": sc}
 
 
 if __name__ == "__main__":

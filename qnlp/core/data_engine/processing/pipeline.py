@@ -5,6 +5,7 @@ from typing import Protocol
 import lmdb
 import polars as pl
 
+from qnlp.constants import constants
 from qnlp.utils.logging import setup_logger
 
 logger = setup_logger(log_name="processing_pipeline")
@@ -22,13 +23,15 @@ class Pipeline:
         atlas_dir: Path | str,
         steps: list[PipelineStep],
         lmdb_path: Path | str | None = None,
-        derived_name: str = "derived_v1",
+        derived_name: str | None = None,
         lmdb_map_size: int = 10 * 1024 * 1024 * 1024,
         keep_columns: list[str] | None = None,
     ):
         self.atlas_dir = Path(atlas_dir)
         self.data_manifest_path = self.atlas_dir / "data_manifest.parquet"
-        self.derived_dir = self.atlas_dir / derived_name
+        # None -> constants.derived_name, which is version-aware (derived_v1 for
+        # bobcat, derived_<version> for a new parser).
+        self.derived_dir = self.atlas_dir / (derived_name or constants.derived_name)
         self.lmdb_path = Path(lmdb_path) if lmdb_path else None
         self.lmdb_map_size = lmdb_map_size
         self.steps = steps
