@@ -2,10 +2,9 @@
 #$ -l tmem=32G
 #$ -l h_rt=48:0:0
 #$ -l gpu=true
-# The linear text model (~1.07B params) + AdamW state needs ~17 GB; a small
-# ~11 GB card OOMs. Request ~20 GB so it lands on a 24 GB-class GPU. If your
-# cluster uses a different resource name than gpu_mem, adjust this line.
-#$ -l gpu_mem=20G
+# NOTE: the linear text model (~1.07B params) + AdamW needs ~17 GB, so it OOMs on
+# small (~11 GB) cards. Add the cluster's GPU-memory resource here once known,
+# e.g.  #$ -l gpu_type=... / #$ -l cuda_mem=...  (see `qconf -sc | grep -i gpu`).
 #$ -S /bin/bash
 #$ -j y
 #$ -N coco_mc_linear
