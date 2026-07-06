@@ -469,6 +469,118 @@ def _print_winoground_by_tag(by_tag: dict[str, dict]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Full benchmark battery + copy-pasteable report
+# ---------------------------------------------------------------------------
+
+
+def evaluate_all_benchmarks(
+    model: ContrastiveVLM,
+    device: torch.device,
+    batch_size: int,
+) -> dict[str, dict | None]:
+    """Run every compositional benchmark used at end-of-training. Each eval is
+    guarded so a missing dataset (e.g. sugarcrepe++ not yet built) logs a warning
+    and returns None instead of killing the whole report."""
+
+    def _guard(name: str, fn):
+        try:
+            return fn()
+        except Exception as e:
+            logger.warning(f"{name}: eval skipped ({type(e).__name__}: {e})")
+            return None
+
+    return {
+        "winoground": _guard("Winoground", lambda: evaluate_winoground(model, device, batch_size)),
+        "winoground_by_tag": _guard("Winoground-by-tag", lambda: evaluate_winoground_by_tag(model, device, batch_size)),
+        "aro": _guard("ARO", lambda: evaluate_aro(model, device, batch_size)),
+        "sugarcrepe_full": _guard(
+            "SugarCREPE full",
+            lambda: evaluate_sugarcrepe(
+                model, device, batch_size, parquet=constants.datasets_path / "sugarcrepe_full_eval.parquet"
+            ),
+        ),
+        "sugarcrepepp": _guard(
+            "SugarCREPE++",
+            lambda: evaluate_sugarcrepe(
+                model, device, batch_size, parquet=constants.datasets_path / "sugarcrepepp_eval.parquet"
+            ),
+        ),
+    }
+
+
+def log_banner(title: str, info: dict) -> None:
+    """Log a titled key/value banner (used at both start and end of training)."""
+    sep = "=" * 72
+    logger.info(sep)
+    logger.info(title)
+    logger.info(sep)
+    for k, v in info.items():
+        logger.info(f"  {k}: {v}")
+    logger.info(sep)
+
+
+def print_full_report(retrieval: dict | None, benchmarks: dict, info: dict | None = None) -> None:
+    """Print one contiguous, copy-pasteable block with the model info and every
+    metric: retrieval, Winoground (overall + per-tag), ARO (attribution/relation/
+    overall), and SugarCREPE (full / ++)."""
+    sep = "=" * 72
+    log = logger.info
+    log(sep)
+    log("FINAL TRAINING REPORT")
+    log(sep)
+
+    if info:
+        for k, v in info.items():
+            log(f"  {k}: {v}")
+        log("-" * 72)
+
+    log("Retrieval (test)")
+    if retrieval:
+        for k in sorted(retrieval):
+            log(f"  {k:<18}: {retrieval[k]:.4f}")
+    else:
+        log("  (not computed)")
+    log("-" * 72)
+
+    wino = benchmarks.get("winoground")
+    log("Winoground (overall)")
+    if wino:
+        log(f"  text : {wino['text_score']:.4f}   image: {wino['image_score']:.4f}   group: {wino['group_score']:.4f}")
+        log(f"  pairs: {wino['n_pairs']}  skipped: {wino.get('n_skipped', 0)}")
+    else:
+        log("  (unavailable)")
+
+    by_tag = benchmarks.get("winoground_by_tag")
+    if by_tag:
+        log("Winoground by tag (multi-label; 'normal' = untagged)")
+        log(f"  {'class':<22}{'N':>6}{'text':>9}{'image':>9}{'group':>9}")
+        for cls in [*sorted(k for k in by_tag if k != "overall"), "overall"]:
+            r = by_tag[cls]
+            log(f"  {cls:<22}{r['n_pairs']:>6}{r['text_score']:>9.4f}{r['image_score']:>9.4f}{r['group_score']:>9.4f}")
+    log("-" * 72)
+
+    aro = benchmarks.get("aro")
+    log("ARO (hard-neg acc by task)")
+    if aro:
+        log(f"  {'task':<14}{'N':>7}{'acc':>9}{'true_cos':>10}{'false_cos':>11}")
+        for task in [*sorted(k for k in aro if k != "overall"), "overall"]:
+            r = aro[task]
+            log(f"  {task:<14}{r['n']:>7}{r['hard_neg_acc']:>9.4f}{r['true_cos']:>10.4f}{r['false_cos']:>11.4f}")
+    else:
+        log("  (unavailable)")
+    log("-" * 72)
+
+    log("SugarCREPE (hard-neg acc)")
+    for name, key in [("full", "sugarcrepe_full"), ("++", "sugarcrepepp")]:
+        sc = benchmarks.get(key)
+        if sc:
+            log(f"  {name:<10} acc={sc['hard_neg_acc']:.4f}  evaluated={sc['n_evaluated']}  skipped={sc['n_skipped']}")
+        else:
+            log(f"  {name:<10} (unavailable)")
+    log(sep)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -476,26 +588,18 @@ def _print_winoground_by_tag(by_tag: dict[str, dict]) -> None:
 def evaluate_all(
     checkpoint_path: Path,
     batch_size: int = 128,
-) -> dict[str, dict]:
+) -> dict[str, dict | None]:
     device = get_device()
     model = load_model(checkpoint_path, device)
 
-    logger.info("--- Winoground ---")
-    wino = evaluate_winoground(model, device, batch_size)
-
-    logger.info("--- Winoground by tag ---")
-    wino_by_tag = evaluate_winoground_by_tag(model, device, batch_size)
-
-    logger.info("--- ARO ---")
-    aro = evaluate_aro(model, device, batch_size)
-
-    logger.info("--- SugarCREPE (swap_obj) ---")
-    sc = evaluate_sugarcrepe(model, device, batch_size)
-
-    _print_summary(wino, aro, sc)
-    _print_winoground_by_tag(wino_by_tag)
-
-    return {"winoground": wino, "winoground_by_tag": wino_by_tag, "aro": aro, "sugarcrepe": sc}
+    benchmarks = evaluate_all_benchmarks(model, device, batch_size)
+    info = {
+        "checkpoint": str(checkpoint_path),
+        "embedding_dim": model.embedding_dim,
+        "non_linear": model.text_model.non_linear_contractions,
+    }
+    print_full_report(retrieval=None, benchmarks=benchmarks, info=info)
+    return benchmarks
 
 
 if __name__ == "__main__":

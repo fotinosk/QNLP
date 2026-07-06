@@ -66,6 +66,7 @@ class ContrastiveVLM(nn.Module):
         super().__init__()
         self.text_model = text_model
         self.image_model = image_model
+        self.embedding_dim = embedding_dim
         head_cls = MLPProjectionHead if use_mlp_head else AlignmentHead
         self.image_head = head_cls(embedding_dim)
         self.text_head = head_cls(embedding_dim)

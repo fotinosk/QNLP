@@ -13,7 +13,7 @@ from qnlp.discoviz.models.image_model import TTNImageModel, image_model_hyperpar
 from qnlp.domain.datasets.dataloader import get_dataloaders
 from qnlp.domain.datasets.dataset import collect_symbol_sizes
 from qnlp.domain.models.vlm.contrastive_vlm import ContrastiveVLM
-from qnlp.scripts.coco_multi_caption.evaluate import evaluate_aro, evaluate_sugarcrepe, evaluate_winoground
+from qnlp.scripts.coco_multi_caption.evaluate import evaluate_all_benchmarks, log_banner, print_full_report
 from qnlp.scripts.coco_single_caption.config import ExperimentConfig
 from qnlp.scripts.coco_single_caption.step import COCOSingleCaptionStep
 from qnlp.utils.logging import setup_logger
@@ -178,6 +178,20 @@ def run():
         "image_model_params": sum(p.numel() for p in image_model.parameters()),
     }
 
+    run_info = {
+        "experiment": EXPERIMENT_NAME,
+        "checkpoint_path": str(checkpoint_path),
+        "dataset": dataset,
+        "non_linear_contractions": cfg.use_non_linear_contractions,
+        "embedding_dim": cfg.embedding_dim,
+        "bond_dim": cfg.bond_dim,
+        "batch_size": cfg.batch_size,
+        "n_symbols": len(symbols),
+        "text_model_params": params["text_model_params"],
+        "image_model_params": params["image_model_params"],
+    }
+    log_banner("TRAINING RUN — START", run_info)
+
     with setup_mlflow_run(EXPERIMENT_NAME, params, 8080) as run:
         trainer = Trainer(
             model=model,
@@ -200,30 +214,36 @@ def run():
 
         retrieval = _collect_retrieval_metrics(model, test_loader, device)
 
-        logger.info("--- Winoground ---")
-        wino = evaluate_winoground(model, device, cfg.batch_size)
+        # Full benchmark battery: Winoground (+ per-tag), ARO (attribution/relation),
+        # SugarCREPE (swap_obj / full / ++). Each guarded against missing datasets.
+        benchmarks = evaluate_all_benchmarks(model, device, cfg.batch_size)
 
-        logger.info("--- ARO ---")
-        aro = evaluate_aro(model, device, cfg.batch_size)
-
-        logger.info("--- SugarCREPE (swap_obj) ---")
-        sc = evaluate_sugarcrepe(model, device, cfg.batch_size)
-
-        _print_final_summary(retrieval, wino, aro, sc)
+        report_info = {
+            **run_info,
+            "run_name": run.info.run_name,
+            **{f"test/{k}": v for k, v in test_metrics.items()},
+        }
+        print_full_report(retrieval, benchmarks, report_info)
 
         if mlflow.active_run():
             mlflow.log_metrics({f"retrieval/{k}": v for k, v in retrieval.items()})
-            mlflow.log_metrics(
-                {
-                    "wino/text": wino["text_score"],
-                    "wino/image": wino["image_score"],
-                    "wino/group": wino["group_score"],
-                }
-            )
+            wino = benchmarks.get("winoground")
+            if wino:
+                mlflow.log_metrics(
+                    {
+                        "wino/text": wino["text_score"],
+                        "wino/image": wino["image_score"],
+                        "wino/group": wino["group_score"],
+                    }
+                )
+            aro = benchmarks.get("aro") or {}
             mlflow.log_metrics(
                 {f"aro/{task}/acc": res["hard_neg_acc"] for task, res in aro.items() if isinstance(res, dict)}
             )
-            mlflow.log_metrics({"sugarcrepe/swap_obj": sc["hard_neg_acc"]})
+            for name, key in [("full", "sugarcrepe_full"), ("pp", "sugarcrepepp")]:
+                sc = benchmarks.get(key)
+                if sc:
+                    mlflow.log_metrics({f"sugarcrepe/{name}": sc["hard_neg_acc"]})
             mlflow.log_artifact(str(checkpoint_path))
 
         send_training_finished_notification(
@@ -232,9 +252,10 @@ def run():
                 "run": run.info.run_name,
                 **test_metrics,
                 **{f"retrieval/{k}": v for k, v in retrieval.items()},
-                "wino_group": wino["group_score"],
-                "aro_overall": aro.get("overall", {}).get("hard_neg_acc", float("nan")),
-                "sugarcrepe": sc["hard_neg_acc"],
+                "wino_group": (benchmarks.get("winoground") or {}).get("group_score", float("nan")),
+                "aro_overall": (benchmarks.get("aro") or {}).get("overall", {}).get("hard_neg_acc", float("nan")),
+                "sugarcrepe_full": (benchmarks.get("sugarcrepe_full") or {}).get("hard_neg_acc", float("nan")),
+                "sugarcrepepp": (benchmarks.get("sugarcrepepp") or {}).get("hard_neg_acc", float("nan")),
             }
         )
 
