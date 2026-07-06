@@ -2,6 +2,10 @@
 #$ -l tmem=32G
 #$ -l h_rt=48:0:0
 #$ -l gpu=true
+# The linear text model (~1.07B params) + AdamW state needs ~17 GB; a small
+# ~11 GB card OOMs. Request ~20 GB so it lands on a 24 GB-class GPU. If your
+# cluster uses a different resource name than gpu_mem, adjust this line.
+#$ -l gpu_mem=20G
 #$ -S /bin/bash
 #$ -j y
 #$ -N coco_mc_linear
