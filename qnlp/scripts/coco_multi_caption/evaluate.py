@@ -23,10 +23,11 @@ from pathlib import Path
 import polars as pl
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from torchvision import transforms
 
 from qnlp.constants import constants
+from qnlp.core.training.retrieval_eval import retrieval_metrics
 from qnlp.discoviz.models.einsum_model import EinsumModel
 from qnlp.discoviz.models.image_model import TTNImageModel, image_model_hyperparams
 from qnlp.domain.datasets.dataloader import vlm_collate_fn
@@ -37,6 +38,10 @@ from qnlp.utils.logging import setup_logger
 from qnlp.utils.torch_utils import get_device
 
 logger = setup_logger(log_name="coco_evaluate")
+
+# COCO test-set retrieval config (mirrors training-time retrieval eval).
+TEST_SIZE = 5000
+COCO_COMPILED_COLUMNS = [("diagram", "symbols", "caption", "path")]
 
 ARO_MANIFEST = constants.atlases_path / "aro" / "data_manifest.parquet"
 
@@ -589,6 +594,52 @@ def print_full_report(retrieval: dict | None, benchmarks: dict, info: dict | Non
 # ---------------------------------------------------------------------------
 
 
+def evaluate_retrieval(
+    model: ContrastiveVLM,
+    device: torch.device,
+    batch_size: int,
+) -> dict[str, float]:
+    """COCO test-set i2t/t2i retrieval, deduplicated to one caption per image
+    (capped at TEST_SIZE). Uses the dataset matching the checkpoint's mode."""
+    non_linear = model.text_model.non_linear_contractions
+    dataset = "coco_single_caption_nlc" if non_linear else "coco_single_caption"
+    parquet = constants.datasets_path / f"{dataset}_test.parquet"
+    size = image_model_hyperparams.image_size
+
+    ds = VLMDataset(
+        parquet,
+        compiled_columns=COCO_COMPILED_COLUMNS,
+        image_transform=_make_transform(size),
+        use_non_linear_contractions=non_linear,
+    )
+    # One caption per unique image (retrieval assumes a diagonal ground truth).
+    seen: set[str] = set()
+    indices: list[int] = []
+    for i, sid in enumerate(ds.df["sample_id"].to_list()):
+        if sid not in seen:
+            seen.add(sid)
+            indices.append(i)
+            if len(indices) >= TEST_SIZE:
+                break
+    loader = DataLoader(
+        Subset(ds, indices), batch_size=batch_size, shuffle=False, collate_fn=vlm_collate_fn, num_workers=4
+    )
+
+    model.eval()
+    img_embs, txt_embs = [], []
+    with torch.no_grad():
+        for batch in loader:
+            images = batch["local_image_path"].to(device)
+            outputs = model(images, batch["caption"])
+            img_e = outputs["image_embeddings"]
+            txt_e = outputs["true_caption_embeddings"]
+            finite = torch.isfinite(img_e).all(-1) & torch.isfinite(txt_e).all(-1)
+            img_embs.append(img_e[finite].cpu())
+            txt_embs.append(txt_e[finite].cpu())
+
+    return retrieval_metrics(torch.cat(img_embs), torch.cat(txt_embs))
+
+
 def evaluate_all(
     checkpoint_path: Path,
     batch_size: int = 128,
@@ -596,14 +647,20 @@ def evaluate_all(
     device = get_device()
     model = load_model(checkpoint_path, device)
 
+    try:
+        retrieval = evaluate_retrieval(model, device, batch_size)
+    except Exception as e:
+        logger.warning(f"Retrieval: eval skipped ({type(e).__name__}: {e})")
+        retrieval = None
+
     benchmarks = evaluate_all_benchmarks(model, device, batch_size)
     info = {
         "checkpoint": str(checkpoint_path),
         "embedding_dim": model.embedding_dim,
         "non_linear": model.text_model.non_linear_contractions,
     }
-    print_full_report(retrieval=None, benchmarks=benchmarks, info=info)
-    return benchmarks
+    print_full_report(retrieval=retrieval, benchmarks=benchmarks, info=info)
+    return {"retrieval": retrieval, **benchmarks}
 
 
 if __name__ == "__main__":
