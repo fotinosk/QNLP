@@ -71,7 +71,10 @@ def _infer_embedding_dim(state_dict: dict) -> int:
 
 
 def load_model(checkpoint_path: Path, device: torch.device) -> ContrastiveVLM:
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    # Load to CPU first: the training checkpoint also holds the AdamW optimizer
+    # state (~2x the model size). map_location=device would put ALL of it on the
+    # GPU and OOM a large linear model. We only need model_state_dict on-device.
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     state_dict = checkpoint["model_state_dict"]
     non_linear = _infer_non_linear(state_dict)
     mlp_head = _infer_mlp_head(state_dict)
@@ -84,6 +87,7 @@ def load_model(checkpoint_path: Path, device: torch.device) -> ContrastiveVLM:
     image_model = TTNImageModel(embedding_dim)
     model = ContrastiveVLM(text_model, image_model, embedding_dim=embedding_dim, use_mlp_head=mlp_head)
     model.load_state_dict(state_dict)
+    del checkpoint, state_dict  # free the CPU-side optimizer state before moving to GPU
     model.to(device).eval()
     return model
 
