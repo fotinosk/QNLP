@@ -12,6 +12,22 @@ from qnlp.core.non_linear_contraction.einsum_interface import contract_einsum_no
 torch.serialization.add_safe_globals([Symbol])
 
 
+def _init_uniform_bound(directed_cod: int) -> float:
+    """Half-width of the uniform init for a tensor whose output leg has size
+    `directed_cod`. Tuned (empirically) so a fresh multilinear contraction stays
+    ~O(1). Also used to derive the per-symbol target norm for the linear-mode
+    weight-norm layer."""
+
+    def mean(size: int) -> float:
+        if size < 6:
+            correction_factor = [0, 3, 2.6, 2, 1.6, 1.3][size]
+        else:
+            correction_factor = 1 / (0.16 * size - 0.04)
+        return (size / 3 - 1 / (15 - correction_factor)) ** 0.5
+
+    return 1 / mean(directed_cod)
+
+
 def get_einsum_model(datasets: list):
     symbol_sizes = dict()
     for ds in datasets:
@@ -56,6 +72,8 @@ class EinsumModel(nn.Module):
         self.reset_parameters()
         self.sym2weight = self.compute_sym2weight()
         self._path_cache: dict[tuple, list | None] = {}
+        # Cache of per-symbol target Frobenius norms for the linear-mode weight-norm.
+        self._weight_scale_cache: dict = {}
 
     def _setup_contractions_function(self):
         if self.non_linear_contractions:
@@ -67,18 +85,25 @@ class EinsumModel(nn.Module):
         return {sym: weight for sym, weight in zip(self.symbols, self.weights)}
 
     def reset_parameters(self, symbols: List[Symbol] = None):
-        def mean(size: int) -> float:
-            if size < 6:
-                correction_factor = [0, 3, 2.6, 2, 1.6, 1.3][size]
-            else:
-                correction_factor = 1 / (0.16 * size - 0.04)
-            return (size / 3 - 1 / (15 - correction_factor)) ** 0.5
-
         for sym, weight in zip(self.symbols, self.weights):
             if symbols is not None and sym not in symbols:
                 continue
-            bound = 1 / mean(sym.directed_cod)
+            bound = _init_uniform_bound(sym.directed_cod)
             nn.init.uniform_(weight, -bound, bound)
+
+    def _target_norm(self, sym: Symbol) -> float:
+        """Frobenius norm the init would give this symbol's tensor.
+
+        For uniform(-b, b) the per-element std is b/sqrt(3), so the expected
+        Frobenius norm is sqrt(numel) * b/sqrt(3). Cached (depends only on shape
+        and directed_cod, which are fixed per symbol)."""
+        cached = self._weight_scale_cache.get(sym)
+        if cached is None:
+            w = self.sym2weight[sym]
+            std = _init_uniform_bound(sym.directed_cod) / (3.0**0.5)
+            cached = (w.numel() ** 0.5) * std
+            self._weight_scale_cache[sym] = cached
+        return cached
 
     def set_weights(self, symbols: List[Symbol], tensors: List[torch.Tensor], freeze: bool = False):
         if len(symbols) != len(tensors):
@@ -176,6 +201,16 @@ class EinsumModel(nn.Module):
                 return torch.full((out_dim,), float("nan"), device=tensors[0].device, dtype=tensors[0].dtype)
         else:
             path = None
+            # Weight-norm layer (linear mode only): rescale each input tensor to its
+            # init Frobenius norm before the contraction. The raw parameters are never
+            # mutated — this is a functional reparameterisation in the forward graph,
+            # so gradients flow through it. Because the contraction is multilinear and
+            # the output is finally normalised, per-symbol scale is a gauge freedom:
+            # this leaves the normalised embedding direction identical while pinning
+            # magnitudes so the contraction can no longer drift into float overflow.
+            # (NLC mode is left untouched: its gate is non-linear, so rescaling inputs
+            # would change the represented function.)
+            tensors = [self._target_norm(sym) * t / (t.norm() + 1e-8) for sym, t in zip(symbols, tensors)]
 
         try:
             x = self.contractions_function(einsum_expr, tensors, path, gate=gate)

@@ -35,11 +35,11 @@ export XDG_CACHE_HOME=$CACHE_DIR/.xdg_cache
 export ML_EMBEDDING_DIM=512
 export ML_BOND_DIM=10
 export ML_USE_NON_LINEAR_CONTRACTIONS=false
-# Linear multilinear contraction is prone to weight-norm drift → overflow. Use a
-# lower text LR and a higher text weight decay (the restoring force on the norms)
-# to keep the model in its well-conditioned regime and avoid non-finite embeddings.
-export ML_TEXT_LR=0.0005
-export ML_TEXT_WEIGHT_DECAY=0.01
+# Overflow is now prevented structurally by the linear-mode weight-norm layer in
+# EinsumModel (per-symbol tensors are rescaled to their init norm in the forward),
+# so a healthy LR is safe — no need to over-damp with a tiny LR / large decay.
+export ML_TEXT_LR=0.002
+export ML_TEXT_WEIGHT_DECAY=0.001
 export ML_BATCH_SIZE=256
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
