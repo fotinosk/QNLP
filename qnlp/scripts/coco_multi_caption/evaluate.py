@@ -140,7 +140,7 @@ def _winoground_pair_results(
     Keyed by pair_id (e.g. 'winoground_123'). Pairs with unknown symbols or
     non-finite scores are omitted and counted in n_skipped.
     """
-    parquet = parquet or constants.datasets_path / "winoground_eval.parquet"
+    parquet = parquet or constants.datasets_path / f"winoground_eval{constants.artifact_suffix}.parquet"
     non_linear = model.text_model.non_linear_contractions
     size = image_model_hyperparams.image_size
 
@@ -282,7 +282,7 @@ def evaluate_aro(
     batch_size: int,
     parquet: Path | None = None,
 ) -> dict[str, dict]:
-    parquet = parquet or constants.datasets_path / "aro_eval.parquet"
+    parquet = parquet or constants.datasets_path / f"aro_eval{constants.artifact_suffix}.parquet"
     non_linear = model.text_model.non_linear_contractions
     size = image_model_hyperparams.image_size
 
@@ -371,7 +371,7 @@ def evaluate_sugarcrepe(
     subset: str = "swap_obj",
     parquet: Path | None = None,
 ) -> dict[str, float]:
-    parquet = parquet or constants.datasets_path / f"sugarcrepe_{subset}_eval.parquet"
+    parquet = parquet or constants.datasets_path / f"sugarcrepe_{subset}_eval{constants.artifact_suffix}.parquet"
     non_linear = model.text_model.non_linear_contractions
     size = image_model_hyperparams.image_size
 
@@ -505,13 +505,19 @@ def evaluate_all_benchmarks(
         "sugarcrepe_full": _guard(
             "SugarCREPE full",
             lambda: evaluate_sugarcrepe(
-                model, device, batch_size, parquet=constants.datasets_path / "sugarcrepe_full_eval.parquet"
+                model,
+                device,
+                batch_size,
+                parquet=constants.datasets_path / f"sugarcrepe_full_eval{constants.artifact_suffix}.parquet",
             ),
         ),
         "sugarcrepepp": _guard(
             "SugarCREPE++",
             lambda: evaluate_sugarcrepe(
-                model, device, batch_size, parquet=constants.datasets_path / "sugarcrepepp_eval.parquet"
+                model,
+                device,
+                batch_size,
+                parquet=constants.datasets_path / f"sugarcrepepp_eval{constants.artifact_suffix}.parquet",
             ),
         ),
     }
@@ -603,7 +609,12 @@ def evaluate_retrieval(
     (capped at TEST_SIZE). Uses the dataset matching the checkpoint's mode."""
     non_linear = model.text_model.non_linear_contractions
     dataset = "coco_single_caption_nlc" if non_linear else "coco_single_caption"
-    parquet = constants.datasets_path / f"{dataset}_test.parquet"
+    parquet = constants.datasets_path / f"{dataset}{constants.artifact_suffix}_test.parquet"
+    if not parquet.exists():
+        # A non-linear dataset serves linear models too (the path column is just
+        # ignored), so fall back to the nlc build when only it was created — e.g.
+        # the tree-no-type parser only ever produces the single nlc dataset.
+        parquet = constants.datasets_path / f"coco_single_caption_nlc{constants.artifact_suffix}_test.parquet"
     size = image_model_hyperparams.image_size
 
     ds = VLMDataset(

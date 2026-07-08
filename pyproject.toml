@@ -10,5 +10,11 @@ ignore = [
     "E731", # Allow assigning lambda expressions to variables
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# The tree-no-type scripts set os.environ["PARSER_VERSION"] before importing
+# qnlp.constants (which reads it at import), so imports intentionally follow
+# module-level code.
+"*_tree_no_type.py" = ["E402"]
+
 [tool.ruff.format]
 quote-style = "double"

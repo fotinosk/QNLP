@@ -17,8 +17,20 @@ _worker_processor = None
 logger = setup_logger(log_name="ccg_parser")
 
 
-def _worker_init(bond_dim: int, embedding_dim: int, device: str, rules: list[str], cache_path: str):
-    """Initialise heavy CCG objects ONCE per worker process."""
+def _worker_init(
+    bond_dim: int,
+    embedding_dim: int,
+    device: str,
+    rules: list[str],
+    cache_path: str,
+    tree_no_type: bool = False,
+):
+    """Initialise heavy CCG objects ONCE per worker process.
+
+    tree_no_type: when True, converts Bobcat CCG trees to compact tree diagrams
+    via lambeq's TreeReader (NO_TYPE mode) instead of the default grammatical-cups
+    reading. The rewriter is skipped because tree diagrams have no cups/snakes.
+    """
     global _worker_processor
     from lambeq import AtomicType, Rewriter
     from lambeq.backend.tensor import Dim
@@ -36,10 +48,19 @@ def _worker_init(bond_dim: int, embedding_dim: int, device: str, rules: list[str
         bond_dim=bond_dim,
     )
     parser = CachedBobcatParser(device=device, cache_path=cache_path)
+
+    lambeq_tree_mode = None
+    if tree_no_type:
+        from lambeq import TreeReaderMode
+
+        lambeq_tree_mode = TreeReaderMode.NO_TYPE
+
     _worker_processor = BobcatTextProcessor(
         ccg_parser=parser,
         ansatz=ansatz,
-        rewriter=Rewriter(rules),
+        # Rewriter only applies to grammatical-cups diagrams; skip for tree mode.
+        rewriter=None if tree_no_type else Rewriter(rules),
+        tree_reader_mode=lambeq_tree_mode,
     )
 
 
@@ -83,6 +104,7 @@ class CCGCompilerStep(PipelineStep):
         max_workers: int = 2,
         worker_batch_size: int = 1000,
         max_tasks_per_child: int = 5,
+        tree_no_type: bool = False,
     ):
         self.lmdb_path = Path(lmdb_path)
         self.text_column = text_column
@@ -93,6 +115,7 @@ class CCGCompilerStep(PipelineStep):
         self.max_workers = max_workers
         self.worker_batch_size = worker_batch_size
         self.max_tasks_per_child = max_tasks_per_child
+        self.tree_no_type = tree_no_type
         self.rules = [
             "auxiliary",
             "connector",
@@ -113,7 +136,14 @@ class CCGCompilerStep(PipelineStep):
             self._pool = mp.get_context("spawn").Pool(
                 processes=self.max_workers,
                 initializer=_worker_init,
-                initargs=(self.bond_dim, self.embedding_dim, self.device, self.rules, self.cache_path),
+                initargs=(
+                    self.bond_dim,
+                    self.embedding_dim,
+                    self.device,
+                    self.rules,
+                    self.cache_path,
+                    self.tree_no_type,
+                ),
                 maxtasksperchild=self.max_tasks_per_child,  # Forces worker restart to free RAM
             )
         return self._pool
