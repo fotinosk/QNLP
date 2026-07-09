@@ -34,6 +34,11 @@ def run() -> None:
         max_workers=MAX_WORKERS,
         cache_path=str(constants.bobcat_cache_path),
         tree_no_type=True,
+        # Never recycle workers: killing a worker mid-batch orphaned its SQLite lock
+        # on the NFS diskcache and deadlocked the pool at the recycle boundary. Keeping
+        # workers alive removes that trigger. Watch maxvmem — recycling was originally
+        # added to bound lambeq/bobcat memory growth (see gc.collect() per batch).
+        max_tasks_per_child=None,
     )
 
     steps = [
