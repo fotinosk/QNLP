@@ -1,6 +1,11 @@
 #!/bin/bash
-#$ -l tmem=16G
+#$ -l tmem=8G
 #$ -l h_rt=12:0:0
+# tmem is PER SLOT; 5 slots x 8G = 40G for the 4 CCG workers (+ main). Without
+# -pe smp the job gets one slot's memory and OOM-kills a worker, hanging the pool.
+# Winoground is tiny (~800 sentences) so 4 workers is ample.
+#$ -pe smp 5
+#$ -R y
 #$ -S /bin/bash
 #$ -j y
 #$ -N wino_process_tree

@@ -103,7 +103,7 @@ class CCGCompilerStep(PipelineStep):
         cache_path: str = "~/.cache/lambeq/bobcat/diskcache",
         max_workers: int = 2,
         worker_batch_size: int = 1000,
-        max_tasks_per_child: int | None = 5,
+        max_tasks_per_child: int = 5,
         tree_no_type: bool = False,
     ):
         self.lmdb_path = Path(lmdb_path)
