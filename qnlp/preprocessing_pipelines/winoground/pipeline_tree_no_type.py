@@ -29,7 +29,7 @@ def build_pipeline() -> WinogroundPipeline:
         embedding_dim=constants.embedding_dim,
         cache_path=str(constants.bobcat_cache_path),
         max_workers=4,
-        worker_batch_size=250,
+        worker_batch_size=500,
         tree_no_type=True,
     )
     unify_step = UnifyEinsumRankStep()

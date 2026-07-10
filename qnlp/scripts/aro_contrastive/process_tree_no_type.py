@@ -32,6 +32,7 @@ def run() -> None:
         embedding_dim=constants.embedding_dim,
         bond_dim=constants.bond_dim,
         max_workers=MAX_WORKERS,
+        worker_batch_size=500,
         cache_path=str(constants.bobcat_cache_path),
         tree_no_type=True,
     )

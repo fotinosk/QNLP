@@ -48,7 +48,7 @@ cd $PROJECT_DIR
 $PYTHON -m qnlp.preprocessing_pipelines.coco.pipeline_tree_no_type \
     --chunk-size 1000 \
     --max-workers 8 \
-    --worker-batch-size 2000
+    --worker-batch-size 500
 
 echo "========================================="
 echo "Job finished successfully at $(date)"
