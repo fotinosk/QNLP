@@ -1,10 +1,10 @@
 #!/bin/bash
 #$ -l tmem=8G
 #$ -l h_rt=12:0:0
-# tmem is PER SLOT on this cluster; 10 slots x 8G = 80G total for the 8 CCG workers
+# tmem is PER SLOT on this cluster; 6 slots x 8G = 48G total for the 4 CCG workers
 # (+ main). Without -pe smp the job gets a single slot's memory and OOM-kills a
 # worker, which silently hangs the multiprocessing pool.
-#$ -pe smp 10
+#$ -pe smp 6
 #$ -R y
 #$ -S /bin/bash
 #$ -j y

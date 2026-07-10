@@ -21,7 +21,7 @@ logger = setup_logger(log_name="aro_process_tree")
 
 ARO_ATLAS_DIR = constants.atlases_path / "aro"
 
-MAX_WORKERS = 8
+MAX_WORKERS = 4
 CHUNK_SIZE = 2000
 
 
