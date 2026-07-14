@@ -12,6 +12,11 @@ ContractionPath: TypeAlias = list[tuple[int, int]]
 # Diagrams whose optimal path exceeds this are excluded at dataset-creation time.
 MAX_INTERMEDIATE_ELEMENTS = 50_000_000
 
+# opt_einsum optimizer used to plan contraction paths. "dp" (exact dynamic
+# programming) finds the true-optimal order; the "branch-2" heuristic fails on
+# tree-reader (NO_TYPE) topologies (huge intermediates / timeouts).
+PATH_OPTIMIZER = "dp"
+
 
 def get_contraction_path_and_cost(einsum_str: str, shapes: TensorShapes) -> tuple[ContractionPath, int]:
     """Compute the pairwise contraction path and the size (in elements) of the
@@ -26,7 +31,7 @@ def get_contraction_path_and_cost(einsum_str: str, shapes: TensorShapes) -> tupl
     or it times out), whereas dp finds the true optimum — typically a ~512-element
     intermediate — quickly, because tree tensor networks have low contraction width.
     """
-    path, info = opt_einsum.contract_path(einsum_str, *shapes, shapes=True, optimize="dp")
+    path, info = opt_einsum.contract_path(einsum_str, *shapes, shapes=True, optimize=PATH_OPTIMIZER)
     return path, int(info.largest_intermediate)
 
 

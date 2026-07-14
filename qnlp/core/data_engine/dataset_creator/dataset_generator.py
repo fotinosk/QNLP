@@ -53,9 +53,16 @@ def add_contraction_paths(
 
     from qnlp.core.non_linear_contraction.determine_optimal_contraction_path import (
         MAX_INTERMEDIATE_ELEMENTS,
+        PATH_OPTIMIZER,
         get_contraction_path_and_cost,
         get_random_path,
         get_right_to_left_path,
+    )
+
+    opt_name = PATH_OPTIMIZER if strategy == "optimal" else strategy
+    logger.info(
+        f"Planning contraction paths: strategy={strategy} "
+        f"(opt_einsum optimizer='{opt_name}', max_intermediate={MAX_INTERMEDIATE_ELEMENTS:,} elems)."
     )
 
     diagrams = atoms["diagram"].to_list()
