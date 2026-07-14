@@ -19,8 +19,14 @@ def get_contraction_path_and_cost(einsum_str: str, shapes: TensorShapes) -> tupl
 
     Uses opt_einsum's ``shapes=True`` interface so no tensors are allocated —
     only the shape tuples are needed to plan the contraction.
+
+    Uses the exact ``dp`` (dynamic-programming optimal) optimizer rather than the
+    ``branch-2`` heuristic: for the tree-reader (NO_TYPE) topologies branch-2 fails
+    to find the cheap order (largest intermediate blows past the feasibility limit,
+    or it times out), whereas dp finds the true optimum — typically a ~512-element
+    intermediate — quickly, because tree tensor networks have low contraction width.
     """
-    path, info = opt_einsum.contract_path(einsum_str, *shapes, shapes=True, optimize="branch-2")
+    path, info = opt_einsum.contract_path(einsum_str, *shapes, shapes=True, optimize="dp")
     return path, int(info.largest_intermediate)
 
 
