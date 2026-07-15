@@ -65,11 +65,20 @@ def add_contraction_paths(
         f"(opt_einsum optimizer='{opt_name}', max_intermediate={MAX_INTERMEDIATE_ELEMENTS:,} elems)."
     )
 
+    from collections import Counter
+
     diagrams = atoms["diagram"].to_list()
     symbols_list = atoms["symbols"].to_list()
     paths: list[str | None] = []
     n_ok = 0
     n_failed = 0
+
+    # Diagnostics: why each unique topology failed, an example per reason, and the
+    # sizes of over-limit intermediates — logged as a summary so the job output
+    # shows what actually fails without flooding one warning per atom.
+    fail_reasons: Counter = Counter()
+    fail_examples: dict[str, tuple[str, str]] = {}
+    too_big_sizes: list[int] = []
 
     # Memoise on (diagram, shapes): templated captions produce the same topology
     # thousands of times, and path planning is the expensive part. A cache miss on a
@@ -95,6 +104,10 @@ def add_contraction_paths(
         if len(shapes) > max_symbols:
             result = None
             n_failed += 1
+            fail_reasons["too_many_symbols"] += 1
+            fail_examples.setdefault(
+                "too_many_symbols", (diagram[:80], f"n_tensors={len(shapes)} > max_symbols={max_symbols}")
+            )
         elif strategy == "right_to_left":
             try:
                 import opt_einsum
@@ -133,18 +146,38 @@ def add_contraction_paths(
                 with _time_limit(timeout_seconds):
                     path, largest_intermediate = get_contraction_path_and_cost(diagram, shapes)
                 if largest_intermediate > MAX_INTERMEDIATE_ELEMENTS:
-                    raise ValueError(f"largest intermediate {largest_intermediate:,} > {MAX_INTERMEDIATE_ELEMENTS:,}")
-                result = orjson.dumps(path).decode()
-                n_ok += 1
+                    result = None
+                    n_failed += 1
+                    fail_reasons["intermediate_too_big"] += 1
+                    too_big_sizes.append(largest_intermediate)
+                    fail_examples.setdefault(
+                        "intermediate_too_big",
+                        (diagram[:80], f"{largest_intermediate:,} elems (n_tensors={len(shapes)})"),
+                    )
+                else:
+                    result = orjson.dumps(path).decode()
+                    n_ok += 1
             except Exception as e:
                 result = None
                 n_failed += 1
-                logger.warning(f"Contraction path failed for diagram '{diagram[:60]}...': {e}")
+                reason = type(e).__name__
+                fail_reasons[reason] += 1
+                fail_examples.setdefault(reason, (diagram[:80], str(e)[:100]))
 
         cache[key] = result
         paths.append(result)
 
     logger.info(f"Contraction paths computed: {n_ok} ok, {n_failed} failed ({len(cache)} unique topologies).")
+    if fail_reasons:
+        logger.info(f"Path failure breakdown (by unique topology): {dict(fail_reasons)}")
+        for reason, (diag, detail) in fail_examples.items():
+            logger.info(f"  example [{reason}]: {detail}  ::  {diag}")
+        if too_big_sizes:
+            s = sorted(too_big_sizes)
+            logger.info(
+                f"  over-limit intermediate sizes: min={s[0]:,} median={s[len(s) // 2]:,} "
+                f"max={s[-1]:,}  (limit={MAX_INTERMEDIATE_ELEMENTS:,})"
+            )
     return atoms.with_columns(pl.Series("path", paths, dtype=pl.String))
 
 
