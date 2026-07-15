@@ -295,7 +295,12 @@ def enrich_atoms(
 
     if compute_contraction_paths:
         logger.info(f"Computing contraction paths for {len(atoms)} atoms (strategy={path_strategy})...")
-        atoms = add_contraction_paths(atoms, path_timeout_seconds, max_symbols=20, strategy=path_strategy)
+        # 200, not 20: tree-reader (NO_TYPE) diagrams have ~3x the tensors of the
+        # grammatical-cups diagrams (more boxes, no rewriter compaction) — n_tensors
+        # of 37-65+ is normal — so a cap of 20 rejected every tree diagram outright.
+        # dp path planning stays fast on tree topologies, and path_timeout_seconds
+        # guards any pathologically large one.
+        atoms = add_contraction_paths(atoms, path_timeout_seconds, max_symbols=200, strategy=path_strategy)
         before = len(atoms)
         atoms = atoms.filter(pl.col("path").is_not_null())
         dropped_path = before - len(atoms)
