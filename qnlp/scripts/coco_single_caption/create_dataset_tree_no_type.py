@@ -27,7 +27,7 @@ def run() -> None:
         derived_dirs=[COCO_DERIVED_DIR],
         strategy=SingleCaptionStrategy(),
         output_name="coco_single_caption_nlc",
-        compute_contraction_paths=True,
+        compute_contraction_paths=False,
     )
 
 
