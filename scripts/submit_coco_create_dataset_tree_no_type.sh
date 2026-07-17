@@ -1,6 +1,10 @@
 #!/bin/bash
 #$ -l tmem=16G
-#$ -l h_rt=12:0:0
+#$ -l h_rt=72:0:0
+# Path planning (dp optimizer) is single-threaded, so the 5 slots are for memory
+# headroom (5 x 16G) to hold the ~566k-atom frame + path cache, not parallelism.
+#$ -pe smp 5
+#$ -R y
 #$ -S /bin/bash
 #$ -j y
 #$ -N coco_create_ds_tree
