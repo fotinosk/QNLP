@@ -304,7 +304,7 @@ def _eval_winoground_frozen(
     device,
     nlc: bool,
 ) -> dict[str, float]:
-    parquet = constants.datasets_path / "winoground_eval.parquet"
+    parquet = constants.datasets_path / f"winoground_eval{constants.artifact_suffix}.parquet"
     if not parquet.exists():
         logger.warning(f"Skipping Winoground — {parquet} not found.")
         return {
@@ -381,7 +381,7 @@ def _print_final_summary(retrieval: dict, wino: dict, aro: dict, sc: dict) -> No
     logger.info("ARO")
     logger.info(f"  acc: {aro['hard_neg_acc']:.4f}  true_cos: {aro['true_cos']:.4f}  false_cos: {aro['false_cos']:.4f}")
     logger.info(f"  evaluated: {aro['n_evaluated']}  skipped: {aro['n_skipped']}")
-    logger.info("SugarCREPE (swap_obj)")
+    logger.info("SugarCREPE (full)")
     logger.info(f"  acc: {sc['hard_neg_acc']:.4f}  evaluated: {sc['n_evaluated']}  skipped: {sc['n_skipped']}")
     logger.info(sep)
 
@@ -536,19 +536,19 @@ def run() -> None:
             text_model,
             text_head,
             image_cache,
-            constants.datasets_path / "aro_eval.parquet",
+            constants.datasets_path / f"aro_eval{constants.artifact_suffix}.parquet",
             _ARO_COMPILED,
             cfg.batch_size,
             device,
             cfg.use_non_linear_contractions,
         )
 
-        logger.info("--- SugarCREPE (swap_obj) ---")
+        logger.info("--- SugarCREPE (full) ---")
         sc = _eval_hard_neg_frozen(
             text_model,
             text_head,
             image_cache,
-            constants.datasets_path / "sugarcrepe_swap_obj_eval.parquet",
+            constants.datasets_path / f"sugarcrepe_full_eval{constants.artifact_suffix}.parquet",
             _SC_COMPILED,
             cfg.batch_size,
             device,
@@ -563,7 +563,7 @@ def run() -> None:
             mlflow.log_metrics(
                 {"wino/text": wino["text_score"], "wino/image": wino["image_score"], "wino/group": wino["group_score"]}
             )
-            mlflow.log_metrics({"aro/hard_neg_acc": aro["hard_neg_acc"], "sugarcrepe/swap_obj": sc["hard_neg_acc"]})
+            mlflow.log_metrics({"aro/hard_neg_acc": aro["hard_neg_acc"], "sugarcrepe/full": sc["hard_neg_acc"]})
             mlflow.log_artifact(str(checkpoint_path))
 
         send_training_finished_notification(
