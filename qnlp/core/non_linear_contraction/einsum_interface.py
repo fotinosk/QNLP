@@ -1,7 +1,7 @@
 from collections.abc import Callable
 
 import torch
-from cotengra import einsum  # supports non-alpha index characters, unlike torch.einsum
+from opt_einsum import contract as einsum  # supports non-alpha index characters, unlike torch.einsum
 
 from qnlp.core.non_linear_contraction.atom import non_linear_contraction
 from qnlp.core.non_linear_contraction.determine_optimal_contraction_path import get_contraction_path

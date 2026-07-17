@@ -3,7 +3,7 @@ from collections.abc import Callable
 from functools import lru_cache
 
 import torch
-from cotengra import einsum
+from opt_einsum import contract as einsum
 
 from qnlp.core.non_linear_contraction.determine_optimal_contraction_path import MAX_INTERMEDIATE_ELEMENTS
 from qnlp.utils.logging import setup_logger

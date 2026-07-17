@@ -3,8 +3,8 @@ from typing import Any, Dict, List
 
 import torch
 import torch.nn as nn
-from cotengra import einsum
 from lambeq import Symbol
+from opt_einsum import contract as einsum
 
 from qnlp.core.non_linear_contraction.atom import IntermediateTooLargeError
 from qnlp.core.non_linear_contraction.einsum_interface import contract_einsum_non_linearly

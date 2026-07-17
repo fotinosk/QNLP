@@ -19,8 +19,8 @@ from typing import Any, Dict, List
 
 import torch
 import torch.nn as nn
-from cotengra import einsum
 from lambeq import Symbol
+from opt_einsum import contract as einsum
 
 torch.serialization.add_safe_globals([Symbol])
 
