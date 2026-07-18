@@ -523,6 +523,280 @@ def evaluate_all_benchmarks(
     }
 
 
+# ---------------------------------------------------------------------------
+# Frozen (CLIP image tower) benchmark variants
+#
+# run_frozen.py / evaluate_frozen.py train only the text model + a linear head
+# and encode images with a cached CLIP tower, so they cannot go through the
+# ContrastiveVLM-based evaluators above. These mirror them exactly — same
+# grouping and skip logic, same returned shapes — but take
+# (text_model, text_head, image_cache) instead of a ContrastiveVLM. `image_cache`
+# is any callable mapping a list of image paths to a batch of L2-normalised
+# CLIP embeddings (run_frozen.CLIPImageCache).
+# ---------------------------------------------------------------------------
+
+
+def _winoground_pair_results_frozen(
+    text_model, text_head, image_cache, batch_size, device, nlc, parquet: Path | None = None
+) -> tuple[dict[str, tuple[bool, bool, bool]], int]:
+    """Per-pair (text, image, group) correctness, keyed by pair_id. Mirrors
+    _winoground_pair_results but with a frozen CLIP image tower."""
+    parquet = parquet or constants.datasets_path / f"winoground_eval{constants.artifact_suffix}.parquet"
+    ds = WinogroundDataset(parquet, mode="eval", use_non_linear_contractions=nlc, return_image_paths=True)
+    loader = DataLoader(ds, batch_size=batch_size, shuffle=False, collate_fn=winoground_eval_collate_fn, num_workers=0)
+    known = set(text_model.sym2weight.keys())
+
+    def _all_known(cap) -> bool:
+        return all(s in known for s in cap[1])
+
+    per_pair: dict[str, tuple[bool, bool, bool]] = {}
+    n_skipped = 0
+
+    text_model.eval()
+    text_head.eval()
+    with torch.no_grad():
+        for batch in loader:
+            caps0, caps1 = batch["captions_0"], batch["captions_1"]
+            paths0, paths1 = batch["images_0"], batch["images_1"]  # lists of path strings
+            pair_ids = batch["pair_ids"]
+            valid = [i for i in range(len(caps0)) if _all_known(caps0[i]) and _all_known(caps1[i])]
+            n_skipped += len(caps0) - len(valid)
+            if not valid:
+                continue
+
+            img0 = image_cache([paths0[i] for i in valid])
+            img1 = image_cache([paths1[i] for i in valid])
+            cap0 = F.normalize(text_head(text_model([caps0[i] for i in valid])), dim=-1)
+            cap1 = F.normalize(text_head(text_model([caps1[i] for i in valid])), dim=-1)
+
+            s00 = F.cosine_similarity(img0, cap0, dim=-1)
+            s01 = F.cosine_similarity(img0, cap1, dim=-1)
+            s10 = F.cosine_similarity(img1, cap0, dim=-1)
+            s11 = F.cosine_similarity(img1, cap1, dim=-1)
+
+            finite = torch.isfinite(s00) & torch.isfinite(s01) & torch.isfinite(s10) & torch.isfinite(s11)
+            text = (s00 > s01) & (s11 > s10)
+            image = (s00 > s10) & (s11 > s01)
+            group = text & image
+
+            for j, i in enumerate(valid):
+                if not bool(finite[j]):
+                    n_skipped += 1
+                    continue
+                per_pair[pair_ids[i]] = (bool(text[j]), bool(image[j]), bool(group[j]))
+
+    return per_pair, n_skipped
+
+
+def evaluate_aro_frozen(
+    text_model, text_head, image_cache, batch_size, device, nlc, parquet: Path | None = None
+) -> dict[str, dict]:
+    """ARO hard-negative accuracy broken down by task (attribution/relation) plus
+    overall. Mirrors evaluate_aro with a frozen CLIP image tower."""
+    parquet = parquet or constants.datasets_path / f"aro_eval{constants.artifact_suffix}.parquet"
+    ds = VLMDataset(
+        parquet, compiled_columns=ARO_COMPILED_COLUMNS, use_non_linear_contractions=nlc, return_image_paths=True
+    )
+    task_map = _load_task_map(set(ds.df["sample_id"].to_list()))
+    loader = DataLoader(ds, batch_size=batch_size, shuffle=False, collate_fn=vlm_collate_fn, num_workers=0)
+    known = set(text_model.sym2weight.keys())
+
+    correct_by_task: dict[str, list[bool]] = defaultdict(list)
+    pos_by_task: dict[str, list[float]] = defaultdict(list)
+    neg_by_task: dict[str, list[float]] = defaultdict(list)
+    n_skipped = 0
+
+    text_model.eval()
+    text_head.eval()
+    with torch.no_grad():
+        for batch in loader:
+            true_caps = batch["true_caption"]
+            false_caps = batch["false_caption"]
+            sample_ids = batch["sample_id"]
+            paths = batch["local_image_path"]  # path strings (return_image_paths=True)
+
+            valid = [
+                i
+                for i in range(len(sample_ids))
+                if all(s in known for s in true_caps[i][1]) and all(s in known for s in false_caps[i][1])
+            ]
+            n_skipped += len(sample_ids) - len(valid)
+            if not valid:
+                continue
+
+            img_emb = image_cache([paths[i] for i in valid])
+            true_emb = F.normalize(text_head(text_model([true_caps[i] for i in valid])), dim=-1)
+            false_emb = F.normalize(text_head(text_model([false_caps[i] for i in valid])), dim=-1)
+
+            pos = F.cosine_similarity(true_emb, img_emb)
+            neg = F.cosine_similarity(false_emb, img_emb)
+            correct = (pos > neg).tolist()
+            finite = (torch.isfinite(pos) & torch.isfinite(neg)).tolist()
+
+            for j, i in enumerate(valid):
+                if not finite[j]:
+                    n_skipped += 1
+                    continue
+                task = task_map[sample_ids[i]]
+                correct_by_task[task].append(bool(correct[j]))
+                pos_by_task[task].append(float(pos[j]))
+                neg_by_task[task].append(float(neg[j]))
+
+    def _acc(xs):
+        return sum(xs) / len(xs) if xs else float("nan")
+
+    results: dict[str, dict] = {}
+    all_c, all_p, all_n = [], [], []
+    for task in sorted(correct_by_task):
+        c, p, n = correct_by_task[task], pos_by_task[task], neg_by_task[task]
+        results[task] = {"n": len(c), "hard_neg_acc": _acc(c), "true_cos": _acc(p), "false_cos": _acc(n)}
+        all_c += c
+        all_p += p
+        all_n += n
+    results["overall"] = {
+        "n": len(all_c),
+        "hard_neg_acc": _acc(all_c),
+        "true_cos": _acc(all_p),
+        "false_cos": _acc(all_n),
+    }
+    if n_skipped:
+        logger.warning(f"ARO (frozen): skipped {n_skipped} pairs with unknown/NaN symbols.")
+    return results
+
+
+def evaluate_sugarcrepe_frozen(
+    text_model, text_head, image_cache, batch_size, device, nlc, parquet: Path
+) -> dict[str, float]:
+    """SugarCREPE hard-negative accuracy. Mirrors evaluate_sugarcrepe with a
+    frozen CLIP image tower."""
+    ds = VLMDataset(
+        parquet, compiled_columns=SUGARCREPE_COMPILED_COLUMNS, use_non_linear_contractions=nlc, return_image_paths=True
+    )
+    loader = DataLoader(ds, batch_size=batch_size, shuffle=False, collate_fn=vlm_collate_fn, num_workers=0)
+    known = set(text_model.sym2weight.keys())
+
+    correct: list[bool] = []
+    pos_cos: list[float] = []
+    neg_cos: list[float] = []
+    n_skipped = 0
+
+    text_model.eval()
+    text_head.eval()
+    with torch.no_grad():
+        for batch in loader:
+            true_caps = batch["true_caption"]
+            false_caps = batch["false_caption"]
+            paths = batch["local_image_path"]
+
+            valid = [
+                i
+                for i in range(len(true_caps))
+                if all(s in known for s in true_caps[i][1]) and all(s in known for s in false_caps[i][1])
+            ]
+            n_skipped += len(true_caps) - len(valid)
+            if not valid:
+                continue
+
+            img_emb = image_cache([paths[i] for i in valid])
+            true_emb = F.normalize(text_head(text_model([true_caps[i] for i in valid])), dim=-1)
+            false_emb = F.normalize(text_head(text_model([false_caps[i] for i in valid])), dim=-1)
+
+            pos = F.cosine_similarity(true_emb, img_emb)
+            neg = F.cosine_similarity(false_emb, img_emb)
+            finite = (torch.isfinite(pos) & torch.isfinite(neg)).tolist()
+
+            for j in range(len(valid)):
+                if not finite[j]:
+                    n_skipped += 1
+                    continue
+                correct.append(bool((pos > neg)[j].item()))
+                pos_cos.append(float(pos[j]))
+                neg_cos.append(float(neg[j]))
+
+    n = len(correct)
+    metrics = {
+        "hard_neg_acc": sum(correct) / n if n else float("nan"),
+        "true_cos": sum(pos_cos) / n if n else float("nan"),
+        "false_cos": sum(neg_cos) / n if n else float("nan"),
+        "n_evaluated": n,
+        "n_skipped": n_skipped,
+    }
+    if n_skipped:
+        logger.warning(f"SugarCREPE (frozen): skipped {n_skipped} pairs with unknown/NaN symbols.")
+    return metrics
+
+
+def evaluate_all_benchmarks_frozen(
+    text_model, text_head, image_cache, batch_size, device, nlc
+) -> dict[str, dict | None]:
+    """Frozen counterpart of evaluate_all_benchmarks. Returns the same-shaped
+    dict (winoground / winoground_by_tag / aro / sugarcrepe_full / sugarcrepepp)
+    so print_full_report renders an identical report. Each benchmark is guarded
+    against missing datasets. Winoground is run once and reused for both the
+    overall and by-tag breakdowns."""
+
+    def _guard(name: str, fn):
+        try:
+            return fn()
+        except Exception as e:
+            logger.warning(f"{name}: eval skipped ({type(e).__name__}: {e})")
+            return None
+
+    wino: dict | None = None
+    wino_by_tag: dict | None = None
+    per_pair = _guard(
+        "Winoground",
+        lambda: _winoground_pair_results_frozen(text_model, text_head, image_cache, batch_size, device, nlc),
+    )
+    if per_pair is not None:
+        pairs, n_skipped = per_pair
+        wino = _agg_winoground(list(pairs.values()))
+        wino["n_skipped"] = n_skipped
+
+        def _by_tag():
+            tags_by_id = _load_wino_tags(WINO_TAG_PATH)
+            by_class: dict[str, list[tuple[bool, bool, bool]]] = defaultdict(list)
+            for pair_id, res in pairs.items():
+                for c in tags_by_id.get(_pair_id_to_index(pair_id), []) or [NORMAL_CLASS]:
+                    by_class[c].append(res)
+            out = {cls: _agg_winoground(vals) for cls, vals in by_class.items()}
+            out["overall"] = _agg_winoground(list(pairs.values()))
+            out["overall"]["n_skipped"] = n_skipped
+            return out
+
+        wino_by_tag = _guard("Winoground-by-tag", _by_tag)
+
+    return {
+        "winoground": wino,
+        "winoground_by_tag": wino_by_tag,
+        "aro": _guard("ARO", lambda: evaluate_aro_frozen(text_model, text_head, image_cache, batch_size, device, nlc)),
+        "sugarcrepe_full": _guard(
+            "SugarCREPE full",
+            lambda: evaluate_sugarcrepe_frozen(
+                text_model,
+                text_head,
+                image_cache,
+                batch_size,
+                device,
+                nlc,
+                parquet=constants.datasets_path / f"sugarcrepe_full_eval{constants.artifact_suffix}.parquet",
+            ),
+        ),
+        "sugarcrepepp": _guard(
+            "SugarCREPE++",
+            lambda: evaluate_sugarcrepe_frozen(
+                text_model,
+                text_head,
+                image_cache,
+                batch_size,
+                device,
+                nlc,
+                parquet=constants.datasets_path / f"sugarcrepepp_eval{constants.artifact_suffix}.parquet",
+            ),
+        ),
+    }
+
+
 def log_banner(title: str, info: dict) -> None:
     """Log a titled key/value banner (used at both start and end of training)."""
     sep = "=" * 72

@@ -15,8 +15,7 @@ torch.serialization.add_safe_globals([Symbol])
 def _init_uniform_bound(directed_cod: int) -> float:
     """Half-width of the uniform init for a tensor whose output leg has size
     `directed_cod`. Tuned (empirically) so a fresh multilinear contraction stays
-    ~O(1). Also used to derive the per-symbol target norm for the linear-mode
-    weight-norm layer."""
+    ~O(1)."""
 
     def mean(size: int) -> float:
         if size < 6:
@@ -72,8 +71,6 @@ class EinsumModel(nn.Module):
         self.reset_parameters()
         self.sym2weight = self.compute_sym2weight()
         self._path_cache: dict[tuple, list | None] = {}
-        # Cache of per-symbol target Frobenius norms for the linear-mode weight-norm.
-        self._weight_scale_cache: dict = {}
 
     def _setup_contractions_function(self):
         if self.non_linear_contractions:
@@ -90,20 +87,6 @@ class EinsumModel(nn.Module):
                 continue
             bound = _init_uniform_bound(sym.directed_cod)
             nn.init.uniform_(weight, -bound, bound)
-
-    def _target_norm(self, sym: Symbol) -> float:
-        """Frobenius norm the init would give this symbol's tensor.
-
-        For uniform(-b, b) the per-element std is b/sqrt(3), so the expected
-        Frobenius norm is sqrt(numel) * b/sqrt(3). Cached (depends only on shape
-        and directed_cod, which are fixed per symbol)."""
-        cached = self._weight_scale_cache.get(sym)
-        if cached is None:
-            w = self.sym2weight[sym]
-            std = _init_uniform_bound(sym.directed_cod) / (3.0**0.5)
-            cached = (w.numel() ** 0.5) * std
-            self._weight_scale_cache[sym] = cached
-        return cached
 
     def set_weights(self, symbols: List[Symbol], tensors: List[torch.Tensor], freeze: bool = False):
         if len(symbols) != len(tensors):
@@ -201,16 +184,22 @@ class EinsumModel(nn.Module):
                 return torch.full((out_dim,), float("nan"), device=tensors[0].device, dtype=tensors[0].dtype)
         else:
             path = None
-            # Weight-norm layer (linear mode only): rescale each input tensor to its
-            # init Frobenius norm before the contraction. The raw parameters are never
+            # Weight-norm layer (linear mode only): rescale each input tensor to UNIT
+            # Frobenius norm before the contraction. The raw parameters are never
             # mutated — this is a functional reparameterisation in the forward graph,
-            # so gradients flow through it. Because the contraction is multilinear and
-            # the output is finally normalised, per-symbol scale is a gauge freedom:
-            # this leaves the normalised embedding direction identical while pinning
-            # magnitudes so the contraction can no longer drift into float overflow.
-            # (NLC mode is left untouched: its gate is non-linear, so rescaling inputs
-            # would change the represented function.)
-            tensors = [self._target_norm(sym) * t / (t.norm() + 1e-8) for sym, t in zip(symbols, tensors)]
+            # so gradients flow through it.
+            #
+            # Frobenius norm is submultiplicative under tensor contraction
+            # (‖A·B‖_F ≤ ‖A‖_F‖B‖_F), so with every input at unit norm the output —
+            # and every opt_einsum intermediate — is bounded by 1 and can never
+            # overflow float32, no matter how training aligns the weight directions.
+            # Because the contraction is multilinear and the output is finally
+            # L2-normalised, the per-symbol scale is a gauge freedom: unit-norm
+            # scaling differs from any other choice only by a constant scalar on the
+            # pre-normalisation output, so the normalised embedding direction is
+            # identical. (NLC mode is left untouched: its gate is non-linear, so
+            # rescaling inputs would change the represented function.)
+            tensors = [t / (t.norm() + 1e-8) for t in tensors]
 
         try:
             x = self.contractions_function(einsum_expr, tensors, path, gate=gate)
