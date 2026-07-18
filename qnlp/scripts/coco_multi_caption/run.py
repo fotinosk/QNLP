@@ -150,6 +150,9 @@ def run():
         compiled_columns=COMPILED_COLUMNS,
         use_non_linear_contractions=cfg.use_non_linear_contractions,
         test_size=TEST_SIZE,
+        # Batching by shared diagram topology only helps EinsumModel's batched
+        # fast path in linear mode — NLC always uses the per-sample path.
+        topology_bucketing=not cfg.use_non_linear_contractions,
     )
     train_loader, _, _ = loaders
     train_ds, val_ds, test_ds = datasets

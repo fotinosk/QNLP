@@ -5,6 +5,16 @@ import torch
 from torch.utils.data import DataLoader, Subset
 
 from qnlp.domain.datasets.dataset import VLMDataset
+from qnlp.domain.datasets.topology_bucket_sampler import TopologyBucketSampler
+
+
+def _diagrams_for(dataset: VLMDataset | Subset, diagram_col: str) -> list[str]:
+    """Diagram string per row, in the dataset's own index space — works for a
+    plain VLMDataset or a Subset wrapping one (e.g. the test_size-capped test set)."""
+    if isinstance(dataset, Subset):
+        base = dataset.dataset.df[diagram_col].to_list()
+        return [base[i] for i in dataset.indices]
+    return dataset.df[diagram_col].to_list()
 
 
 def vlm_collate_fn(batch: list[dict[str, Any]]) -> dict[str, Any]:
@@ -37,6 +47,8 @@ def get_dataloaders(
     num_workers: int = 4,
     use_non_linear_contractions: bool = False,
     test_size: int | None = None,
+    topology_bucketing: bool = False,
+    min_bucket_size: int = 64,
 ) -> tuple[list[DataLoader], list[VLMDataset]]:
     """
     Build train/val/test DataLoaders from enriched parquet files.
@@ -53,6 +65,15 @@ def get_dataloaders(
         image_columns: Passed to VLMDataset (default ["local_image_path"]).
         compiled_columns: Passed to VLMDataset (default [("diagram", "symbols", "caption")]).
         num_workers: DataLoader worker count.
+        topology_bucketing: If True, batch by shared diagram topology via
+            TopologyBucketSampler (see that module) so EinsumModel's batched
+            same-topology fast path engages for linear-mode training. Only
+            supported for single-compiled-column datasets (e.g. COCO's
+            (diagram, symbols, caption) — not ARO-style true/false pairs).
+            Applied to all three splits — but val/test are ALWAYS built with
+            tail_fraction=1.0 (full coverage, no truncation), hardcoded here,
+            independent of anything train-side experimentation adds later.
+        min_bucket_size: Passed to TopologyBucketSampler for every split.
     """
     train_ds = VLMDataset(
         train_parquet,
@@ -84,26 +105,64 @@ def get_dataloaders(
         prefetch_factor=2 if num_workers > 0 else None,
     )
 
-    train_loader = DataLoader(
-        train_ds,
-        batch_size=batch_size,
-        shuffle=True,
-        collate_fn=vlm_collate_fn,
-        **worker_kwargs,
-    )
-    val_loader = DataLoader(
-        val_ds,
-        batch_size=batch_size,
-        shuffle=False,
-        collate_fn=vlm_collate_fn,
-        **worker_kwargs,
-    )
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        collate_fn=vlm_collate_fn,
-        **worker_kwargs,
-    )
+    if topology_bucketing:
+        cols = compiled_columns or [("diagram", "symbols", "caption")]
+        if len(cols) != 1:
+            raise ValueError(
+                "topology_bucketing only supports single-compiled-column datasets "
+                f"(e.g. COCO's (diagram, symbols, caption)); got {len(cols)} compiled_columns."
+            )
+        diagram_col = cols[0][0]
+
+        # tail_fraction is hardcoded to 1.0 for every split here (not threaded
+        # through from a parameter) — val/test must never truncate, and train
+        # stays lossless too until a dedicated train-only knob is added later.
+        train_sampler = TopologyBucketSampler(
+            _diagrams_for(train_ds, diagram_col),
+            batch_size=batch_size,
+            min_bucket_size=min_bucket_size,
+            tail_fraction=1.0,
+            shuffle=True,
+        )
+        val_sampler = TopologyBucketSampler(
+            _diagrams_for(val_ds, diagram_col),
+            batch_size=batch_size,
+            min_bucket_size=min_bucket_size,
+            tail_fraction=1.0,
+            shuffle=False,
+        )
+        test_sampler = TopologyBucketSampler(
+            _diagrams_for(test_dataset, diagram_col),
+            batch_size=batch_size,
+            min_bucket_size=min_bucket_size,
+            tail_fraction=1.0,
+            shuffle=False,
+        )
+
+        train_loader = DataLoader(train_ds, batch_sampler=train_sampler, collate_fn=vlm_collate_fn, **worker_kwargs)
+        val_loader = DataLoader(val_ds, batch_sampler=val_sampler, collate_fn=vlm_collate_fn, **worker_kwargs)
+        test_loader = DataLoader(test_dataset, batch_sampler=test_sampler, collate_fn=vlm_collate_fn, **worker_kwargs)
+    else:
+        train_loader = DataLoader(
+            train_ds,
+            batch_size=batch_size,
+            shuffle=True,
+            collate_fn=vlm_collate_fn,
+            **worker_kwargs,
+        )
+        val_loader = DataLoader(
+            val_ds,
+            batch_size=batch_size,
+            shuffle=False,
+            collate_fn=vlm_collate_fn,
+            **worker_kwargs,
+        )
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            collate_fn=vlm_collate_fn,
+            **worker_kwargs,
+        )
 
     return [[train_loader, val_loader, test_loader], [train_ds, val_ds, test_ds]]

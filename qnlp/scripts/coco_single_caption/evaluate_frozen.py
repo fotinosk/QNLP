@@ -77,7 +77,7 @@ def evaluate(checkpoint_path: str, batch_size: int = 256) -> None:
 
     dataset_name = "coco_single_caption_nlc" if nlc else "coco_single_caption"
     test_ds = FrozenCOCODataset(DATASETS_PATH / f"{dataset_name}_test.parquet", use_non_linear_contractions=nlc)
-    test_loader = _dedup_loader(test_ds, batch_size, max_images=TEST_SIZE)
+    test_loader = _dedup_loader(test_ds, batch_size, max_images=TEST_SIZE, topology_bucketing=not nlc)
     logger.info(f"Test set: {len(test_ds)} rows → {len(test_loader.dataset)} unique images (capped at {TEST_SIZE})")
 
     log_banner(

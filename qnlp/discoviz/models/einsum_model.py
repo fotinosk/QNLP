@@ -1,3 +1,4 @@
+import string
 from functools import partial
 from typing import Any, Dict, List
 
@@ -71,8 +72,17 @@ class EinsumModel(nn.Module):
         self.reset_parameters()
         self.sym2weight = self.compute_sym2weight()
         self._path_cache: dict[tuple, list | None] = {}
-        # Cache of pre-compiled ContractExpression graphs for linear-mode contraction.
+        # Cache of pre-compiled ContractExpression graphs for linear-mode contraction,
+        # shared by the per-sample and batched-same-topology paths (their expr strings
+        # never collide, since the batched one has an extra leading batch index).
         self._expression_cache: dict[tuple, Any] = {}
+        # Cache of "ab,bc->ac" -> "zab,zbc->zac" batched-expr rewrites, keyed by the
+        # plain (unbatched) einsum expression.
+        self._batched_expr_cache: dict[str, str] = {}
+        # Diagnostic counters: how many forward() calls used the batched
+        # same-topology fast path vs. the per-sample fallback.
+        self.fast_path_batches = 0
+        self.fallback_batches = 0
 
     def _setup_contractions_function(self):
         if self.non_linear_contractions:
@@ -135,6 +145,78 @@ class EinsumModel(nn.Module):
             del self.sizes[idx]
 
         self.sym2weight = self.compute_sym2weight()
+
+    @staticmethod
+    def _unit_rescale(t: torch.Tensor, batched: bool) -> torch.Tensor:
+        """Rescale a linear-mode symbol tensor to unit Frobenius norm.
+
+        Single shared formula for both the per-sample path (batched=False, norm
+        over every dim) and the batched same-topology path (batched=True, norm
+        over every dim except the leading batch dim, so each batch element is
+        rescaled independently). Kept as one method so a future change to the
+        rescale formula can't drift between the two call sites.
+        """
+        dims = tuple(range(1, t.ndim)) if batched else tuple(range(t.ndim))
+        norm = torch.linalg.vector_norm(t, ord=2, dim=dims, keepdim=True)
+        return t / (norm + 1e-8)
+
+    def _batched_expr(self, einsum_expr: str) -> str:
+        """Rewrite "ab,bc->ac" into "zab,zbc->zac" (add a shared leading batch
+        index to every operand and the output), picking a letter not already
+        used anywhere in the expression."""
+        cached = self._batched_expr_cache.get(einsum_expr)
+        if cached is not None:
+            return cached
+
+        lhs, rhs = einsum_expr.split("->")
+        operands = lhs.split(",")
+        used = {c for c in einsum_expr if c.isalpha()}
+        batch_letter = next(c for c in string.ascii_letters if c not in used)
+        batched = f"{','.join(batch_letter + op for op in operands)}->{batch_letter}{rhs}"
+        self._batched_expr_cache[einsum_expr] = batched
+        return batched
+
+    def _forward_batch_same_topology(self, inputs: list[tuple]) -> torch.Tensor:
+        """Batched fast path: every input shares the same einsum expression
+        (diagram), so this runs ONE opt_einsum call across the whole batch
+        instead of one call per sample. Linear mode only — see forward().
+
+        Relies on an assumption verified offline against the actual training
+        data (not just assumed): for any two samples sharing the same
+        einsum_expr, symbols[i] has the same shape at every position i (see
+        qnlp/domain/datasets/topology_bucket_sampler.py). Re-checked here
+        defensively — any violation falls back to the per-sample path rather
+        than risk silently contracting mismatched legs together.
+        """
+        einsum_expr = inputs[0][0]
+        symbols_per_sample = [inp[1] for inp in inputs]
+        n_positions = len(symbols_per_sample[0])
+
+        if any(len(syms) != n_positions for syms in symbols_per_sample):
+            return torch.stack([self._forward_single(inp) for inp in inputs])
+
+        stacked_tensors = []
+        for i in range(n_positions):
+            column = [self.sym2weight[syms[i]] for syms in symbols_per_sample]
+            ref_shape = column[0].shape
+            if any(t.shape != ref_shape for t in column[1:]):
+                return torch.stack([self._forward_single(inp) for inp in inputs])
+            stacked_tensors.append(self._unit_rescale(torch.stack(column, dim=0), batched=True))
+
+        batched_expr = self._batched_expr(einsum_expr)
+        shapes = tuple(t.shape for t in stacked_tensors)
+        key = (batched_expr, shapes)
+        expr_obj = self._expression_cache.get(key)
+        if expr_obj is None:
+            import opt_einsum
+
+            expr_obj = opt_einsum.contract_expression(batched_expr, *shapes)
+            self._expression_cache[key] = expr_obj
+
+        x = expr_obj(*stacked_tensors)  # [B, out_dim]
+        if x.ndim != 2:
+            raise RuntimeError(f"Expected 2D batched output, got shape {tuple(x.shape)}\n  diagram: {einsum_expr}")
+        return nn.functional.normalize(x, dim=-1, eps=1e-35)
 
     def _get_path(self, einsum_expr: str, tensors: list[torch.Tensor]) -> list | None:
         """Recompute a contraction path from actual tensor shapes via opt_einsum branch-2.
@@ -201,7 +283,7 @@ class EinsumModel(nn.Module):
             # pre-normalisation output, so the normalised embedding direction is
             # identical. (NLC mode is left untouched: its gate is non-linear, so
             # rescaling inputs would change the represented function.)
-            tensors = [t / (t.norm() + 1e-8) for t in tensors]
+            tensors = [self._unit_rescale(t, batched=False) for t in tensors]
 
         try:
             if self.non_linear_contractions:
@@ -233,6 +315,16 @@ class EinsumModel(nn.Module):
         return nn.functional.normalize(x, dim=-1, eps=1e-35)
 
     def forward(self, inputs: List[tuple[str, List[Symbol]]]) -> torch.Tensor:
+        # Fast path: linear mode, batch size > 1, and every sample shares the same
+        # diagram (e.g. batches built by TopologyBucketSampler) — one contraction
+        # call for the whole batch instead of one per sample. NLC mode always uses
+        # the per-sample path (its gate is non-linear, so batching would change the
+        # represented function); heterogeneous batches (default random batching,
+        # eval loaders, etc.) fall back seamlessly too.
+        if not self.non_linear_contractions and len(inputs) > 1 and len({inp[0] for inp in inputs}) == 1:
+            self.fast_path_batches += 1
+            return self._forward_batch_same_topology(inputs)
+        self.fallback_batches += 1
         return torch.stack([self._forward_single(input) for input in inputs])
 
     def state_dict(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:

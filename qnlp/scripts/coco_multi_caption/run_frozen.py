@@ -30,7 +30,9 @@ from qnlp.core.training.batch_utils import drop_nonfinite_rows
 from qnlp.core.training.losses.single_caption import SingleCaptionLoss
 from qnlp.core.training.retrieval_eval import retrieval_metrics
 from qnlp.discoviz.models.einsum_model import EinsumModel
+from qnlp.domain.datasets.dataloader import _diagrams_for
 from qnlp.domain.datasets.dataset import _deserialize_symbols, collect_symbol_sizes
+from qnlp.domain.datasets.topology_bucket_sampler import TopologyBucketSampler
 from qnlp.scripts.coco_multi_caption.config import ExperimentConfig
 from qnlp.scripts.coco_multi_caption.evaluate import (
     evaluate_all_benchmarks_frozen,
@@ -114,7 +116,13 @@ def _collate(batch: list[dict]) -> dict:
     return {k: [item[k] for item in batch] for k in batch[0]}
 
 
-def _dedup_loader(ds: FrozenCOCODataset, batch_size: int, max_images: int | None = None) -> DataLoader:
+def _dedup_loader(
+    ds: FrozenCOCODataset,
+    batch_size: int,
+    max_images: int | None = None,
+    topology_bucketing: bool = False,
+    min_bucket_size: int = 64,
+) -> DataLoader:
     """One caption per unique sample_id — required for retrieval eval."""
     seen: set[str] = set()
     indices: list[int] = []
@@ -124,8 +132,19 @@ def _dedup_loader(ds: FrozenCOCODataset, batch_size: int, max_images: int | None
             indices.append(i)
             if max_images is not None and len(indices) >= max_images:
                 break
+    subset = Subset(ds, indices)
+    if topology_bucketing:
+        # tail_fraction is hardcoded to 1.0 — val/test must never truncate.
+        sampler = TopologyBucketSampler(
+            _diagrams_for(subset, "diagram"),
+            batch_size=batch_size,
+            min_bucket_size=min_bucket_size,
+            tail_fraction=1.0,
+            shuffle=False,
+        )
+        return DataLoader(subset, batch_sampler=sampler, collate_fn=_collate, num_workers=0)
     return DataLoader(
-        Subset(ds, indices),
+        subset,
         batch_size=batch_size,
         shuffle=False,
         collate_fn=_collate,

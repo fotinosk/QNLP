@@ -27,7 +27,9 @@ from qnlp.core.training.batch_utils import drop_nonfinite_rows
 from qnlp.core.training.losses.single_caption import SingleCaptionLoss
 from qnlp.core.training.retrieval_eval import retrieval_metrics
 from qnlp.discoviz.models.einsum_model import EinsumModel
+from qnlp.domain.datasets.dataloader import _diagrams_for
 from qnlp.domain.datasets.dataset import _deserialize_symbols, collect_symbol_sizes
+from qnlp.domain.datasets.topology_bucket_sampler import TopologyBucketSampler, set_loader_epoch
 from qnlp.scripts.coco_multi_caption.evaluate import (
     evaluate_all_benchmarks_frozen,
     log_banner,
@@ -113,7 +115,13 @@ def _collate(batch: list[dict]) -> dict:
     return {k: [item[k] for item in batch] for k in batch[0]}
 
 
-def _dedup_loader(ds: FrozenCOCODataset, batch_size: int, max_images: int | None = None) -> DataLoader:
+def _dedup_loader(
+    ds: FrozenCOCODataset,
+    batch_size: int,
+    max_images: int | None = None,
+    topology_bucketing: bool = False,
+    min_bucket_size: int = 64,
+) -> DataLoader:
     """One caption per unique sample_id — required for retrieval eval."""
     seen: set[str] = set()
     indices: list[int] = []
@@ -123,8 +131,19 @@ def _dedup_loader(ds: FrozenCOCODataset, batch_size: int, max_images: int | None
             indices.append(i)
             if max_images is not None and len(indices) >= max_images:
                 break
+    subset = Subset(ds, indices)
+    if topology_bucketing:
+        # tail_fraction is hardcoded to 1.0 — val/test must never truncate.
+        sampler = TopologyBucketSampler(
+            _diagrams_for(subset, "diagram"),
+            batch_size=batch_size,
+            min_bucket_size=min_bucket_size,
+            tail_fraction=1.0,
+            shuffle=False,
+        )
+        return DataLoader(subset, batch_sampler=sampler, collate_fn=_collate, num_workers=0)
     return DataLoader(
-        Subset(ds, indices),
+        subset,
         batch_size=batch_size,
         shuffle=False,
         collate_fn=_collate,
@@ -159,16 +178,31 @@ def _build_loaders(cfg: ExperimentConfig) -> tuple[dict[str, DataLoader], dict[s
         split: FrozenCOCODataset(DATASETS_PATH / f"{dataset_name}_{split}.parquet", cfg.use_non_linear_contractions)
         for split in ("train", "val", "test")
     }
-    loaders = {
-        "train": DataLoader(
+    # Batching by shared diagram topology only helps EinsumModel's batched fast
+    # path in linear mode — NLC always uses the per-sample path.
+    topology_bucketing = not cfg.use_non_linear_contractions
+    if topology_bucketing:
+        train_sampler = TopologyBucketSampler(
+            _diagrams_for(datasets["train"], "diagram"),
+            batch_size=cfg.batch_size,
+            tail_fraction=1.0,
+            shuffle=True,
+        )
+        train_loader = DataLoader(datasets["train"], batch_sampler=train_sampler, collate_fn=_collate, num_workers=0)
+    else:
+        train_loader = DataLoader(
             datasets["train"],
             batch_size=cfg.batch_size,
             shuffle=True,
             collate_fn=_collate,
             num_workers=0,
+        )
+    loaders = {
+        "train": train_loader,
+        "val": _dedup_loader(datasets["val"], cfg.batch_size, topology_bucketing=topology_bucketing),
+        "test": _dedup_loader(
+            datasets["test"], cfg.batch_size, max_images=TEST_SIZE, topology_bucketing=topology_bucketing
         ),
-        "val": _dedup_loader(datasets["val"], cfg.batch_size),
-        "test": _dedup_loader(datasets["test"], cfg.batch_size, max_images=TEST_SIZE),
     }
     return loaders, datasets
 
@@ -301,6 +335,11 @@ def run() -> None:
 
     with setup_mlflow_run(EXPERIMENT_NAME, params, 8080) as run:
         for epoch in range(1, cfg.max_epochs + 1):
+            # TopologyBucketSampler (if in use) needs the epoch so batch order/
+            # composition varies run-to-run. No-op for a plain batch_sampler.
+            set_loader_epoch(loaders["train"], epoch)
+            set_loader_epoch(loaders["val"], epoch)
+
             train_metrics = _run_epoch(
                 text_model,
                 text_head,
@@ -387,6 +426,11 @@ def run() -> None:
                 }
             )
             mlflow.log_artifact(str(checkpoint_path))
+
+        logger.info(
+            f"Forward path statistics: {text_model.fast_path_batches} batches on batched fast path, "
+            f"{text_model.fallback_batches} batches on sequential fallback path."
+        )
 
         send_training_finished_notification(
             {

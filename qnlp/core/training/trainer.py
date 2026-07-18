@@ -10,6 +10,7 @@ from torchmetrics import MeanMetric
 from tqdm import trange
 
 from qnlp.core.training.protocols import TrainingStep
+from qnlp.domain.datasets.topology_bucket_sampler import set_loader_epoch
 from qnlp.utils.early_stopping import EarlyStopping, ModelTrainingStatus
 from qnlp.utils.logging import setup_logger
 
@@ -97,6 +98,12 @@ class Trainer:
         for epoch in trange(1, self.max_epochs + 1, desc="Epochs"):
             if hasattr(self.step, "on_epoch_start"):
                 self.step.on_epoch_start(epoch)
+
+            # TopologyBucketSampler (or any future epoch-aware batch_sampler) needs
+            # to know the epoch so batch order/composition varies run-to-run instead
+            # of repeating the same grouping every epoch. No-op for a plain BatchSampler.
+            set_loader_epoch(self.train_loader, epoch)
+            set_loader_epoch(self.val_loader, epoch)
 
             train_metrics = self._run_epoch(self.train_loader, train=True)
             if mlflow.active_run():

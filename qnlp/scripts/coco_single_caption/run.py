@@ -88,6 +88,9 @@ def run():
         compiled_columns=COMPILED_COLUMNS,
         use_non_linear_contractions=cfg.use_non_linear_contractions,
         test_size=5000,
+        # Batching by shared diagram topology only helps EinsumModel's batched
+        # fast path in linear mode — NLC always uses the per-sample path.
+        topology_bucketing=not cfg.use_non_linear_contractions,
     )
     train_loader, val_loader, test_loader = loaders
     train_ds, val_ds, test_ds = datasets
@@ -221,6 +224,11 @@ def run():
                 if sc:
                     mlflow.log_metrics({f"sugarcrepe/{name}": sc["hard_neg_acc"]})
             mlflow.log_artifact(str(checkpoint_path))
+
+        logger.info(
+            f"Forward path statistics: {text_model.fast_path_batches} batches on batched fast path, "
+            f"{text_model.fallback_batches} batches on sequential fallback path."
+        )
 
         send_training_finished_notification(
             {
