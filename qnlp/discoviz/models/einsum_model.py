@@ -71,6 +71,8 @@ class EinsumModel(nn.Module):
         self.reset_parameters()
         self.sym2weight = self.compute_sym2weight()
         self._path_cache: dict[tuple, list | None] = {}
+        # Cache of pre-compiled ContractExpression graphs for linear-mode contraction.
+        self._expression_cache: dict[tuple, Any] = {}
 
     def _setup_contractions_function(self):
         if self.non_linear_contractions:
@@ -202,7 +204,18 @@ class EinsumModel(nn.Module):
             tensors = [t / (t.norm() + 1e-8) for t in tensors]
 
         try:
-            x = self.contractions_function(einsum_expr, tensors, path, gate=gate)
+            if self.non_linear_contractions:
+                x = self.contractions_function(einsum_expr, tensors, path, gate=gate)
+            else:
+                shapes = tuple(t.shape for t in tensors)
+                key = (einsum_expr, shapes)
+                expr_obj = self._expression_cache.get(key)
+                if expr_obj is None:
+                    import opt_einsum
+
+                    expr_obj = opt_einsum.contract_expression(einsum_expr, *shapes)
+                    self._expression_cache[key] = expr_obj
+                x = expr_obj(*tensors)
         except IntermediateTooLargeError:
             output_idx = einsum_expr.split("->")[1]
             size_map = {
@@ -217,7 +230,7 @@ class EinsumModel(nn.Module):
             raise RuntimeError(
                 f"Expected 1D output, got shape {tuple(x.shape)}\n  diagram: {einsum_expr}\n  symbol shapes: {shapes}"
             )
-        return nn.functional.normalize(x, dim=-1)
+        return nn.functional.normalize(x, dim=-1, eps=1e-35)
 
     def forward(self, inputs: List[tuple[str, List[Symbol]]]) -> torch.Tensor:
         return torch.stack([self._forward_single(input) for input in inputs])
