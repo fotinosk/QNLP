@@ -254,6 +254,11 @@ def run():
         }
         print_full_report(retrieval, benchmarks, report_info)
 
+        logger.info(
+            f"Forward path statistics: {text_model.fast_path_batches} batches on batched fast path, "
+            f"{text_model.fallback_batches} batches on sequential fallback path."
+        )
+
         if mlflow.active_run():
             mlflow.log_metrics({f"retrieval/{k}": v for k, v in retrieval.items()})
             wino = benchmarks.get("winoground")
