@@ -80,9 +80,13 @@ class EinsumModel(nn.Module):
         # plain (unbatched) einsum expression.
         self._batched_expr_cache: dict[str, str] = {}
         # Diagnostic counters: how many forward() calls used the batched
-        # same-topology fast path vs. the per-sample fallback.
+        # same-topology fast path vs. the per-sample fallback, and how many
+        # individual samples went through a grouped (batched) contraction vs.
+        # a one-sample sequential contraction.
         self.fast_path_batches = 0
         self.fallback_batches = 0
+        self.fast_path_samples = 0
+        self.fallback_samples = 0
         # Cache of per-symbol target Frobenius norms for the linear-mode weight-norm.
         self._weight_scale_cache: dict = {}
 
@@ -352,13 +356,40 @@ class EinsumModel(nn.Module):
         # diagram (e.g. batches built by TopologyBucketSampler) — one contraction
         # call for the whole batch instead of one per sample. NLC mode always uses
         # the per-sample path (its gate is non-linear, so batching would change the
-        # represented function); heterogeneous batches (default random batching,
-        # eval loaders, etc.) fall back seamlessly too.
-        if not self.non_linear_contractions and len(inputs) > 1 and len({inp[0] for inp in inputs}) == 1:
+        # represented function).
+        if self.non_linear_contractions or len(inputs) == 1:
+            self.fallback_batches += 1
+            self.fallback_samples += len(inputs)
+            return torch.stack([self._forward_single(input) for input in inputs])
+
+        groups: dict[str, list[int]] = {}
+        for i, inp in enumerate(inputs):
+            groups.setdefault(inp[0], []).append(i)
+
+        if len(groups) == 1:
             self.fast_path_batches += 1
+            self.fast_path_samples += len(inputs)
             return self._forward_batch_same_topology(inputs)
+
+        # Heterogeneous batch (tail batches from TopologyBucketSampler, default
+        # random batching, eval loaders, ...): contract per same-diagram GROUP
+        # rather than per sample. One opt_einsum call per unique diagram in the
+        # batch — per-call cost is roughly independent of group size (it's
+        # dispatch-bound for these small tensors), so this cuts the dominant
+        # per-sample dispatch cost by the mean group multiplicity. Samples whose
+        # diagram is unique within the batch still take the single-sample path.
         self.fallback_batches += 1
-        return torch.stack([self._forward_single(input) for input in inputs])
+        out: list[torch.Tensor | None] = [None] * len(inputs)
+        for idxs in groups.values():
+            if len(idxs) == 1:
+                self.fallback_samples += 1
+                out[idxs[0]] = self._forward_single(inputs[idxs[0]])
+            else:
+                self.fast_path_samples += len(idxs)
+                embeddings = self._forward_batch_same_topology([inputs[i] for i in idxs])
+                for row, i in enumerate(idxs):
+                    out[i] = embeddings[row]
+        return torch.stack(out)
 
     def state_dict(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         base = super().state_dict(*args, **kwargs)

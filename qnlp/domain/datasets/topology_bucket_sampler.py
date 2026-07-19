@@ -85,9 +85,13 @@ class TopologyBucketSampler(Sampler[list[int]]):
         self._head_buckets: dict[str, list[int]] = {
             d: idxs for d, idxs in buckets.items() if len(idxs) >= min_bucket_size
         }
-        self._tail_indices: list[int] = [
-            idx for idxs in buckets.values() if len(idxs) < min_bucket_size for idx in idxs
-        ]
+        # Tail rows kept grouped by diagram: mixed batches are laid out as
+        # contiguous same-diagram runs, so EinsumModel.forward can contract each
+        # run with ONE batched opt_einsum call instead of one call per sample
+        # (per-call cost is dispatch-bound and roughly independent of group
+        # size — this is what makes tail batches cheap, not just head ones).
+        self._tail_groups: list[list[int]] = [idxs for idxs in buckets.values() if len(idxs) < min_bucket_size]
+        self._tail_indices: list[int] = [idx for idxs in self._tail_groups for idx in idxs]
 
         n_head_rows = sum(len(v) for v in self._head_buckets.values())
         n_total = len(diagrams)
@@ -105,18 +109,21 @@ class TopologyBucketSampler(Sampler[list[int]]):
         """
         self._epoch = epoch
 
-    def _select_tail_indices(self, rng: random.Random) -> list[int]:
-        """Rows from below-threshold diagrams to include this epoch.
+    def _select_tail_groups(self, rng: random.Random) -> list[list[int]]:
+        """Same-diagram groups of rows from below-threshold diagrams to include
+        this epoch. Groups are kept intact (never split here) so same-diagram
+        rows stay contiguous within mixed batches — see __init__.
 
-        Today this always returns every tail row (no truncation). A later
-        revision can sample `tail_fraction` of self._tail_indices here, rotating
-        the subset using self._epoch so full coverage is guaranteed over
-        multiple epochs — the rest of the class does not need to change.
+        Today this always returns every tail group (no truncation). A later
+        revision can sample `tail_fraction` of the groups here, rotating the
+        subset using self._epoch so full coverage is guaranteed over multiple
+        epochs — the rest of the class does not need to change.
         """
         if self.tail_fraction >= 1.0:
-            return list(self._tail_indices)
+            return [list(g) for g in self._tail_groups]
         k = round(len(self._tail_indices) * self.tail_fraction)
-        return rng.sample(self._tail_indices, k)
+        selected = set(rng.sample(self._tail_indices, k))
+        return [kept for g in self._tail_groups if (kept := [i for i in g if i in selected])]
 
     def _n_chunks(self, n: int) -> int:
         if n == 0:
@@ -159,9 +166,15 @@ class TopologyBucketSampler(Sampler[list[int]]):
             batches.extend(self._chunk(pool))
 
         # Slow-path: mixed batches pooled from tail rows (all included today).
-        tail = self._select_tail_indices(rng)
+        # Shuffle at the GROUP level, keeping same-diagram rows contiguous, so
+        # each mixed batch is a sequence of same-diagram runs that forward()
+        # contracts with one batched call each instead of one call per sample.
+        tail_groups = self._select_tail_groups(rng)
         if self.shuffle:
-            rng.shuffle(tail)
+            rng.shuffle(tail_groups)
+            for g in tail_groups:
+                rng.shuffle(g)
+        tail = [idx for g in tail_groups for idx in g]
         batches.extend(self._chunk(tail))
 
         # Interleave pure and mixed batches so the epoch doesn't run all

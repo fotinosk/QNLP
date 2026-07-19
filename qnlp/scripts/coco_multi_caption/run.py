@@ -256,7 +256,9 @@ def run():
 
         logger.info(
             f"Forward path statistics: {text_model.fast_path_batches} batches on batched fast path, "
-            f"{text_model.fallback_batches} batches on sequential fallback path."
+            f"{text_model.fallback_batches} batches on sequential fallback path; "
+            f"{text_model.fast_path_samples} samples contracted in same-topology groups, "
+            f"{text_model.fallback_samples} samples contracted one-by-one."
         )
 
         if mlflow.active_run():

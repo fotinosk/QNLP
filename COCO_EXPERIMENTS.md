@@ -178,3 +178,17 @@ Remap at training time: `{constants.embedding_dim → cfg.embedding_dim, constan
 - Does the expressive model (per-symbol gates + word bypass) eventually converge or is 58 min/epoch a blocker?
 - Should text_weight_decay be increased to 0.05 to combat overfitting in NLC models?
 - Can lemmatisation (grouping inflected forms: run/runs/ran/running → run) further reduce effective vocabulary beyond what tied-noun achieves?
+
+---
+
+## 2026-07-19 — Training slowness root cause found: sequential tail-batch contractions
+
+**Question:** Why did the TopologyBucketSampler + batched-contraction fast path not reduce epoch time (still 40–70 min)?
+
+**Answer (evidence-based, from cluster logs + local measurement):** The ~20% "tail" rows (88,335 rows across 28,290 rare diagrams, per the sampler's own log) were still contracted **one opt_einsum call per sample** (~4–10 ms each, dispatch-bound), costing ~35–40 min/epoch — the entire epoch. Key evidence: frozen **val** (deduped ~11K mostly-tail rows, no backward, images cached) took only ~40 s, i.e. ~4 ms/sample, which scaled to the 88K-row train tail with backward reproduces the full epoch time. Fast-path batches cost seconds in total. Ruled out: data loading/deserialization (`num_workers=0` frozen loader measured at 0.0075 ms/row → 0.06 min/epoch), fp64 (prior benchmark), diagram-string canonicalization (expressions already canonical: 28,996 unique before and after).
+
+**Fix (landed on `coco-training-nlc`, lossless):**
+1. `TopologyBucketSampler` now lays out tail rows grouped by diagram (group-level shuffle) so same-diagram rows are contiguous within mixed batches.
+2. `EinsumModel.forward` now contracts heterogeneous batches **per same-diagram group** (one batched call per unique diagram in the batch) instead of per sample; singletons keep the single path. New counters: `fast_path_samples`/`fallback_samples`, logged by all 4 run scripts.
+
+Verified: forward bit-identical (0.0 diff) and grads at fp32 epsilon vs the per-sample loop; sampler coverage/contiguity/no-size-1-batch invariants hold. Expected: tail contraction calls per epoch 88,335 → ~28,290 (8,809 multi-groups, mean multiplicity 7.8, + 19,481 singletons) ≈ 3.1× fewer; predicted epoch ~40 min → ~15 min (frozen). Remaining floor is the 19,481 singleton rows (~8 min); the designed `tail_fraction < 1.0` rotation knob is the next lever if needed. Awaiting a short cluster run to confirm.
