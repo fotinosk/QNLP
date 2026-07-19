@@ -193,6 +193,38 @@ class EinsumModel(nn.Module):
         target = target.view(-1, *([1] * (stacked.ndim - 1)))
         return target * stacked / (norm + 1e-8)
 
+    def _prepare_rescaled_weights(self, inputs: list[tuple]) -> Dict[Symbol, torch.Tensor]:
+        """Rescale + fp64-cast every unique symbol used in the batch ONCE per
+        forward call, in a few shape-grouped batched ops, instead of once per
+        occurrence inside every contraction call. The per-call cost of a tail
+        contraction is dispatch-bound, and ~2/3 of its ops were the per-operand
+        `_rescale_single` + `.double()` preprocessing — recomputed even when the
+        same word appears many times in the batch. Same math, same op order
+        (rescale in the parameter dtype, then cast), so the contraction inputs
+        are bit-identical; reusing one rescaled node across occurrences just
+        makes autograd sum the per-use gradient contributions, which is exactly
+        what separate rescale subgraphs did. Valid only within a single forward
+        call (weights change between optimizer steps) — never cached across
+        calls. Linear mode only: NLC's gate is non-linear, so rescaling its
+        inputs would change the represented function."""
+        unique: dict[Symbol, torch.Tensor] = {}
+        for inp in inputs:
+            for sym in inp[1]:
+                if sym not in unique:
+                    unique[sym] = self.sym2weight[sym]
+
+        by_shape: dict[tuple[int, ...], list[Symbol]] = {}
+        for sym, w in unique.items():
+            by_shape.setdefault(tuple(w.shape), []).append(sym)
+
+        prepared: dict[Symbol, torch.Tensor] = {}
+        for syms in by_shape.values():
+            stacked = torch.stack([unique[s] for s in syms], dim=0)
+            rescaled = self._rescale_batched(stacked, syms).double()
+            for row, sym in enumerate(syms):
+                prepared[sym] = rescaled[row]
+        return prepared
+
     def _batched_expr(self, einsum_expr: str) -> str:
         """Rewrite "ab,bc->ac" into "zab,zbc->zac" (add a shared leading batch
         index to every operand and the output), picking a letter not already
@@ -209,10 +241,15 @@ class EinsumModel(nn.Module):
         self._batched_expr_cache[einsum_expr] = batched
         return batched
 
-    def _forward_batch_same_topology(self, inputs: list[tuple]) -> torch.Tensor:
+    def _forward_batch_same_topology(
+        self, inputs: list[tuple], prepared: Dict[Symbol, torch.Tensor] | None = None
+    ) -> torch.Tensor:
         """Batched fast path: every input shares the same einsum expression
         (diagram), so this runs ONE opt_einsum call across the whole batch
         instead of one call per sample. Linear mode only — see forward().
+
+        `prepared` (from `_prepare_rescaled_weights`) maps each symbol to its
+        already-rescaled fp64 tensor, skipping the per-operand rescale/cast.
 
         Relies on an assumption verified offline against the actual training
         data (not just assumed): for any two samples sharing the same
@@ -226,17 +263,21 @@ class EinsumModel(nn.Module):
         n_positions = len(symbols_per_sample[0])
 
         if any(len(syms) != n_positions for syms in symbols_per_sample):
-            return torch.stack([self._forward_single(inp) for inp in inputs])
+            return torch.stack([self._forward_single(inp, prepared) for inp in inputs])
 
         orig_dtype = self.sym2weight[symbols_per_sample[0][0]].dtype
+        source = prepared if prepared is not None else self.sym2weight
         stacked_tensors = []
         for i in range(n_positions):
-            column = [self.sym2weight[syms[i]] for syms in symbols_per_sample]
+            column = [source[syms[i]] for syms in symbols_per_sample]
             ref_shape = column[0].shape
             if any(t.shape != ref_shape for t in column[1:]):
-                return torch.stack([self._forward_single(inp) for inp in inputs])
-            syms_at_position = [syms[i] for syms in symbols_per_sample]
-            stacked_tensors.append(self._rescale_batched(torch.stack(column, dim=0), syms_at_position))
+                return torch.stack([self._forward_single(inp, prepared) for inp in inputs])
+            stacked = torch.stack(column, dim=0)
+            if prepared is None:
+                syms_at_position = [syms[i] for syms in symbols_per_sample]
+                stacked = self._rescale_batched(stacked, syms_at_position).double()
+            stacked_tensors.append(stacked)
 
         batched_expr = self._batched_expr(einsum_expr)
         shapes = tuple(t.shape for t in stacked_tensors)
@@ -254,8 +295,10 @@ class EinsumModel(nn.Module):
         # ceiling as training correlates weight directions. float64 gives ~270
         # orders of magnitude more headroom — same opt_einsum path/algorithm,
         # pure dtype change. Cast back to the model dtype only after
-        # normalize, whose output is safely bounded in [-1, 1].
-        x = expr_obj(*[t.double() for t in stacked_tensors])  # [B, out_dim]
+        # normalize, whose output is safely bounded in [-1, 1]. (The rescale +
+        # fp64 cast happens either in _prepare_rescaled_weights — once per
+        # unique symbol per forward — or inline above when called standalone.)
+        x = expr_obj(*stacked_tensors)  # [B, out_dim]
         if x.ndim != 2:
             raise RuntimeError(f"Expected 2D batched output, got shape {tuple(x.shape)}\n  diagram: {einsum_expr}")
         return nn.functional.normalize(x, dim=-1, eps=1e-35).to(orig_dtype)
@@ -280,11 +323,14 @@ class EinsumModel(nn.Module):
                 self._path_cache[key] = None
         return self._path_cache[key]
 
-    def _forward_single(self, input: tuple) -> torch.Tensor:
+    def _forward_single(self, input: tuple, prepared: Dict[Symbol, torch.Tensor] | None = None) -> torch.Tensor:
         # input = (einsum_expr, symbols) for linear, or (einsum_expr, symbols, path) for NLC.
+        # `prepared` (linear mode only) maps symbols to already-rescaled fp64
+        # tensors from _prepare_rescaled_weights, skipping per-operand work here.
         einsum_expr, symbols = input[0], input[1]
         stored_path = input[2] if len(input) > 2 else None
 
+        orig_dtype = self.sym2weight[symbols[0]].dtype if symbols else torch.get_default_dtype()
         tensors = [self.sym2weight[sym] for sym in symbols]
         gate = self.nonlinear_gate.clamp(min=0.1) if self.non_linear_contractions else None
 
@@ -317,8 +363,13 @@ class EinsumModel(nn.Module):
             # runs in float64 (below) for headroom against overflow as training
             # correlates weight directions. (NLC mode is left untouched: its
             # gate is non-linear, so rescaling inputs would change the
-            # represented function.)
-            tensors = [self._rescale_single(t, sym) for sym, t in zip(symbols, tensors)]
+            # represented function.) When `prepared` is given, both the rescale
+            # and the fp64 cast already happened once per unique symbol in
+            # _prepare_rescaled_weights.
+            if prepared is not None:
+                tensors = [prepared[sym] for sym in symbols]
+            else:
+                tensors = [self._rescale_single(t, sym).double() for sym, t in zip(symbols, tensors)]
 
         try:
             if self.non_linear_contractions:
@@ -333,7 +384,7 @@ class EinsumModel(nn.Module):
                     expr_obj = opt_einsum.contract_expression(einsum_expr, *shapes)
                     self._expression_cache[key] = expr_obj
                 # float64 contraction — see _rescale_single docstring.
-                x = expr_obj(*[t.double() for t in tensors])
+                x = expr_obj(*tensors)
         except IntermediateTooLargeError:
             output_idx = einsum_expr.split("->")[1]
             size_map = {
@@ -342,14 +393,14 @@ class EinsumModel(nn.Module):
                 for c, dim in zip(repr_, t.shape)
             }
             out_dim = size_map[output_idx[0]] if output_idx else 1
-            return torch.full((out_dim,), float("nan"), device=tensors[0].device, dtype=tensors[0].dtype)
+            return torch.full((out_dim,), float("nan"), device=tensors[0].device, dtype=orig_dtype)
         if x.ndim != 1:
             shapes = {str(sym): tuple(self.sym2weight[sym].shape) for sym in symbols}
             raise RuntimeError(
                 f"Expected 1D output, got shape {tuple(x.shape)}\n  diagram: {einsum_expr}\n  symbol shapes: {shapes}"
             )
         result = nn.functional.normalize(x, dim=-1, eps=1e-35)
-        return result.to(tensors[0].dtype) if not self.non_linear_contractions else result
+        return result.to(orig_dtype) if not self.non_linear_contractions else result
 
     def forward(self, inputs: List[tuple[str, List[Symbol]]]) -> torch.Tensor:
         # Fast path: linear mode, batch size > 1, and every sample shares the same
@@ -357,10 +408,19 @@ class EinsumModel(nn.Module):
         # call for the whole batch instead of one per sample. NLC mode always uses
         # the per-sample path (its gate is non-linear, so batching would change the
         # represented function).
-        if self.non_linear_contractions or len(inputs) == 1:
+        if self.non_linear_contractions:
             self.fallback_batches += 1
             self.fallback_samples += len(inputs)
             return torch.stack([self._forward_single(input) for input in inputs])
+
+        # Rescale + fp64-cast each unique symbol once for the whole batch (a few
+        # shape-grouped batched ops) instead of per occurrence in every call.
+        prepared = self._prepare_rescaled_weights(inputs)
+
+        if len(inputs) == 1:
+            self.fallback_batches += 1
+            self.fallback_samples += 1
+            return torch.stack([self._forward_single(inputs[0], prepared)])
 
         groups: dict[str, list[int]] = {}
         for i, inp in enumerate(inputs):
@@ -369,7 +429,7 @@ class EinsumModel(nn.Module):
         if len(groups) == 1:
             self.fast_path_batches += 1
             self.fast_path_samples += len(inputs)
-            return self._forward_batch_same_topology(inputs)
+            return self._forward_batch_same_topology(inputs, prepared)
 
         # Heterogeneous batch (tail batches from TopologyBucketSampler, default
         # random batching, eval loaders, ...): contract per same-diagram GROUP
@@ -383,10 +443,10 @@ class EinsumModel(nn.Module):
         for idxs in groups.values():
             if len(idxs) == 1:
                 self.fallback_samples += 1
-                out[idxs[0]] = self._forward_single(inputs[idxs[0]])
+                out[idxs[0]] = self._forward_single(inputs[idxs[0]], prepared)
             else:
                 self.fast_path_samples += len(idxs)
-                embeddings = self._forward_batch_same_topology([inputs[i] for i in idxs])
+                embeddings = self._forward_batch_same_topology([inputs[i] for i in idxs], prepared)
                 for row, i in enumerate(idxs):
                     out[i] = embeddings[row]
         return torch.stack(out)

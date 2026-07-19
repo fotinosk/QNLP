@@ -276,6 +276,11 @@ def run() -> None:
     set_seed()
     device = get_device()
 
+    logger.info(
+        "SPEED-OPTIMIZED BUILD (2026-07-19): diagram-grouped tail batches + per-forward "
+        "prepared (rescaled fp64) weights. Compare epoch times against earlier runs."
+    )
+
     loaders, datasets = _build_loaders(cfg)
     train_ds, val_ds, test_ds = datasets["train"], datasets["val"], datasets["test"]
     logger.info(

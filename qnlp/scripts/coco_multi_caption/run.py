@@ -117,6 +117,11 @@ def run():
     set_seed()
     device = get_device()
 
+    logger.info(
+        "SPEED-OPTIMIZED BUILD (2026-07-19): diagram-grouped tail batches + per-forward "
+        "prepared (rescaled fp64) weights. Compare epoch times against earlier runs."
+    )
+
     logger.info("========================================")
     logger.info("Experiment config:")
     for k, v in cfg.model_dump().items():
