@@ -62,6 +62,13 @@ class TopologyBucketSampler(Sampler[list[int]]):
     ):
         if not 0.0 <= tail_fraction <= 1.0:
             raise ValueError(f"tail_fraction must be in [0, 1], got {tail_fraction}")
+        if min_bucket_size < 2:
+            # A head bucket's total size can never be smaller than min_bucket_size.
+            # Below 2, a bucket whose entire size is 1 has no previous chunk to
+            # merge its degenerate singleton batch into (see _chunk) — that batch
+            # would reach an InfoNCE-style loss and produce NaN (S[~eye] is empty
+            # for B=1). No caller in this codebase sets this below the default 64.
+            raise ValueError(f"min_bucket_size must be >= 2, got {min_bucket_size}")
 
         self.batch_size = batch_size
         self.min_bucket_size = min_bucket_size
@@ -114,12 +121,30 @@ class TopologyBucketSampler(Sampler[list[int]]):
     def _n_chunks(self, n: int) -> int:
         if n == 0:
             return 0
-        return n // self.batch_size if self.drop_last else -(-n // self.batch_size)
+        if self.drop_last:
+            return n // self.batch_size
+        q, r = divmod(n, self.batch_size)
+        if r == 0:
+            return q
+        if r == 1 and q >= 1:
+            return q  # remainder of 1 gets merged into the last full chunk, not its own
+        return q + 1
 
     def _chunk(self, indices: list[int]) -> list[list[int]]:
         chunks = [indices[i : i + self.batch_size] for i in range(0, len(indices), self.batch_size)]
-        if self.drop_last and chunks and len(chunks[-1]) < self.batch_size:
-            chunks.pop()
+        if self.drop_last:
+            if chunks and len(chunks[-1]) < self.batch_size:
+                chunks.pop()
+            return chunks
+        # Avoid a degenerate final batch of size 1: InfoNCE-style losses compute
+        # an off-diagonal mean (S[~eye]) which is EMPTY for a batch of 1, and
+        # .mean() of an empty tensor is NaN — poisoning that epoch's accumulated
+        # metrics. Per-bucket chunking (unlike plain random batching, which only
+        # ever produces one undersized batch per epoch) makes this common: every
+        # head bucket gets its own remainder. Merge a size-1 remainder into the
+        # previous chunk instead of yielding it standalone.
+        if len(chunks) > 1 and len(chunks[-1]) < 2:
+            chunks[-2].extend(chunks.pop())
         return chunks
 
     def __iter__(self) -> Iterator[list[int]]:

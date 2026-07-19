@@ -83,6 +83,8 @@ class EinsumModel(nn.Module):
         # same-topology fast path vs. the per-sample fallback.
         self.fast_path_batches = 0
         self.fallback_batches = 0
+        # Cache of per-symbol target Frobenius norms for the linear-mode weight-norm.
+        self._weight_scale_cache: dict = {}
 
     def _setup_contractions_function(self):
         if self.non_linear_contractions:
@@ -146,19 +148,46 @@ class EinsumModel(nn.Module):
 
         self.sym2weight = self.compute_sym2weight()
 
-    @staticmethod
-    def _unit_rescale(t: torch.Tensor, batched: bool) -> torch.Tensor:
-        """Rescale a linear-mode symbol tensor to unit Frobenius norm.
+    def _target_norm(self, sym: Symbol) -> float:
+        """Frobenius norm the init would give this symbol's tensor.
 
-        Single shared formula for both the per-sample path (batched=False, norm
-        over every dim) and the batched same-topology path (batched=True, norm
-        over every dim except the leading batch dim, so each batch element is
-        rescaled independently). Kept as one method so a future change to the
-        rescale formula can't drift between the two call sites.
-        """
-        dims = tuple(range(1, t.ndim)) if batched else tuple(range(t.ndim))
-        norm = torch.linalg.vector_norm(t, ord=2, dim=dims, keepdim=True)
-        return t / (norm + 1e-8)
+        For uniform(-b, b) the per-element std is b/sqrt(3), so the expected
+        Frobenius norm is sqrt(numel) * b/sqrt(3). Cached (depends only on shape
+        and directed_cod, which are fixed per symbol)."""
+        cached = self._weight_scale_cache.get(sym)
+        if cached is None:
+            w = self.sym2weight[sym]
+            std = _init_uniform_bound(sym.directed_cod) / (3.0**0.5)
+            cached = (w.numel() ** 0.5) * std
+            self._weight_scale_cache[sym] = cached
+        return cached
+
+    def _rescale_single(self, t: torch.Tensor, sym: Symbol) -> torch.Tensor:
+        """Rescale one linear-mode symbol tensor to its expected init Frobenius
+        norm before the contraction. The raw parameter is never mutated — this
+        is a functional reparameterisation in the forward graph, so gradients
+        flow through it. Restores the O(1)-typical-magnitude calibration
+        `_init_uniform_bound` was tuned for (unlike pinning every symbol to an
+        arbitrary constant, which either overflows or underflows depending on
+        chain length). The contraction itself runs in float64 (see
+        `_forward_single`/`_forward_batch_same_topology`) so the wider dynamic
+        range absorbs residual drift from weight growth or correlated
+        (non-random) directions during training, without touching the
+        opt_einsum path or algorithm. Because the contraction is multilinear
+        and the output is finally L2-normalised, per-symbol scale is a gauge
+        freedom — this leaves the normalised embedding direction unaffected."""
+        norm = torch.linalg.vector_norm(t)
+        return self._target_norm(sym) * t / (norm + 1e-8)
+
+    def _rescale_batched(self, stacked: torch.Tensor, syms: List[Symbol]) -> torch.Tensor:
+        """Same rescale as `_rescale_single`, but for a [B, *shape] stack where
+        each row may be a DIFFERENT symbol/word — so each row gets its OWN
+        target norm, not a single shared one."""
+        dims = tuple(range(1, stacked.ndim))
+        norm = torch.linalg.vector_norm(stacked, ord=2, dim=dims, keepdim=True)
+        target = torch.tensor([self._target_norm(s) for s in syms], device=stacked.device, dtype=stacked.dtype)
+        target = target.view(-1, *([1] * (stacked.ndim - 1)))
+        return target * stacked / (norm + 1e-8)
 
     def _batched_expr(self, einsum_expr: str) -> str:
         """Rewrite "ab,bc->ac" into "zab,zbc->zac" (add a shared leading batch
@@ -195,13 +224,15 @@ class EinsumModel(nn.Module):
         if any(len(syms) != n_positions for syms in symbols_per_sample):
             return torch.stack([self._forward_single(inp) for inp in inputs])
 
+        orig_dtype = self.sym2weight[symbols_per_sample[0][0]].dtype
         stacked_tensors = []
         for i in range(n_positions):
             column = [self.sym2weight[syms[i]] for syms in symbols_per_sample]
             ref_shape = column[0].shape
             if any(t.shape != ref_shape for t in column[1:]):
                 return torch.stack([self._forward_single(inp) for inp in inputs])
-            stacked_tensors.append(self._unit_rescale(torch.stack(column, dim=0), batched=True))
+            syms_at_position = [syms[i] for syms in symbols_per_sample]
+            stacked_tensors.append(self._rescale_batched(torch.stack(column, dim=0), syms_at_position))
 
         batched_expr = self._batched_expr(einsum_expr)
         shapes = tuple(t.shape for t in stacked_tensors)
@@ -213,10 +244,17 @@ class EinsumModel(nn.Module):
             expr_obj = opt_einsum.contract_expression(batched_expr, *shapes)
             self._expression_cache[key] = expr_obj
 
-        x = expr_obj(*stacked_tensors)  # [B, out_dim]
+        # Contract (and normalise) in float64: with per-symbol target-norm
+        # scaling restored, per-tensor magnitudes are back to ~O(100)s, and a
+        # chain of a dozen-plus such tensors can drift past float32's overflow
+        # ceiling as training correlates weight directions. float64 gives ~270
+        # orders of magnitude more headroom — same opt_einsum path/algorithm,
+        # pure dtype change. Cast back to the model dtype only after
+        # normalize, whose output is safely bounded in [-1, 1].
+        x = expr_obj(*[t.double() for t in stacked_tensors])  # [B, out_dim]
         if x.ndim != 2:
             raise RuntimeError(f"Expected 2D batched output, got shape {tuple(x.shape)}\n  diagram: {einsum_expr}")
-        return nn.functional.normalize(x, dim=-1, eps=1e-35)
+        return nn.functional.normalize(x, dim=-1, eps=1e-35).to(orig_dtype)
 
     def _get_path(self, einsum_expr: str, tensors: list[torch.Tensor]) -> list | None:
         """Recompute a contraction path from actual tensor shapes via opt_einsum branch-2.
@@ -268,22 +306,15 @@ class EinsumModel(nn.Module):
                 return torch.full((out_dim,), float("nan"), device=tensors[0].device, dtype=tensors[0].dtype)
         else:
             path = None
-            # Weight-norm layer (linear mode only): rescale each input tensor to UNIT
-            # Frobenius norm before the contraction. The raw parameters are never
-            # mutated — this is a functional reparameterisation in the forward graph,
-            # so gradients flow through it.
-            #
-            # Frobenius norm is submultiplicative under tensor contraction
-            # (‖A·B‖_F ≤ ‖A‖_F‖B‖_F), so with every input at unit norm the output —
-            # and every opt_einsum intermediate — is bounded by 1 and can never
-            # overflow float32, no matter how training aligns the weight directions.
-            # Because the contraction is multilinear and the output is finally
-            # L2-normalised, the per-symbol scale is a gauge freedom: unit-norm
-            # scaling differs from any other choice only by a constant scalar on the
-            # pre-normalisation output, so the normalised embedding direction is
-            # identical. (NLC mode is left untouched: its gate is non-linear, so
-            # rescaling inputs would change the represented function.)
-            tensors = [self._unit_rescale(t, batched=False) for t in tensors]
+            # Weight-norm layer (linear mode only): rescale each input tensor to
+            # its expected init Frobenius norm before the contraction — see
+            # _rescale_single for why (restores the O(1)-typical-magnitude
+            # calibration rather than an arbitrary constant). The contraction
+            # runs in float64 (below) for headroom against overflow as training
+            # correlates weight directions. (NLC mode is left untouched: its
+            # gate is non-linear, so rescaling inputs would change the
+            # represented function.)
+            tensors = [self._rescale_single(t, sym) for sym, t in zip(symbols, tensors)]
 
         try:
             if self.non_linear_contractions:
@@ -297,7 +328,8 @@ class EinsumModel(nn.Module):
 
                     expr_obj = opt_einsum.contract_expression(einsum_expr, *shapes)
                     self._expression_cache[key] = expr_obj
-                x = expr_obj(*tensors)
+                # float64 contraction — see _rescale_single docstring.
+                x = expr_obj(*[t.double() for t in tensors])
         except IntermediateTooLargeError:
             output_idx = einsum_expr.split("->")[1]
             size_map = {
@@ -312,7 +344,8 @@ class EinsumModel(nn.Module):
             raise RuntimeError(
                 f"Expected 1D output, got shape {tuple(x.shape)}\n  diagram: {einsum_expr}\n  symbol shapes: {shapes}"
             )
-        return nn.functional.normalize(x, dim=-1, eps=1e-35)
+        result = nn.functional.normalize(x, dim=-1, eps=1e-35)
+        return result.to(tensors[0].dtype) if not self.non_linear_contractions else result
 
     def forward(self, inputs: List[tuple[str, List[Symbol]]]) -> torch.Tensor:
         # Fast path: linear mode, batch size > 1, and every sample shares the same
@@ -335,6 +368,13 @@ class EinsumModel(nn.Module):
         return base
 
     def load_state_dict(self, state_dict: Dict[str, Any], strict: bool = True):
+        # Preserve whatever device (and dtype) the model was already on — the
+        # weights are about to be replaced wholesale below, and torch.empty()
+        # defaults to CPU, which would silently strand the model on CPU on
+        # every reload regardless of an earlier .to(device) call.
+        device = self.weights[0].device if len(self.weights) > 0 else torch.device("cpu")
+        dtype = self.weights[0].dtype if len(self.weights) > 0 else torch.get_default_dtype()
+
         if "symbols_list" in state_dict:
             loaded_symbols = state_dict.pop("symbols_list")
             self.symbols = list(loaded_symbols)
@@ -345,7 +385,9 @@ class EinsumModel(nn.Module):
             self.non_linear_contractions = state_dict.pop("non_linear_contractions")
             self._setup_contractions_function()
 
-        self.weights = nn.ParameterList([nn.Parameter(torch.empty(size)) for size in self.sizes])
+        self.weights = nn.ParameterList(
+            [nn.Parameter(torch.empty(size, device=device, dtype=dtype)) for size in self.sizes]
+        )
 
         self.sym2weight = self.compute_sym2weight()
         self._path_cache = {}
