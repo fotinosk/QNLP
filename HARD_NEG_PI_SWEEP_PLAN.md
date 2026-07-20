@@ -220,6 +220,13 @@ cluster).** Files:
   `coco_hard_neg_specs_smoke.parquet`, skips validation.
 - Verified locally: swap enumeration produces correct obj + attr swaps on a synthetic
   lambeq CCGTree ('A red dog chases a small cat' → dog↔cat obj, red↔small attr).
+- RESUMABLE (added 2026-07-21): captions sorted by text_hash, processed in 50k-caption
+  chunks, each written atomically (tmp+rename) to
+  `data/datasets/coco_hard_neg_specs_parts/part_NNNNN.parquet`; on restart existing
+  parts are skipped, so a killed job resumes at the first missing part. CLIP h-scoring
+  runs once at the end over all parts; final output also written atomically. Parts are
+  KEPT after success (cheap; delete `*_parts/` manually to force full regeneration —
+  required if the input parquets ever change, since chunk boundaries are content-based).
 - TO RUN (user, on cluster): sync repo to PROJECT_DIR, then
   `qsub -v SMOKE=5000 scripts/submit_generate_hard_negatives.sh` first; check the log
   (cache-miss count MUST be ~0, coverage/h stats sane), then full

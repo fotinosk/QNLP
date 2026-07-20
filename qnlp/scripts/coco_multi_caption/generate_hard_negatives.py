@@ -220,6 +220,33 @@ def fetch_tree(caches: list[diskcache.Cache], tokenizer, text: str):
     return tokens, None
 
 
+CHUNK = 50_000  # captions per resumable part-file
+
+
+def _enumerate_chunk(chunk_df: pl.DataFrame, caches, tokenizer) -> tuple[list[tuple], int]:
+    """Swap-enumerate one chunk of (text_hash, processed_text) rows.
+    Returns (rows, cache_misses); rows = (text_hash, processed_text, neg_text, t, w1, w2)."""
+    rows: list[tuple] = []
+    misses = 0
+    for text_hash, text in chunk_df.iter_rows():
+        tokens, tree = fetch_tree(caches, tokenizer, text)
+        if tree is None:
+            misses += 1
+            continue
+        leaves = _leaves(tree)
+        lemmas = tokenizer.lemmatize(tokens) if len(tokens) == len(leaves) else [None] * len(leaves)
+        order = [LeafRecord(l.text, lemma, str(l.biclosed_type)) for l, lemma in zip(leaves, lemmas)]
+        order_index = {id(l): k for k, l in enumerate(leaves)}
+
+        obj = object_swaps(order)
+        attr = attribute_swaps(tree, order_index, order)
+        for t, swaps in (("obj", obj), ("attr", attr)):
+            for i, j in swaps:
+                w1, w2 = sorted((order[i].norm, order[j].norm))
+                rows.append((text_hash, text, materialize(order, i, j), t, w1, w2))
+    return rows, misses
+
+
 def run(parquets: list[str], output: str, limit: int | None = None) -> None:
     from qnlp.discoviz.models.bobcat_text_processor import Tokenizer
 
@@ -234,60 +261,63 @@ def run(parquets: list[str], output: str, limit: int | None = None) -> None:
     if not caches:
         raise RuntimeError("No bobcat diskcache available — run on the cluster from PROJECT_DIR.")
 
-    df = load_unique_captions(parquets)
+    # Deterministic order so chunk boundaries are identical across restarts.
+    df = load_unique_captions(parquets).sort("text_hash")
     if limit:
         df = df.head(limit)
 
-    rows = []  # (text_hash, processed_text, neg_text, t, w1, w2)
-    word_pairs: set[tuple[str, str]] = set()
-    n = misses = with_any = obj_tot = attr_tot = 0
+    # Resumable enumeration: one part-file per CHUNK captions; existing parts are
+    # skipped, so a killed job picks up at the first missing part on rerun.
+    # Parts are written atomically (tmp + rename) so a mid-write kill can't leave
+    # a truncated part behind. h is NOT in the parts — it's scored over all parts
+    # at the end (cheap), keeping parts independent of the global word vocabulary.
+    parts_dir = Path(str(output).replace(".parquet", "_parts"))
+    parts_dir.mkdir(parents=True, exist_ok=True)
+    n_parts = (df.height + CHUNK - 1) // CHUNK
     t0 = time.time()
+    total_misses = 0
 
-    for text_hash, text in df.iter_rows():
-        n += 1
-        tokens, tree = fetch_tree(caches, tokenizer, text)
-        if tree is None:
-            misses += 1
+    for k in range(n_parts):
+        part_path = parts_dir / f"part_{k:05d}.parquet"
+        if part_path.exists():
+            logger.info(f"Part {k + 1}/{n_parts} exists — skipping (resume).")
             continue
-        leaves = _leaves(tree)
-        lemmas = tokenizer.lemmatize(tokens) if len(tokens) == len(leaves) else [None] * len(leaves)
-        order = [LeafRecord(l.text, lemma, str(l.biclosed_type)) for l, lemma in zip(leaves, lemmas)]
-        order_index = {id(l): k for k, l in enumerate(leaves)}
+        chunk_df = df.slice(k * CHUNK, CHUNK)
+        rows, misses = _enumerate_chunk(chunk_df, caches, tokenizer)
+        total_misses += misses
+        part = pl.DataFrame(rows, schema=["text_hash", "processed_text", "neg_text", "t", "w1", "w2"], orient="row")
+        tmp = part_path.with_suffix(".tmp.parquet")
+        part.write_parquet(tmp)
+        tmp.rename(part_path)
+        logger.info(
+            f"Part {k + 1}/{n_parts}: {chunk_df.height} captions -> {part.height} candidates, "
+            f"{misses} cache misses ({time.time() - t0:.0f}s elapsed)"
+        )
 
-        obj = object_swaps(order)
-        attr = attribute_swaps(tree, order_index, order)
-        if not obj and not attr:
-            continue
-        with_any += 1
-        obj_tot += len(obj)
-        attr_tot += len(attr)
-        for t, swaps in (("obj", obj), ("attr", attr)):
-            for i, j in swaps:
-                w1, w2 = sorted((order[i].norm, order[j].norm))
-                word_pairs.add((w1, w2))
-                rows.append((text_hash, text, materialize(order, i, j), t, w1, w2))
-
-        if n % 50_000 == 0:
-            logger.info(f"  {n}/{df.height} captions ({time.time() - t0:.0f}s, {misses} cache misses)")
-
+    all_parts = pl.concat([pl.read_parquet(p) for p in sorted(parts_dir.glob("part_*.parquet"))])
+    n_covered = all_parts["text_hash"].n_unique()
+    n_obj = (all_parts["t"] == "obj").sum()
+    n_attr = (all_parts["t"] == "attr").sum()
     logger.info(
-        f"Enumeration done: {n} captions, {misses} cache misses, "
-        f"{with_any} with >=1 candidate ({100 * with_any / max(1, n - misses):.1f}% of parsed), "
-        f"obj/cap={obj_tot / max(1, n):.2f} attr/cap={attr_tot / max(1, n):.2f} "
-        f"({obj_tot} obj, {attr_tot} attr) in {time.time() - t0:.0f}s"
+        f"Enumeration done: {df.height} captions, {total_misses} cache misses THIS run "
+        f"(misses in resumed parts not re-counted), {n_covered} with >=1 candidate "
+        f"({100 * n_covered / max(1, df.height):.1f}%), "
+        f"obj/cap={n_obj / max(1, df.height):.2f} attr/cap={n_attr / max(1, df.height):.2f} "
+        f"({n_obj} obj, {n_attr} attr)"
     )
 
+    word_pairs = {(w1, w2) for w1, w2 in all_parts.select("w1", "w2").unique().iter_rows()}
     h_by_pair = clip_word_similarities(word_pairs, device)
 
-    out = pl.DataFrame(
-        rows, schema=["text_hash", "processed_text", "neg_text", "t", "w1", "w2"], orient="row"
-    ).with_columns(
+    out = all_parts.with_columns(
         pl.struct(["w1", "w2"])
         .map_elements(lambda s: h_by_pair[(s["w1"], s["w2"])], return_dtype=pl.Float64)
         .alias("h")
     )
     Path(output).parent.mkdir(parents=True, exist_ok=True)
-    out.write_parquet(output)
+    final_tmp = Path(str(output) + ".tmp")
+    out.write_parquet(final_tmp)
+    final_tmp.rename(output)
 
     h = out["h"]
     logger.info(
