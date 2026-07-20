@@ -34,6 +34,7 @@ All trained on `coco_*_nlc_tree_no_type_*.parquet` (452,783 train rows), July 18
 | 7077131 | SC frozen | 14 | 0.0004 | 0.0004 | .145/.140/.051 | .144/.124/.046 | .500 (.503/.496) | 0.511 | 0.515 |
 | 7077207 | SC frozen | 9 | 0.0002 | 0.0002 | .182/.057/.029 | .163/.026/.007 | .503 (.504/.501) | 0.503 | 0.488 |
 | 7077283 | SC frozen | 15 | 0.0002 | 0.0000 | .208/.154/.046 | .190/.150/.039 | .501 (.506/.494) | 0.505 | 0.505 |
+| 7076697 | SC frozen | 34 | 0.0000 | 0.0006 | .114/.057/.026 | .065/.039/.007 | .529 (.527/.531) | 0.540 | 0.502 |
 | 7076698 | MC non-frozen | 16 | 0.0002 | 0.0002 | .143/.157/.029 | .157/.157/.033 | .492 (.492/.491) | 0.512 | 0.502 |
 | 7077132 | MC non-frozen | 16 | 0.0002 | 0.0002 | .143/.157/.029 | .157/.157/.033 | .492 (.492/.491) | 0.512 | 0.502 |
 | 7077209 | MC non-frozen | 16 | 0.0002 | 0.0002 | .168/.094/.034 | .137/.078/.020 | .500 (.501/.498) | 0.476 | 0.492 |
@@ -49,9 +50,14 @@ skip-adjusted baseline.
 Incomplete / failed runs in this family (no final report): SC frozen 7073756, 7074583,
 7075226, 7075412 (crashed — traceback in log); SC non-frozen 7073757 (crashed at epoch 1);
 7073492/7073510/7073530/7073531/7073685/7073686 (died at startup).
-Still running at time of writing: 7076697 (SC frozen, epoch 23+), 7076699 (MC frozen,
-epoch 34+), and the first speed-optimized-build submissions 7078454 (MC linear) and
-7078455 (frozen), both started 2026-07-20 ~10:00.
+Still running at time of writing: 7076699 (MC frozen, epoch 34+), and the first
+speed-optimized-build submissions 7078454 (MC linear) and 7078455 (frozen), both
+started 2026-07-20 ~10:00.
+(7076697 completed 2026-07-20 23:06 — row added above. Longest-trained SC frozen run:
+checkpoint epoch 34, 23,953 symbols. Its ARO 0.529 and SC full 0.540 are the only
+current-generation numbers marginally above the 0.50 chance line, though retrieval is
+still at chance and its Winoground clean scores are the family's worst. ARO eval skipped
+362 pairs; SugarCREPE full/++ skipped 852/1,565 pairs with unknown/NaN symbols.)
 
 ### A2. Previous generation — Bobcat parser datasets
 

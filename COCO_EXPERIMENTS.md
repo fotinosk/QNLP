@@ -193,4 +193,9 @@ Remap at training time: `{constants.embedding_dim → cfg.embedding_dim, constan
 
 Verified: forward bit-identical (0.0 diff) and grads at fp32 epsilon vs the per-sample loop; sampler coverage/contiguity/no-size-1-batch invariants hold. Expected: tail contraction calls per epoch 88,335 → ~28,290 (8,809 multi-groups, mean multiplicity 7.8, + 19,481 singletons) ≈ 3.1× fewer; predicted epoch ~40 min → ~15 min (frozen). Remaining floor is the 19,481 singleton rows (~8 min); the designed `tail_fraction < 1.0` rotation knob is the next lever if needed. Awaiting a short cluster run to confirm.
 
+**Result note (2026-07-20, job 7076697):** longest-trained tree_no_type SC frozen linear
+run (checkpoint epoch 34, 23,953 symbols) evaluated: retrieval still at chance, but ARO
+0.529 (attr .527/rel .531) and SugarCREPE full 0.540 — the only current-generation
+numbers marginally above chance. Full row in RESULTS.md §A1.
+
 **Follow-up optimization (same day):** `_prepare_rescaled_weights` — each `forward()` now rescales + fp64-casts every *unique* symbol in the batch once, via a few shape-grouped batched ops, instead of per occurrence inside every contraction call (~2/3 of each dispatch-bound call's ops were this preprocessing). Threaded through both the batched and single paths as a `prepared` dict; valid only within one forward (never cached across optimizer steps); NLC untouched. Verified bit-identical forward (0.0 diff on mixed/pure/B=1 batches, fp32 output dtype preserved), grads at fp32 accumulation noise (1.5e-5). Measured on CPU tail batches: 54.0 -> 23.4 ms/batch (**2.3x** vs pre-change per-sample path, grouping + prepared combined); GPU gain expected larger since the removed ops were pure dispatch. Revised prediction: frozen epoch ~40 min -> **~6-10 min**.

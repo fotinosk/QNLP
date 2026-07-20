@@ -12,6 +12,18 @@ truth; update it as work proceeds so any fresh agent context can resume from her
 - Loss: widen our existing i2t InfoNCE term with negative columns (labels unchanged,
   negatives never queries, t2i untouched). NOT copying the colleague's double-counted
   base+wide structure. π=0 must be bit-identical to current loss.
+- NO EARLY STOPPING (decided 2026-07-21): every sweep run trains a FIXED epoch budget,
+  identical across all cells; benchmarks reported from the FINAL epoch (best-epoch
+  checkpoint kept for analysis only — colleague's protocol). Rationale: (a) job 7076697
+  (epoch 34) is the only current-gen run above chance on ARO/SC while patience-stopped
+  siblings (ep 9–20) all sat at chance — val loss is a bad stopping signal for sparse
+  symbols; (b) π changes val dynamics, so patience would give cells different training
+  lengths and confound the dose-response. Budget: ~35–40 epochs frozen; non-frozen set
+  after post-speedup epoch-time measurement. Implement via config (patience=∞ or an
+  ML_DISABLE_EARLY_STOPPING flag) — do NOT silently change existing scripts' defaults.
+- The sweep is SELF-CONTAINED: π=0 cells regenerate all 4 linear baselines under the
+  new protocol, superseding the early-stopped chance-level runs in RESULTS.md §A1.
+  Nothing outside the 20 runs is needed (NLC out of scope).
 
 ## Task (from user, 2026-07-21)
 
