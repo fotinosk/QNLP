@@ -70,11 +70,31 @@ swap only the text tower:
   512-d vector. Score = cosine against the provided CLIP image features
   (re-normalize the fp16 features after loading). Vocabulary construction is
   the encoder's own business (ours came from the training captions).
-- **Loss**: logits = cos × e^s with s a LEARNED scalar initialized to 2.5
-  (s is a trainable parameter in the same optimizer). Base loss =
-  0.5 · [CE(image→caption) + CE(caption→image)] over the B×B batch matrix.
-  Hard-negative term (if π > 0): one EXTRA CE(image→text) over the matrix
-  widened with the sampled negative columns, added at weight 1.0.
+- **Loss** — exact PyTorch form (this is the whole objective; do not improvise):
+
+  ```python
+  # T: [B,512] caption embeddings (L2-normalized, requires grad)
+  # V: [B,512] image embeddings  (from the released cache, re-normalized)
+  # N: [M,512] embeddings of the sampled hard negatives, M ≈ pi*B
+  #    (encoded through the SAME text tower, gradients ON)
+  # s: learned scalar, initialized to 2.5, in the same optimizer
+  L    = (T @ V.t()) * s.exp()                      # [B,B]
+  base = 0.5 * (ce(L, arange(B)) + ce(L.t(), arange(B)))   # symmetric InfoNCE
+  loss = base
+  if M > 0:
+      bank = cat([T, N])                            # [B+M,512]
+      wide = (V @ bank.t()) * s.exp()               # [B, B+M]
+      loss = base + ce(wide, arange(B))             # labels point at first B cols
+  ```
+
+  Three properties to preserve exactly: (1) the widened CE's LABELS are still
+  0..B-1 — a swap column is never a correct answer; (2) swaps appear ONLY as
+  extra columns in the image→text direction — they are never queries and never
+  enter the caption→image term (a swapped caption has no true image);
+  (3) the plain caption columns are intentionally present in BOTH the base and
+  the widened term (a deliberate double-count — all our results were trained
+  this way; do not "deduplicate" it).
+
 - **Optimization**: AdamW, weight decay 1e-5, gradient-norm clip 1.0,
   batch 512, 12 epochs, captions shuffled each epoch.
 - **Learning rate — run the screen, don't guess**: 3-point grid × your encoder
@@ -124,9 +144,9 @@ Protocol, exactly as our runs (π = the sweep variable):
 3. Sampling rule (given the candidate list): drop candidates with h > 0.95
    (near-paraphrases; if that empties the list, keep all), then sample one with
    probability ∝ exp((h − mean_h) / 0.5) over the survivors.
-4. Use the sampled negatives as EXTRA image→text in-batch negatives: append
-   their text embeddings as columns to the B×B logit matrix and add a second
-   cross-entropy(image→text) term over the widened matrix.
+4. Use the sampled negatives exactly as in the loss pseudocode of the
+   "Training recipe" section: extra columns of the image→text softmax, labels
+   unchanged, no caption→image participation.
 5. Our grid: π ∈ {0, 0.1, 0.25, 0.5, 1.0} (π=0 is training with no negatives).
    Read the effect on SugarCrepe swap-object / swap-attribute accuracy — the
    aggregate score dilutes it ~7×.
@@ -146,3 +166,5 @@ positive/negative comparison is tokenization-consistent.
 Provenance, schemas in full, and the campaign report:
 `README.md` in this directory, and
 `discoviz-repo/llm/report_socher_seq_redo_v3.md`.
+
+Code for generation of hard negatives can be found at: /SAN/intelsys/discoviz/discoviz-repo/llm/systematic/harness.py
