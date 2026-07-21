@@ -941,6 +941,51 @@ the plan doc above):**
       assignment (`{0,3}`/`{1}`/`{2}`, matching `bi % 3`), no file collisions,
       no duplicates, all 4 batches covered exactly once across the 3 shards.
 
+**⭐ REUSABLE SHARDING PATTERN (noted 2026-07-21 for future reuse, e.g. on the
+`score` stage) — the general recipe, abstracted away from `enumerate`'s specifics:**
+1. Define a **deterministic, global index** over the full unit of work, computed
+   the same way regardless of how many shards will run (here: batch number =
+   position in the caption list sorted by `text_hash`, floor-divided by
+   `worker_batch_size`). Determinism is the load-bearing property — every
+   shard/rerun must derive the SAME index for the SAME piece of work, or the
+   whole scheme breaks.
+2. **Assign shards by `index % num_shards == shard_index`** (not contiguous
+   ranges) — trivially maps onto SGE array-job task IDs
+   (`shard_index = SGE_TASK_ID - 1`), and gives even load balance for free
+   whenever the underlying data is already in an effectively-random order
+   (true here since captions are sorted by hash, not by any property that
+   correlates with per-item cost).
+3. **Name output artifacts after the global index**, not anything shard-local
+   (here: `part_{bi:06d}.parquet`) — this is what makes concurrent writes from
+   independent shards collision-free into the SAME output directory with zero
+   coordination, and what makes "does this already exist?" a correct resume
+   check regardless of which shard (or which run) produced it.
+4. **Give each shard its own scratch/cache resources** if the underlying work
+   writes to any shared mutable store outside the sharded output itself (here:
+   the bobcat diskcache) — concurrent shards hitting one shared mutable
+   resource is where the actual risk lives (this project's diskcache write-race
+   crash), not in the sharding logic itself.
+5. Resume/rerun-one-shard/rerun-everything all reduce to the SAME "skip if the
+   global-index-named output already exists" check — no separate bookkeeping
+   needed for any of the three cases.
+
+**Applying this to `score_stage` specifically, when/if it becomes worth
+sharding** (NOT done yet — `score` is GPU-bound and short, ~2h budgeted, so may
+never need it, but the pattern transfers cleanly if it does): the natural
+global index there is the **unique `(w1, w2)` word pair**, not a caption or
+batch. Today `score_stage` collects ALL unique pairs across every enumerate
+part file in one pass and CLIP-encodes them in one job. To shard: sort the
+unique pairs deterministically (e.g. lexicographically), assign
+`pair_index % num_shards == shard_index` same as above, have each shard
+CLIP-encode only its slice and write a partial `(w1, w2, h)` lookup parquet
+named by shard index, then a final (cheap, CPU-only) merge step concatenates
+all shard lookups and joins `h` onto the enumerate output — replacing the
+current single `clip_word_similarities()` call over the full union. Only
+worth building if CLIP scoring turns out to be a real bottleneck in practice
+(e.g. if the unique-word-pair count from the full 508,058-caption run turns
+out far larger than expected) — check actual `score` stage wall-time first
+before implementing this.
+
 **NOT yet done (must happen before the real cluster run):**
 - `qdel` the currently-stuck job and resubmit fresh with all of: `tmem=24G`,
   per-batch resumable `enumerate_stage`, `worker_batch_size=30`. `parts_dir`
