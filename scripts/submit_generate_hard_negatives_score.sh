@@ -1,6 +1,13 @@
 #!/bin/bash
 #$ -l tmem=16G
-#$ -l h_rt=2:0:0
+#$ -l h_rt=12:0:0
+# h_rt bumped 2h->12h (2026-07-21) as headroom — CLIP encoding itself should be
+# fast (low thousands of unique swap words, batched 512/pass), but score_stage
+# also has to read every enumerate part file (~10k+ small parquet files at
+# worker_batch_size=100) off /SAN before it can even start scoring, and /SAN
+# I/O has been a repeated source of surprises this session. Not raised to 72h
+# like the CPU enumerate job since this reserves a GPU, which is more
+# inconsiderate to hold for a long time on a shared cluster if unused.
 #$ -l gpu=true
 #$ -S /bin/bash
 #$ -j y
