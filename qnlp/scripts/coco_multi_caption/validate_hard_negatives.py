@@ -1,9 +1,17 @@
-"""Validate the Phase A0 rule port against the colleague's released negatives.
+"""Validate the rule port against the colleague's released negatives.
 
 For captions of ours that EXACT-match his (same cocoid + lowercased caption
 string — the ~66% subset unchanged by our LemmatizeStep), compare the swap
-candidates as (type, {word1, word2}) sets — form-insensitive, so his raw-form
-words and our lemma-normalized words still align through norm().
+candidates as (type, {word1, word2}) sets.
+
+Both sides' words are normalized with lowercase + punctuation-strip + WordNet
+noun lemmatization: since the v3 combined redesign, OUR w1/w2 are LEMMA forms
+(enumeration runs on the lemmatized tree) while HIS are surface forms — without
+lemmatizing his words, every plural swap word ('cars' vs 'car') counts as one
+HIS-ONLY plus one OURS-ONLY mismatch for what is actually the same swap, which
+systematically understates agreement (observed: mean Jaccard 0.702 with the
+form-sensitive comparison on the first full run, 2026-07-22; the printed
+mismatch examples were plural/singular twins of the same pairs).
 
 Expect high overlap; systematic differences indicate a rule-port bug (or CCG
 parse differences between his trees and ours — spot-check a few by hand before
@@ -19,6 +27,7 @@ import re
 import string
 
 import polars as pl
+from nltk.stem import WordNetLemmatizer
 
 from qnlp.utils.logging import setup_logger
 
@@ -29,9 +38,14 @@ SPECS = "data/datasets/coco_hard_negs_train.parquet"
 TRAIN = "data/datasets/coco_single_caption_nlc_train.parquet"
 _ID_RX = re.compile(r"_(\d+)\.jpg$")
 
+_lemmatizer = WordNetLemmatizer()
+
 
 def _norm(w: str) -> str:
-    return (w or "").lower().strip(string.punctuation)
+    # Noun lemmatization (the dominant swap word class — obj swaps outnumber
+    # attr ~9:1, and adjectives rarely inflect) applied SYMMETRICALLY to both
+    # sides; idempotent on our already-lemmatized w1/w2.
+    return _lemmatizer.lemmatize((w or "").lower().strip(string.punctuation))
 
 
 def run(specs_path: str, train_path: str, negs_path: str, sample: int) -> None:
@@ -41,7 +55,10 @@ def run(specs_path: str, train_path: str, negs_path: str, sample: int) -> None:
     specs = pl.read_parquet(specs_path, columns=["text_hash", "t", "w1", "w2"])
     ours_by_hash: dict[str, set] = {}
     for th, t, w1, w2 in specs.iter_rows():
-        ours_by_hash.setdefault(th, set()).add((t, frozenset((w1, w2))))
+        # _norm applied to OUR side too (not just his): mostly idempotent on our
+        # lemma-form w1/w2, but catches residual inflected forms the generation's
+        # pos-tagging occasionally leaves (e.g. 'men' at sentence start).
+        ours_by_hash.setdefault(th, set()).add((t, frozenset((_norm(w1), _norm(w2)))))
 
     his: dict[tuple[int, str], list[dict]] = {}
     with open(negs_path) as f:
