@@ -940,6 +940,39 @@ the plan doc above):**
       the same `parts_dir` with 4 toy captions — correct disjoint batch
       assignment (`{0,3}`/`{1}`/`{2}`, matching `bi % 3`), no file collisions,
       no duplicates, all 4 batches covered exactly once across the 3 shards.
+    - **Ran successfully on the cluster**: confirmed healthy at 610/5,081
+      batches (12.0%) via the consistency+per-shard-progress health check —
+      zero orphaned/only-one-side batches, all 10 shards within a tight
+      11.0-13.0% band (no stalled/dead shard, no overlap).
+    - **Bumped 10 -> 20 shards (2026-07-21, user request for more parallelism)**:
+      `-t 1-10` -> `-t 1-20`, `NUM_SHARDS=10` -> `20` in the submit script.
+      Changing the shard count is NOT additive/live-safe — `bi % 10` and
+      `bi % 20` assign most batches to different shard indices, so a mixed
+      10-way/20-way run would leave gaps, not just add capacity — requires
+      killing the old array and resubmitting the new one. Cheap regardless:
+      every already-completed batch is skipped instantly by the new 20-way
+      shards (resume is keyed by global batch index + file existence, not by
+      which shard count produced it), so only whatever was in-flight in the
+      killed 10 tasks is lost. Same `tmem=12G`/`-pe smp 2` per task (24G/task);
+      total array footprint scales to 480G (20 x 24G) if the scheduler happens
+      to run all tasks at once, but each task's individual reservation is
+      unchanged and still small/easy-to-schedule.
+    - **Clarified during discussion (not yet implemented): the resume check is
+      a ONE-TIME startup snapshot, not a live per-batch check.** This matters
+      for a scenario raised but not adopted — adding an UNSHARDED extra worker
+      (`--num-shards 1`) on top of the running shards, to add capacity without
+      touching them. Since that worker's "batches to do" list is fixed at ITS
+      OWN startup and never rechecked against what the shards complete in the
+      meantime, it would end up redundantly recomputing a real, possibly large
+      fraction of batches the shards get to first — not just rare same-instant
+      collisions. Not a correctness risk (writes are idempotent, last-writer-
+      wins via tmp+rename) but a real efficiency one. Fix, if this pattern is
+      wanted later: re-check file existence live, right before each batch is
+      dispatched to a worker, instead of only once at `enumerate_stage` startup
+      — would also modestly help the existing sharded jobs' own efficiency
+      (protects against staleness right after a worker recycle etc.), not just
+      enable an unsharded add-on. NOT implemented — the 10->20 shard-count bump
+      (above) was the option actually used instead.
 
 **⭐ REUSABLE SHARDING PATTERN (noted 2026-07-21 for future reuse, e.g. on the
 `score` stage) — the general recipe, abstracted away from `enumerate`'s specifics:**
