@@ -25,4 +25,11 @@ class ExperimentConfig(BaseSettings):
     temperature: float = 0.07  # fixed — not passed to the optimizer
     use_mlp_head: bool = False
 
+    # Hard-negative π-sweep (see HARD_NEG_PI_SWEEP_PLAN.md Phase B). pi=0 (default)
+    # must leave every code path bit-identical to no-hard-negatives training.
+    hard_neg_pi: float = 0.0
+    hard_negs_dataset: str | None = None  # base name, resolved as {name}_train.parquet
+    hard_neg_softmax_temp: float = 0.5
+    hard_neg_h_max: float = 0.95  # redundant with the build-time filter, kept as a knob
+
     model_config = SettingsConfigDict(env_prefix="ML_")

@@ -12,6 +12,7 @@ retrieval evaluation. Matches run.py in every other respect.
 Requires ML_EMBEDDING_DIM=512 (must match CLIP ViT-B/32 output dim).
 """
 
+import random
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -32,6 +33,7 @@ from qnlp.core.training.retrieval_eval import retrieval_metrics
 from qnlp.discoviz.models.einsum_model import EinsumModel
 from qnlp.domain.datasets.dataloader import _diagrams_for
 from qnlp.domain.datasets.dataset import _deserialize_symbols, collect_symbol_sizes
+from qnlp.domain.datasets.hard_negatives import HardNegativeBank, _SymbolSource
 from qnlp.domain.datasets.topology_bucket_sampler import TopologyBucketSampler, set_loader_epoch
 from qnlp.scripts.coco_multi_caption.config import ExperimentConfig
 from qnlp.scripts.coco_multi_caption.evaluate import (
@@ -109,6 +111,7 @@ class FrozenCOCODataset(Dataset):
             "caption": caption,
             "image_path": row["local_image_path"],
             "sample_id": row["sample_id"],
+            "text_hash": row["text_hash"],
         }
 
 
@@ -162,11 +165,15 @@ def _run_epoch(
     device,
     train: bool,
     max_grad_norm: float = 1.0,
+    hard_neg_bank: HardNegativeBank | None = None,
+    hard_neg_pi: float = 0.0,
+    rng: random.Random | None = None,
 ) -> dict[str, float]:
     text_model.train(train)
     text_head.train(train)
     totals: dict[str, float] = defaultdict(float)
     n = 0
+    rng = rng or random.Random()
 
     with torch.set_grad_enabled(train):
         for batch in loader:
@@ -192,7 +199,24 @@ def _run_epoch(
             if loss_inputs["image_embeddings"].shape[0] == 0:
                 continue
 
-            loss, metrics = loss_fn(loss_inputs)
+            # Hard-negative sampling is TRAIN-ONLY (see HardNegativeBank docstring —
+            # the text_hash join key is not safe to consult from eval code paths).
+            neg_emb = None
+            n_hard_negs = 0
+            if train and hard_neg_bank is not None and hard_neg_pi > 0:
+                sampled = [
+                    hard_neg_bank.sample(text_hash, hard_neg_pi, rng) for text_hash in batch.get("text_hash", [])
+                ]
+                sampled = [s for s in sampled if s is not None]
+                if sampled:
+                    neg_emb = F.normalize(text_head(text_model(sampled)), dim=-1)
+                    neg_emb = neg_emb[torch.isfinite(neg_emb).all(dim=-1)]
+                    n_hard_negs = neg_emb.shape[0]
+                    if n_hard_negs == 0:
+                        neg_emb = None
+
+            loss, metrics = loss_fn(loss_inputs, negative_text_emb=neg_emb)
+            metrics["n_hard_negs"] = image_emb.new_tensor(float(n_hard_negs))
 
             if train:
                 loss.backward()
@@ -301,8 +325,22 @@ def run() -> None:
         f"Test: {len(test_ds)} rows ({len(loaders['test'].dataset)} unique images)"
     )
 
+    # Hard-negative bank: only constructed when pi>0 AND a dataset is configured,
+    # so pi=0 never even touches this (bit-identical to no-hard-negatives training,
+    # not just "samples nothing").
+    hard_neg_bank = None
+    hard_neg_rng = random.Random()
+    symbol_sources: list = [train_ds, val_ds, test_ds]
+    if cfg.hard_neg_pi > 0 and cfg.hard_negs_dataset:
+        hard_negs_path = DATASETS_PATH / f"{cfg.hard_negs_dataset}_train.parquet"
+        hard_neg_bank = HardNegativeBank(
+            str(hard_negs_path), h_max=cfg.hard_neg_h_max, softmax_temp=cfg.hard_neg_softmax_temp
+        )
+        logger.info(f"Loaded hard-negative bank from {hard_negs_path}: {hard_neg_bank.df.height} candidates.")
+        symbol_sources.append(_SymbolSource(hard_neg_bank.df))
+
     symbols, sizes = collect_symbol_sizes(
-        [train_ds, val_ds, test_ds],
+        symbol_sources,
         SYMBOL_COLS,
         remap={constants.embedding_dim: cfg.embedding_dim, constants.bond_dim: cfg.bond_dim},
     )
@@ -369,6 +407,12 @@ def run() -> None:
                 device,
                 train=True,
                 max_grad_norm=cfg.max_grad_norm,
+                # hard_neg_bank/pi passed ONLY to the train call — val/test below
+                # keep the function's None/0.0 defaults, structurally (not just
+                # behaviorally) preventing eval from ever consulting the bank.
+                hard_neg_bank=hard_neg_bank,
+                hard_neg_pi=cfg.hard_neg_pi,
+                rng=hard_neg_rng,
             )
             if mlflow.active_run():
                 mlflow.log_metrics({f"train/{k}": v for k, v in train_metrics.items()}, step=epoch)

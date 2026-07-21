@@ -26,7 +26,16 @@ class SymmetricInfoNCE(nn.Module):
         # logit_scale = log(1/temperature); exp(logit_scale) multiplies the logits
         self.logit_scale = nn.Parameter(torch.tensor(math.log(1.0 / temperature)))
 
-    def forward(self, image_emb: Tensor, text_emb: Tensor) -> tuple[Tensor, Tensor]:
+    def forward(
+        self, image_emb: Tensor, text_emb: Tensor, negative_text_emb: Tensor | None = None
+    ) -> tuple[Tensor, Tensor]:
+        """negative_text_emb: optional [M, D] hard-negative text embeddings (M is
+        independent of batch size B — not row-aligned with image_emb/text_emb).
+        Widens the i2t term's denominator only: `logit_scale * img @ cat([txt,
+        negs]).T`, labels unchanged (still arange(B) — negatives are extra
+        columns, never additional rows/queries). t2i is untouched (negatives
+        never act as queries). When None (default), this is bit-identical to
+        the original i2t computation — no extra ops are introduced."""
         image_emb = F.normalize(image_emb, dim=-1)
         text_emb = F.normalize(text_emb, dim=-1)
 
@@ -38,12 +47,19 @@ class SymmetricInfoNCE(nn.Module):
 
         logits = logit_scale * torch.matmul(image_emb, text_emb.t())
 
-        i2t_loss = F.cross_entropy(logits, labels)
+        if negative_text_emb is not None and negative_text_emb.shape[0] > 0:
+            neg_emb = F.normalize(negative_text_emb, dim=-1)
+            neg_logits = logit_scale * torch.matmul(image_emb, neg_emb.t())
+            i2t_logits = torch.cat([logits, neg_logits], dim=1)
+        else:
+            i2t_logits = logits
+
+        i2t_loss = F.cross_entropy(i2t_logits, labels)
         t2i_loss = F.cross_entropy(logits.t(), labels)
         loss = (i2t_loss + t2i_loss) / 2
 
         with torch.no_grad():
-            i2t_acc = (logits.argmax(dim=1) == labels).float().mean()
+            i2t_acc = (i2t_logits.argmax(dim=1) == labels).float().mean()
             t2i_acc = (logits.t().argmax(dim=1) == labels).float().mean()
             accuracy = (i2t_acc + t2i_acc) / 2
 

@@ -9,6 +9,7 @@ Temperature is fixed (not learnable) to avoid collapse. No hard negative
 mining — plain symmetric InfoNCE with in-batch negatives only.
 """
 
+import random
 from datetime import datetime
 
 import mlflow
@@ -26,6 +27,7 @@ from qnlp.discoviz.models.einsum_model import EinsumModel
 from qnlp.discoviz.models.image_model import TTNImageModel, image_model_hyperparams
 from qnlp.domain.datasets.dataloader import get_dataloaders, vlm_collate_fn
 from qnlp.domain.datasets.dataset import VLMDataset, collect_symbol_sizes
+from qnlp.domain.datasets.hard_negatives import HardNegativeBank, _SymbolSource
 from qnlp.domain.models.vlm.contrastive_vlm import ContrastiveVLM
 from qnlp.scripts.coco_multi_caption.config import ExperimentConfig
 from qnlp.scripts.coco_multi_caption.evaluate import evaluate_all_benchmarks, log_banner, print_full_report
@@ -46,13 +48,40 @@ TEST_SIZE = 5000
 
 
 class SimpleCaptionStep:
-    def __init__(self, loss_fn: SingleCaptionLoss, device: torch.device):
+    def __init__(
+        self,
+        loss_fn: SingleCaptionLoss,
+        device: torch.device,
+        hard_neg_bank: HardNegativeBank | None = None,
+        hard_neg_pi: float = 0.0,
+        rng: random.Random | None = None,
+    ):
         self.loss_fn = loss_fn
         self.device = device
+        self.hard_neg_bank = hard_neg_bank
+        self.hard_neg_pi = hard_neg_pi
+        self.rng = rng or random.Random()
 
     def __call__(self, model, batch: dict, train: bool) -> tuple[Tensor, dict]:
         images = batch["local_image_path"].to(self.device)
-        outputs = model(images, batch["caption"])
+
+        # Hard-negative sampling is TRAIN-ONLY (see HardNegativeBank docstring —
+        # the text_hash join key is not safe to consult from eval code paths).
+        # Fresh sample every call, i.e. every batch every epoch (no caching).
+        neg_captions = None
+        if train and self.hard_neg_bank is not None and self.hard_neg_pi > 0:
+            sampled = [
+                self.hard_neg_bank.sample(text_hash, self.hard_neg_pi, self.rng)
+                for text_hash in batch.get("text_hash", [])
+            ]
+            sampled = [s for s in sampled if s is not None]
+            if sampled:
+                neg_captions = sampled
+
+        # false_captions is an existing ContrastiveVLM.forward hook — reuses its
+        # NaN-safe text encode (_safe_text_embed) unchanged rather than duplicating
+        # that logic here.
+        outputs = model(images, batch["caption"], false_captions=neg_captions)
 
         loss_inputs = {
             "image_embeddings": outputs["image_embeddings"],
@@ -63,7 +92,16 @@ class SimpleCaptionStep:
         if loss_inputs["image_embeddings"].shape[0] == 0:
             return torch.zeros((), device=self.device, requires_grad=True), {}
 
-        loss, metrics = self.loss_fn(loss_inputs)
+        neg_emb = outputs.get("false_caption_embeddings")
+        n_hard_negs = 0
+        if neg_emb is not None:
+            neg_emb = neg_emb[torch.isfinite(neg_emb).all(dim=-1)]
+            n_hard_negs = neg_emb.shape[0]
+            if n_hard_negs == 0:
+                neg_emb = None
+
+        loss, metrics = self.loss_fn(loss_inputs, negative_text_emb=neg_emb)
+        metrics["n_hard_negs"] = images.new_tensor(float(n_hard_negs))
 
         if n_dropped:
             metrics["n_skipped"] = images.new_tensor(float(n_dropped))
@@ -171,8 +209,21 @@ def run():
         f"Test: {len(test_ds)} rows ({len(test_loader_dedup.dataset)} unique images)"
     )
 
+    # Hard-negative bank: only constructed when pi>0 AND a dataset is configured,
+    # so pi=0 never even touches this (bit-identical to no-hard-negatives training,
+    # not just "samples nothing").
+    hard_neg_bank = None
+    symbol_sources: list[VLMDataset | _SymbolSource] = [train_ds, val_ds, test_ds]
+    if cfg.hard_neg_pi > 0 and cfg.hard_negs_dataset:
+        hard_negs_path = DATASETS_PATH / f"{cfg.hard_negs_dataset}_train.parquet"
+        hard_neg_bank = HardNegativeBank(
+            str(hard_negs_path), h_max=cfg.hard_neg_h_max, softmax_temp=cfg.hard_neg_softmax_temp
+        )
+        logger.info(f"Loaded hard-negative bank from {hard_negs_path}: {hard_neg_bank.df.height} candidates.")
+        symbol_sources.append(_SymbolSource(hard_neg_bank.df))
+
     symbols, sizes = collect_symbol_sizes(
-        [train_ds, val_ds, test_ds],
+        symbol_sources,
         SYMBOL_COLS,
         remap={constants.embedding_dim: cfg.embedding_dim, constants.bond_dim: cfg.bond_dim},
     )
@@ -186,7 +237,7 @@ def run():
 
     # Fixed temperature — loss_fn is NOT in the optimizer so logit_scale won't move.
     loss_fn = SingleCaptionLoss(temperature=cfg.temperature, alignment_weight=0.0).to(device)
-    step = SimpleCaptionStep(loss_fn=loss_fn, device=device)
+    step = SimpleCaptionStep(loss_fn=loss_fn, device=device, hard_neg_bank=hard_neg_bank, hard_neg_pi=cfg.hard_neg_pi)
 
     optimizer = torch.optim.AdamW(
         [

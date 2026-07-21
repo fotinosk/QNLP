@@ -35,7 +35,13 @@ class SingleCaptionLoss:
         self.alignment_weight = alignment_weight
         self._eps = eps
 
-    def __call__(self, outputs: dict[str, Tensor]) -> tuple[Tensor, dict[str, Tensor]]:
+    def __call__(
+        self, outputs: dict[str, Tensor], negative_text_emb: Tensor | None = None
+    ) -> tuple[Tensor, dict[str, Tensor]]:
+        """negative_text_emb: optional [M, D] hard-negative text embeddings,
+        widening the InfoNCE i2t term (see SymmetricInfoNCE.forward). Omitted
+        (default None) by every existing call site — bit-identical to
+        pre-hard-negative behavior in that case."""
         image_emb = outputs["image_embeddings"]
         caption_emb = outputs["caption_embeddings"]
 
@@ -43,7 +49,7 @@ class SingleCaptionLoss:
         txt_n = F.normalize(caption_emb, dim=-1)
 
         # InfoNCE with learnable temperature
-        infonce_loss, accuracy = self._loss(image_emb, caption_emb)
+        infonce_loss, accuracy = self._loss(image_emb, caption_emb, negative_text_emb=negative_text_emb)
 
         # Per-sample cosine alignment on matched pairs — range [0, 2]
         # Provides a direct per-sample gradient independent of batch hardness
@@ -86,6 +92,19 @@ class SingleCaptionLoss:
             "modality_gap": modality_gap,
             "temperature": temperature,
         }
+
+        if negative_text_emb is not None and negative_text_emb.shape[0] > 0:
+            with torch.no_grad():
+                # Global mean image<->hard-negative similarity vs mean image<->positive
+                # similarity — negatives aren't row-aligned with the batch (M != B, only
+                # a pi-fraction of rows get one), so this is a batch-wide monitoring
+                # signal, not a per-sample metric. A shrinking gap means the sampled
+                # hard negatives are getting genuinely harder to distinguish from
+                # positives — the intended training signal.
+                neg_n = F.normalize(negative_text_emb, dim=-1)
+                mean_neg_hard = (img_n @ neg_n.t()).mean()
+                metrics["hard_neg_pos_gap"] = mean_pos - mean_neg_hard
+
         return loss, metrics
 
     def parameters(self) -> Iterator[nn.Parameter]:

@@ -1295,6 +1295,96 @@ plus 2 submit scripts (bobcat / tree_no_type). Steps:
    π=0 path must be bit-identical to current loss (negs arg None).
 5. Metrics: log `n_hard_negs` per batch, and neg-vs-pos similarity gap for monitoring.
 
+**STATUS: IMPLEMENTED 2026-07-21 (locally; not yet run on the cluster — enumerate/
+score for the actual hard-negatives data are still in flight).** Deviated from the
+sketch above in a few places, each for a concrete reason found while reading the
+real code (via a research pass over `run.py`/`run_frozen.py`/`contrastive_vlm.py`/
+`dataset.py` first, since this needed to integrate with real call sites, not
+assumptions):
+
+- **`ContrastiveVLM.forward` already has a `false_captions` hook** (encodes via
+  the existing NaN-safe `_safe_text_embed`, sets
+  `outputs["false_caption_embeddings"]`) — reused it directly in
+  `run.py::SimpleCaptionStep` instead of calling `model.text_model`/
+  `model.text_head` separately as the sketch said. Same net effect (negatives go
+  through the same tower+head, ContrastiveVLM.forward's OTHER behavior
+  untouched), but gets the NaN-safety-before-head handling for free instead of
+  duplicating it.
+- **`run_frozen.py` has no such wrapper** (text_model/text_head used bare), so
+  there the sketch's literal `F.normalize(text_head(text_model(neg_caps)))` was
+  used as written — and, matching that file's existing pattern for the TRUE
+  captions, WITHOUT the extra NaN-zero-before-head precaution (that file doesn't
+  do it for true captions either, and this sweep is linear-only, where the NLC
+  infeasible-contraction NaN sentinel this precaution exists for cannot occur —
+  consistency with the file's own convention over introducing a new one).
+- **`FrozenCOCODataset.__getitem__` didn't expose `text_hash`** — added it
+  (present in the underlying parquet already; `VLMDataset` used by `run.py`
+  already passed it through via its generic "remaining columns" logic, so only
+  the frozen path's minimal hand-rolled dataset needed the addition).
+- **Symbol registration**: `collect_symbol_sizes` only reads `ds.df[col]` for
+  whatever datasets it's given (duck-typed, not actually restricted to
+  `VLMDataset` despite the type hint) — added `_SymbolSource`, a 2-line wrapper
+  exposing a `HardNegativeBank`'s loaded DataFrame the same way, and pass it
+  alongside `[train_ds, val_ds, test_ds]` in both `run.py` and `run_frozen.py`
+  when the bank is active. Avoids a KeyError in `EinsumModel.sym2weight` for any
+  swap-introduced symbol not already in the main vocabulary.
+- **`n_hard_negs` placement**: set unconditionally (0 or count) by the STEP/
+  `_run_epoch` caller, not inside `SingleCaptionLoss` — the loss module only adds
+  `hard_neg_pos_gap` (global mean image<->hard-negative similarity vs mean
+  image<->positive similarity; NOT row-aligned since M != B and only a
+  pi-fraction of rows get a sample) and only when negatives are actually present
+  that batch, since it can't be computed from zero negatives.
+- **Bank construction is fully gated** (`cfg.hard_neg_pi > 0 and
+  cfg.hard_negs_dataset`) in both scripts' setup — at pi=0 the bank is never
+  even instantiated (no stray file I/O), not just "instantiated but never
+  sampled."
+- **Train-only enforcement is structural, not just a runtime `if train:` check**:
+  in `run_frozen.py`, the bank/pi/rng are passed to the TRAIN `_run_epoch` call
+  only — the val/test/final-test calls keep the function's `None`/`0.0` defaults,
+  so a future edit can't accidentally leak eval-time hard negatives just by
+  deleting one `if train and ...` guard (per the plan's own explicit warning
+  above about not creating a lookup util that both train and eval could call).
+
+**Verified locally (`qnlp` conda env, no cluster needed):**
+1. `SymmetricInfoNCE.forward`/`SingleCaptionLoss.__call__`: pi=0 (omitted arg vs.
+   explicit `negative_text_emb=None`) produces bit-identical loss/accuracy —
+   confirmed via `torch.equal`, not just "looks close." Widened loss provably
+   differs when negatives are given. Negatives receive nonzero gradient (they
+   actually influence training, not inert). `M=0` (empty negatives tensor, e.g.
+   every row in a batch happened to sample None) behaves exactly like `None`, not
+   as a degenerate 0-column cat. `hard_neg_pos_gap` present only when negatives
+   are given, absent at pi=0.
+2. `HardNegativeBank`: `h_max` filter drops rows correctly; pi=0 never samples;
+   unknown `text_hash` and a `text_hash` fully filtered out by `h_max` both
+   correctly return `None` even at pi=1 (don't fall through to some other
+   caption's candidates); pi=1 on a real candidate always returns a valid
+   `(diagram, [Symbol,...])`; softmax weighting empirically matches the
+   analytic `exp((h-mean_h)/temp)` distribution over 5000 draws (relative
+   frequencies within ~1% of computed weights).
+3. `_SymbolSource` + `collect_symbol_sizes`: a symbol present ONLY in a
+   hard-negatives source (not the main train/val/test datasets) is correctly
+   picked up and merged into the collected symbol list.
+4. All 6 touched files import cleanly end-to-end in the real `qnlp` env
+   (including `run.py`/`run_frozen.py`'s full dependency chains — `mlflow`,
+   `clip`, etc.), pass `ruff check` with zero findings, and are `ruff format`
+   clean.
+
+**NOT yet verified (needs the cluster / real data, not available locally):**
+- End-to-end run against a REAL hard-negatives parquet (`coco_hard_negs_train
+  .parquet` from Phase A — still being generated as of this writing) — the
+  local tests above use small synthetic parquets, not the actual generated
+  data, and haven't exercised the real `EinsumModel`/`TTNImageModel`/CLIP-frozen
+  towers at all.
+- A real pi=1 smoke run (few epochs) confirming M≈B negatives per batch in
+  practice, finite loss, and that `collect_symbol_sizes` doesn't KeyError on
+  any real swap-introduced symbol at scale (the plan's own Verification section
+  item 3, below, not yet executed).
+- Whether `hard_negs_dataset`'s "base name resolved as `{name}_train.parquet`"
+  convention (chosen to mirror `dataset_name`'s existing resolution pattern,
+  e.g. `ML_HARD_NEGS_DATASET=coco_hard_negs` or `coco_hard_negs_tree_no_type`)
+  is actually what gets set correctly in the Phase C submit scripts once those
+  are written — not yet done, see Phase C below (still not started).
+
 ### Phase C — runs (grid)
 
 Submit scripts: parametrize the 4 existing linear submit scripts with `PI` env →
