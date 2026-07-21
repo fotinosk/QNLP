@@ -75,7 +75,9 @@ logger = setup_logger(log_name="generate_hard_negatives")
 MAXK = 6
 CLIP_NAME = "openai/clip-vit-base-patch32"
 TEMPLATE = "a photo of a {}"
-CHUNK = 50_000  # captions per resumable part-file
+CHUNK = 5_000  # captions per resumable part-file (kept small: the whole chunk's rows are
+# held in the main process as Python lists before being built into a DataFrame and
+# written — a 50k chunk peaked at ~90G maxvmem on the cluster, see plan doc)
 EMBEDDING_DIM = 512  # matches every linear submit script's ML_EMBEDDING_DIM in this sweep
 BOND_DIM = 10  # matches every linear submit script's ML_BOND_DIM in this sweep
 # Exact rule list from CCGCompilerStep.__init__ — must match what positives were
@@ -416,6 +418,7 @@ def enumerate_stage(
     max_workers: int,
     worker_batch_size: int,
     max_tasks_per_child: int,
+    cache_path: str = BOBCAT_CACHE,
 ) -> None:
     df = load_unique_captions(bobcat_train, tree_train).sort("text_hash")
     if limit:
@@ -429,7 +432,7 @@ def enumerate_stage(
     pool = mp.get_context("spawn").Pool(
         processes=max_workers,
         initializer=_worker_init,
-        initargs=(BOBCAT_CACHE, bobcat_train, tree_train),
+        initargs=(cache_path, bobcat_train, tree_train),
         maxtasksperchild=max_tasks_per_child,
     )
     try:
@@ -462,12 +465,23 @@ def enumerate_stage(
                     f"({(time.time() - t_batches) / max(1, n_done):.2f}s/caption avg)"
                 )
 
+            logger.info(
+                f"  all batches done for part {k + 1}/{n_parts}: {len(bobcat_rows)} bobcat rows + "
+                f"{len(tree_rows)} tree rows accumulated ({time.time() - t_batches:.0f}s since part start) "
+                f"— building DataFrames..."
+            )
+            t_build = time.time()
             bobcat_part = pl.DataFrame(bobcat_rows, schema=_ROW_SCHEMA, orient="row")
             tree_part = pl.DataFrame(tree_rows, schema=_ROW_SCHEMA, orient="row")
-            for part, path in ((bobcat_part, bobcat_part_path), (tree_part, tree_part_path)):
+            logger.info(f"  DataFrames built in {time.time() - t_build:.0f}s — writing parquet...")
+            t_write = time.time()
+            for label, part, path in (("bobcat", bobcat_part, bobcat_part_path), ("tree", tree_part, tree_part_path)):
                 tmp = path.with_suffix(".tmp.parquet")
                 part.write_parquet(tmp)
                 tmp.rename(path)
+                logger.info(
+                    f"  wrote {label} part ({part.height} rows) -> {path} ({time.time() - t_write:.0f}s so far)"
+                )
             logger.info(
                 f"Part {k + 1}/{n_parts}: {len(items)} captions -> "
                 f"{bobcat_part.height} bobcat + {tree_part.height} tree candidates, "
@@ -585,6 +599,9 @@ if __name__ == "__main__":
     ap.add_argument("--max-workers", type=int, default=4)
     ap.add_argument("--worker-batch-size", type=int, default=200)
     ap.add_argument("--max-tasks-per-child", type=int, default=5)
+    ap.add_argument(
+        "--cache-path", default=BOBCAT_CACHE, help="Bobcat parse diskcache dir (override for local testing)."
+    )
     args = ap.parse_args()
 
     if args.stage == "enumerate":
@@ -596,6 +613,7 @@ if __name__ == "__main__":
             args.max_workers,
             args.worker_batch_size,
             args.max_tasks_per_child,
+            args.cache_path,
         )
     else:
         PARTS_DIR = args.parts_dir

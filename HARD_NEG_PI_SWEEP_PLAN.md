@@ -617,29 +617,115 @@ does everything described above in one `enumerate` stage:
   3. Unit-checked `_unify_rank`/`_is_1d` against a synthetic multi-output-wire
      einsum string (`ab,cd->bcd` -> `ab,cd->b`) — matches `UnifyEinsumRankStep`'s
      behavior exactly.
-  4. Launched a tiny end-to-end run of the actual `enumerate` CLI stage (2 synthetic
-     captions, 2 workers, real multiprocessing pool + part-file writing) to
-     smoke-test the plumbing around the verified logic — **result not yet known
-     as of this writing, still running** (cold bobcat-parser load per worker is
-     slow, consistent with the ~226s/cold-call finding earlier in this doc, so a
-     2-worker pool startup on a laptop taking several minutes is expected, not a
-     hang — confirmed both worker processes alive and CPU-active via `ps`, not
-     stuck). Check this before trusting the plumbing on the cluster.
+  4. Ran the actual `enumerate` + `score` CLI stages end to end locally (2
+     synthetic captions, 2 workers, real multiprocessing pool + part-file
+     writing + CLIP scoring) — **PASSED**, after finding and fixing two real bugs
+     along the way (see "Bugs found and fixed" below). Final output inspected
+     directly: `coco_hard_negs_train.parquet`-equivalent has 3 rows for the 2
+     captions (`h1` -> obj `dog↔cat` h=0.931, attr `red↔small` h=0.860; `h2` -> obj
+     `bike↔man` h=0.848 — `h2` "a man ride a bike" only appears in the bobcat
+     output, correctly excluded from tree output since it wasn't in the tiny
+     `tree_train` fixture, confirming the per-parser conditional-compile gating
+     works), tree output has 2 rows (only `h1`, correctly excluded `h2`); both have
+     the full `text_hash, processed_text, neg_text, t, w1, w2, diagram, symbols, h`
+     schema; `neg_text` values are correctly swapped ("a red cat chase a small
+     dog", "a small dog chase a red cat", "a bike ride a man"); diagram strings
+     end in a single output index (rank-1, e.g. `...->i`, `...->W`) confirming the
+     `_unify_rank` port is wired correctly end to end, not just unit-correct.
+
+**Bugs found and fixed while running the above (both real, neither anticipated by
+the plan doc above):**
+
+1. **Cluster crash — diskcache write race under concurrent workers (hit twice on
+   the cluster: smoke job 7082632, batch 8/10, ~09:57-10:00). All `max_workers`
+   processes point `CachedBobcatParser` at the SAME shared `bobcat/diskcache`
+   directory and write every cache miss back to it; since every caption in this
+   job is unique (deduped by `text_hash` up front), essentially every parse is a
+   miss, so this is unusually write-heavy vs. the cache's normal mostly-read
+   pattern. Under that write pressure, diskcache's internal `_cull`/`reset`
+   accounting hit a transient race (`ValueError: not enough values to unpack
+   (expected 1, got 0)` inside `diskcache/core.py`, from `self._cache[key] =
+   result` in `cached_bobcat.py::sentences2trees`) and killed the job — the parse
+   result itself had already been computed successfully; only the optional
+   write-back failed.
+   **Tried:** wrapped that write in try/except (log + keep the parsed result
+   regardless) in `qnlp/discoviz/parser/cached_bobcat.py`.
+   **REVERTED at user's request (2026-07-21):** job 7082661 (the FULL run) was
+   submitted 7 minutes after 7082632 (the smoke run) and has NOT hit this error —
+   still running cleanly at the time this was checked. User's read: this was
+   likely triggered by running the smoke and full jobs CONCURRENTLY (2 jobs × 5
+   workers = 10 processes hammering the same shared diskcache at once, not just 5
+   from a single job), not a flaw that shows up in normal single-job operation.
+   Reverted `cached_bobcat.py` back to its original (unwrapped) state — do not
+   reapply without new evidence this recurs from a single job running alone. If
+   it recurs under normal (non-overlapping) operation, the fix above is ready to
+   reapply from this doc's history.
+2. **Local-only hang, looked like a stall but was actually a crash-loop.** The
+   module hardcodes `BOBCAT_CACHE = "/SAN/intelsys/discoviz/fotinos/QNLP/.cache/
+   lambeq/bobcat/diskcache"`, which only exists on the cluster — locally `/SAN`
+   doesn't exist at all. Each worker's `_worker_init` failed trying to create the
+   cache dir there, and `multiprocessing.Pool` kept spawning replacement workers
+   to maintain its process count (a known Pool gotcha when an initializer raises)
+   — ~250 rapid respawns over ~28 minutes with zero progress, easy to mistake for
+   a slow cold-start rather than a crash-loop (confirmed via the giveaway: one
+   fresh timestamped log file created every few seconds, since `setup_logger` runs
+   at module import and each respawn re-imports the module). **Fix (kept):** added
+   a `--cache-path` CLI override (defaults to the same cluster path, so cluster
+   behavior is unchanged) so this is actually testable locally.
+3. **Job 7082661 (the full run) stalled at the end of part 1/11, memory-blown —
+   found 2026-07-21 ~13:00-14:00 while monitoring it live.** Progressed cleanly
+   through all 250 batches of part 1 (`CHUNK` was still 50,000 at the time —
+   250 batches × 200/batch = 50,000 captions, steady ~0.17-0.18s/caption avg,
+   no errors), then went silent for 30-40+ minutes after batch 250 with the parts
+   dir still empty. `qstat -j 7082661` showed `maxvmem=90.277G` against a
+   `tmem=16G` × 5 slots (`pe smp 5`) request — i.e. peaked at/near/over the total
+   memory reservation. Root cause (reasoned from the code, not directly observed
+   via a cluster debugger): `enumerate_stage` accumulates ALL of a chunk's output
+   rows (`bobcat_rows`, `tree_rows` — Python lists of tuples, ~150-200k rows for a
+   50k-caption chunk at the ~3.5-3.6 cand/caption reference rate) in the MAIN
+   process across all 250 batches, and only builds+writes at the very end via
+   `pl.DataFrame(rows, schema=_ROW_SCHEMA, orient="row")` — a row-oriented
+   construction that has to hold the source list AND the new columnar frame
+   simultaneously. This is a purely structural memory peak (list monotonically
+   grows to its max size exactly at the last batch, then roughly doubles during
+   the DataFrame build) — NOT the lambeq-tree-leak explanation first suspected;
+   that would show up as gradual/periodic slowdown across batches (bounded by
+   `maxtasksperchild` worker recycling), not a hard stop precisely at the chunk
+   boundary, which is what was actually observed. This step was also completely
+   unlogged before the fix below, so there was no way to tell "slow" from "stuck"
+   from the log alone.
+   **Fix:** `CHUNK` reduced 50,000 -> 5,000 (bounds the worst-case accumulated
+   list and DataFrame-build size to ~1/10th, i.e. peak memory should drop
+   roughly proportionally). Added logging around the previously-silent end-of-
+   chunk step: row counts accumulated, DataFrame-build duration, and per-file
+   write duration/row-count, so a future stall is immediately diagnosable by
+   which specific sub-step it's in rather than by "guess and check `ps`/`qstat`."
+   Verified locally (2-caption smoke test) that the new log lines fire correctly
+   end to end. **Job 7082661 should be `qdel`'d — it is expected to be
+   stuck/thrashing indefinitely at the memory ceiling, not merely slow — before
+   resubmitting with this fix.**
 
 **NOT yet done (must happen before the real cluster run):**
-- Confirm the local 2-caption smoke test above actually completes and produces
-  well-formed `part_bobcat_00000.parquet` / `part_tree_00000.parquet` files with
-  the expected columns/row counts.
-- Cluster smoke test (`qsub -v SMOKE=2000 scripts/submit_generate_hard_negatives_enumerate.sh`)
-  — needed to (a) confirm coverage/candidate-rate stats still match the ~99%/3.5-
-  3.6-per-caption reference now that lemmatize+dual-compile runs inside the same
-  worker call, and (b) measure real per-caption throughput of the COMBINED
-  parse+compile pipeline, which is new cost the earlier (~1h/50k-caption-part)
-  throughput numbers from the enumerate-only design did NOT include — do not
-  assume the old timing extrapolation still holds before checking.
+- `qdel 7082661` (memory-blown, stuck since ~12:29) and resubmit fresh with the
+  `CHUNK=5,000` + logging fix. `cached_bobcat.py` stays UNCHANGED from its
+  original state (fix #1 above reverted) — do not resubmit believing that's
+  fixed, it isn't; watch for the diskcache race recurring specifically if
+  multiple jobs against this script are ever run concurrently again.
+- Cluster smoke test needed to (a) confirm coverage/candidate-rate stats still
+  match the ~99%/3.5-3.6-per-caption reference now that lemmatize+dual-compile
+  runs inside the same worker call, and (b) measure real per-caption throughput of
+  the COMBINED parse+compile pipeline, which is new cost the earlier
+  (~1h/50k-caption-part) throughput numbers from the enumerate-only design did NOT
+  include — do not assume the old timing extrapolation still holds before
+  checking. Also re-check the new memory ceiling at the smaller `CHUNK=5,000`
+  before trusting the full 11-part (now more chunks at the smaller size) run not
+  to hit the same wall.
 - Decide fate of the OLD job 7081533 (enumerate-only design, string-swap-only,
   still possibly running on the cluster as of this writing) — asked the user,
-  not yet confirmed either way (kill vs let finish and ignore output).
+  not yet confirmed either way (kill vs let finish and ignore output). User said
+  (2026-07-21) they'll let it keep running since it doesn't hurt anything; its
+  output remains not directly usable by the new design (see "operational note"
+  above), at most useful later as an independent cross-check.
 - Phase 0 (unified bobcat/tree split) is still NOT implemented — this combined
   script's per-parser conditional-compile logic is currently load-bearing (real
   ~59% train-set divergence), not the no-op safety net it becomes once Phase 0
