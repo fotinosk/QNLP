@@ -199,3 +199,49 @@ run (checkpoint epoch 34, 23,953 symbols) evaluated: retrieval still at chance, 
 numbers marginally above chance. Full row in RESULTS.md §A1.
 
 **Follow-up optimization (same day):** `_prepare_rescaled_weights` — each `forward()` now rescales + fp64-casts every *unique* symbol in the batch once, via a few shape-grouped batched ops, instead of per occurrence inside every contraction call (~2/3 of each dispatch-bound call's ops were this preprocessing). Threaded through both the batched and single paths as a `prepared` dict; valid only within one forward (never cached across optimizer steps); NLC untouched. Verified bit-identical forward (0.0 diff on mixed/pure/B=1 batches, fp32 output dtype preserved), grads at fp32 accumulation noise (1.5e-5). Measured on CPU tail batches: 54.0 -> 23.4 ms/batch (**2.3x** vs pre-change per-sample path, grouping + prepared combined); GPU gain expected larger since the removed ops were pure dispatch. Revised prediction: frozen epoch ~40 min -> **~6-10 min**.
+
+## 2026-07-22 — Hard-negative π-sweep: data generation complete + port validated
+
+**Context:** full plan/history in `HARD_NEG_PI_SWEEP_PLAN.md`. Self-generated
+swap-based hard negatives (obj/attr word swaps on the lemmatized CCG tree,
+compiled to BOTH diagram types from the positive's single parse), keyed to our
+train rows by `text_hash`, CLIP-scored for hardness `h`. Runs on the ORIGINAL
+(unmatched) bobcat/tree splits — Phase 0 matched splits implemented
+(`unify_splits.py`) but deliberately NOT used for this sweep (negatives were
+enumerated from the original train parquets; matched splits would create silent
+coverage gaps).
+
+**Generation (sharded enumerate, 20-way SGE array + score job 7091296):**
+- `coco_hard_negs_train.parquet`: 1,229,136 candidates / 366,684 captions
+  (98.55% of bobcat train, 3.35 cand/caption).
+- `coco_hard_negs_tree_no_type_train.parquet`: 1,572,394 / 429,695
+  (98.70% of tree train, 3.66 cand/caption). Reference: 98.8%, 3.62.
+- `h` (CLIP ViT-B/32 via transformers, template "a photo of a {}", matching the
+  colleague's score_negs_hardness.py — NOTE: different wrapper than training's
+  `clip` package, same underlying weights; kept for colleague-comparability,
+  h is only used relatively so wrapper deltas don't matter): mean 0.824,
+  p5 0.74, p95 0.90; h>0.95 only ~0.2%.
+
+**Port validation (job after fix, lemma-normalized both sides):** 244,687
+exact-match captions vs the colleague's negs: **97.4% identical candidate sets,
+mean Jaccard 0.985**. (First run scored 0.702 — an artifact: our w1/w2 are lemma
+forms since the v3 redesign, his are surface forms, and the validator didn't
+lemmatize his side, double-counting every plural swap word as two mismatches.)
+Residual ~2.6% is benign: nominal gerunds lemmatized to verb lemmas on our side
+(internally consistent with our lemmatized training data), his surface-only
+sign↔signs-style swaps that are lemma-identity no-ops (correctly refused by our
+design), and rare WordNet quirks (vases→vas→va) / malformed captions.
+
+**Operational lessons (details in the plan doc):** enumerate initially OOM'd at
+~90G — root cause was SYNCHRONIZED worker recycles (all workers reloading
+parser+ansatz at once), fixed with per-worker random startup jitter, NOT the
+suspected chunk-accumulation or leak-budget issues; final design writes per
+100-caption batch (fully resumable, kill-any-time) and shards via global batch
+index % num_shards (safe concurrent writes to one parts dir). Also found+fixed:
+`_split_ids` was non-deterministic despite seed (polars `.unique()` order
+instability) — affects all `split_by_groups` callers.
+
+**Next:** π=1 frozen smoke run, then the 20-run grid
+(`scripts/submit_pi_sweep_{bobcat,tree}_linear[_frozen].sh`, SGE arrays -t 1-5
+→ π ∈ {0, 0.1, 0.25, 0.5, 1.0}; bobcat cells deliberately pin
+ML_DATASET_NAME=coco_single_caption_nlc to match the negatives' text_hash keying).
