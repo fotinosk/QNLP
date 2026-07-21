@@ -245,6 +245,62 @@ cluster).** Files:
   `qsub scripts/submit_generate_hard_negatives.sh`. Validation Jaccard ≥~0.8 expected;
   large HIS-ONLY buckets = port bug, investigate before Phase A.
 
+**SMOKE TEST RESULT (job 7081219, 2026-07-20): FOUND A DESIGN BUG, NOW FIXED.**
+386/500 (77%) cache misses — the "no parsing happens, cache hits only" assumption
+was wrong. Root cause (confirmed by direct key comparison against the real
+diskcache): in `compiler_step.py::CCGCompilerStep.process()`, the **LMDB diagram
+store (keyed by text_hash) is checked FIRST**, and the worker pool (hence
+`CachedBobcatParser`, hence the tree diskcache) is only invoked for captions NOT
+already in LMDB at compile time. So the tree diskcache is an incomplete,
+history-dependent subset of the training set — not a full mirror — and never was.
+The enumeration logic itself was fine: of the 114/500 captions that DID have a
+cached tree, candidate yield (3.45/caption) and h distribution matched his
+reference (3.62/caption) closely.
+
+**REDESIGNED 2026-07-20 — two-stage, now a real parsing job:**
+`generate_hard_negatives.py` is now `enumerate`/`score` subcommands (both required
+via CLI positional arg):
+- `enumerate` (CPU only): worker pool mirroring `CCGCompilerStep`'s pattern
+  (`mp.get_context("spawn").Pool`, `maxtasksperchild` recycling — same lambeq
+  memory-leak mitigation as [[project-lambeq-tree-memory-leak]]). Each worker
+  holds ONE real `CachedBobcatParser(load_parser=True)` targeting
+  `bobcat/diskcache` and calls `sentences2trees()` per batch — this checks the
+  cache internally AND parses+caches on a miss, so coverage becomes complete
+  rather than whatever fraction happened to miss LMDB historically. Trees never
+  cross the process boundary as raw objects — swap enumeration happens INSIDE
+  the worker (`_enumerate_from_tree`), only lightweight tuples come back. Writes
+  the same resumable 50k-caption part files as before (no `h` column yet).
+- `score` (GPU, short): loads all parts, CLIP-embeds the unique swapped words
+  once, joins `h`, writes final `coco_hard_neg_specs.parquet` atomically. Kept
+  separate so the (many-hour) CPU parsing stage never holds a GPU allocation idle.
+- Only `bobcat/diskcache` is used now (dropped the separate tree_no_type cache
+  path) — both parsers share the same underlying CCG trees, this generation step
+  doesn't care which store a tree came from, and using one cache halves the
+  redundant parsing work versus checking two.
+- Verified locally (no cluster needed): synthetic-tree swap enumeration still
+  correct after the refactor into `_enumerate_from_tree`; `CCGTree` confirmed
+  plain-attribute (safe for `to_json`/pickling, though we no longer need to move
+  tree objects across processes at all — enumeration moved inside the worker
+  instead); module imports cleanly; both submit scripts pass `bash -n`.
+  NOT verified: real per-sentence bobcat parse throughput (a probe job to time
+  this stalled/timed out against the cluster mid-session — cluster was reported
+  unresponsive; harmless to skip, the 72h budget has generous headroom, but
+  CHECK THE FIRST SMOKE RUN'S elapsed-time-per-caption to see if `max-workers`/
+  `worker-batch-size` need tuning before the full run).
+
+Scripts: `scripts/submit_generate_hard_negatives_enumerate.sh` (CPU, 16G tmem,
+5 slots, 72h — mirrors `submit_coco_create_dataset_tree_no_type.sh`'s resource
+shape) and `scripts/submit_generate_hard_negatives_score.sh` (GPU, 2h). The old
+single-script `submit_generate_hard_negatives.sh` is REMOVED (superseded).
+
+TO RUN (user):
+```
+qsub -v SMOKE=2000 scripts/submit_generate_hard_negatives_enumerate.sh   # smoke
+# check log: coverage should approach ~99%, not 22.8%; note elapsed time/caption
+qsub scripts/submit_generate_hard_negatives_enumerate.sh                 # full (resumable — rerun same cmd if killed)
+qsub scripts/submit_generate_hard_negatives_score.sh                     # after all parts exist; also runs validation
+```
+
 #### Original design notes (kept)
 
 Motivation: the colleague's negs are keyed to HIS caption set/forms; ours are lemmatized

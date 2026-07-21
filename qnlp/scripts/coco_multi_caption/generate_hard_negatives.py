@@ -1,10 +1,23 @@
 """Generate hard-negative swap candidates for OUR COCO captions (Phase A0).
 
 Port of the colleague's caption-level generator (discoviz-repo/llm/systematic/
-gen_hard_negs_v2.py + score_negs_hardness.py) onto our artifacts: instead of his
-trees_train jsonl we read lambeq CCGTree objects straight from the
-CachedBobcatParser diskcache, keyed by the exact post-lemmatize training strings
-in our train parquets. No parsing happens here — cache hits only.
+gen_hard_negs_v2.py + score_negs_hardness.py) onto our artifacts.
+
+IMPORTANT (found via smoke test, job 7081219, 2026-07-20): the CachedBobcatParser
+diskcache is NOT a complete mirror of the training set. CCGCompilerStep checks the
+LMDB diagram store (keyed by text_hash) FIRST and only invokes the parser — hence
+only populates the tree diskcache — for captions that were not already compiled
+there at some point in the past. So most captions have NO cached tree and must be
+PARSED here. This is a real, CPU-bound bobcat parsing job (hours), not a fast
+lookup pass.
+
+Two stages, run as separate cluster jobs (see submit scripts):
+  enumerate — CPU only. For each caption: get its CCGTree (diskcache hit, or a real
+    bobcat parse via a worker pool with recycling — the same memory-leak mitigation
+    used by CCGCompilerStep, since lambeq CCG objects leak cumulatively), enumerate
+    obj/attr swaps, write resumable per-chunk part files (no hardness yet).
+  score — GPU. Loads all parts, CLIP-embeds the unique swapped words once, joins on
+    h, writes the final output.
 
 Swap rules (verbatim from gen_hard_negs_v2, CCG grammar):
   OBJECT   : two distinct head nouns (type "n") with a predicate leaf (type
@@ -25,19 +38,19 @@ Output: data/datasets/coco_hard_neg_specs.parquet with columns
   text_hash, processed_text, neg_text, t ("obj"|"attr"), h, w1, w2
 keyed by the POSITIVE row's text_hash (joins 1:1 onto both train parquets).
 
-Run on the cluster from PROJECT_DIR (caches + parquets are there):
-  python -m qnlp.scripts.coco_multi_caption.generate_hard_negatives
+Run on the cluster from PROJECT_DIR:
+  python -m qnlp.scripts.coco_multi_caption.generate_hard_negatives enumerate
+  python -m qnlp.scripts.coco_multi_caption.generate_hard_negatives score
 """
 
 import argparse
+import gc
+import multiprocessing as mp
 import string
 import time
 from pathlib import Path
 
-import diskcache
 import polars as pl
-import torch
-import torch.nn.functional as F
 
 from qnlp.utils.logging import setup_logger
 
@@ -46,9 +59,9 @@ logger = setup_logger(log_name="generate_hard_negatives")
 MAXK = 6
 CLIP_NAME = "openai/clip-vit-base-patch32"
 TEMPLATE = "a photo of a {}"
+CHUNK = 50_000  # captions per resumable part-file
 
 BOBCAT_CACHE = "/SAN/intelsys/discoviz/fotinos/QNLP/.cache/lambeq/bobcat/diskcache"
-TREE_CACHE = "/SAN/intelsys/discoviz/fotinos/QNLP/.cache/lambeq/bobcat_tree_no_type/diskcache"
 
 DEFAULT_PARQUETS = [
     "data/datasets/coco_single_caption_nlc_train.parquet",
@@ -170,11 +183,141 @@ def materialize(order: list[LeafRecord], i: int, j: int) -> str:
     return " ".join(tokens)
 
 
-# ---------------------------------------------------------------- hardness
+def _enumerate_from_tree(tree, tokens: list[str], tokenizer) -> list[tuple[str, str, str]]:
+    """(t, w1, w2, neg_text) candidates for one already-parsed tree."""
+    leaves = _leaves(tree)
+    lemmas = tokenizer.lemmatize(tokens) if len(tokens) == len(leaves) else [None] * len(leaves)
+    order = [LeafRecord(l.text, lemma, str(l.biclosed_type)) for l, lemma in zip(leaves, lemmas)]
+    order_index = {id(l): k for k, l in enumerate(leaves)}
+    obj = object_swaps(order)
+    attr = attribute_swaps(tree, order_index, order)
+    out = []
+    for t, swaps in (("obj", obj), ("attr", attr)):
+        for i, j in swaps:
+            w1, w2 = sorted((order[i].norm, order[j].norm))
+            out.append((t, w1, w2, materialize(order, i, j)))
+    return out
+
+
+# ---------------------------------------------------------------- worker pool
+# Mirrors compiler_step.py's pattern: heavy CachedBobcatParser loaded once per
+# worker, maxtasksperchild forces periodic restart to bound the lambeq CCG
+# compile memory leak (see memory: project_lambeq_tree_memory_leak).
+
+_worker_parser = None
+_worker_tokenizer = None
+
+
+def _worker_init(cache_path: str):
+    global _worker_parser, _worker_tokenizer
+    from qnlp.discoviz.models.bobcat_text_processor import Tokenizer
+    from qnlp.discoviz.parser.cached_bobcat import CachedBobcatParser
+
+    _worker_tokenizer = Tokenizer()
+    _worker_parser = CachedBobcatParser(device="cpu", cache_path=cache_path, load_parser=True)
+
+
+def _worker_process_batch(items: list[tuple[str, str]]) -> list[tuple[str, str, list]]:
+    """items: (text_hash, processed_text). Returns (text_hash, processed_text, candidates)
+    where candidates = [(t, w1, w2, neg_text), ...]."""
+    global _worker_parser, _worker_tokenizer
+    texts = [t for _, t in items]
+    tokens_list = [_worker_tokenizer.tokenize(t) for t in texts]
+    trees = _worker_parser.sentences2trees(tokens_list, tokenised=True, suppress_exceptions=True, verbose="suppress")
+    results = []
+    for (text_hash, text), tokens, tree in zip(items, tokens_list, trees):
+        cands = _enumerate_from_tree(tree, tokens, _worker_tokenizer) if tree is not None else []
+        results.append((text_hash, text, cands))
+    gc.collect()
+    return results
+
+
+# ---------------------------------------------------------------- stage: enumerate
+
+
+def load_unique_captions(parquets: list[str]) -> pl.DataFrame:
+    frames = []
+    for p in parquets:
+        if not Path(p).exists():
+            logger.warning(f"Parquet not found, skipping: {p}")
+            continue
+        frames.append(pl.read_parquet(p, columns=["text_hash", "processed_text"]))
+    df = pl.concat(frames).unique(subset=["text_hash"], keep="first")
+    logger.info(f"{df.height} unique captions across {len(frames)} parquets.")
+    return df
+
+
+def enumerate_stage(
+    parquets: list[str],
+    output: str,
+    limit: int | None,
+    max_workers: int,
+    worker_batch_size: int,
+    max_tasks_per_child: int,
+) -> None:
+    df = load_unique_captions(parquets).sort("text_hash")
+    if limit:
+        df = df.head(limit)
+
+    parts_dir = Path(str(output).replace(".parquet", "_parts"))
+    parts_dir.mkdir(parents=True, exist_ok=True)
+    n_parts = (df.height + CHUNK - 1) // CHUNK
+    t0 = time.time()
+
+    pool = mp.get_context("spawn").Pool(
+        processes=max_workers, initializer=_worker_init, initargs=(BOBCAT_CACHE,), maxtasksperchild=max_tasks_per_child
+    )
+    try:
+        for k in range(n_parts):
+            part_path = parts_dir / f"part_{k:05d}.parquet"
+            if part_path.exists():
+                logger.info(f"Part {k + 1}/{n_parts} exists — skipping (resume).")
+                continue
+            chunk_df = df.slice(k * CHUNK, CHUNK)
+            items = list(chunk_df.iter_rows())
+            batches = [items[i : i + worker_batch_size] for i in range(0, len(items), worker_batch_size)]
+
+            rows = []
+            n_with_any = 0
+            for batch_results in pool.imap_unordered(_worker_process_batch, batches, chunksize=1):
+                for text_hash, text, cands in batch_results:
+                    if cands:
+                        n_with_any += 1
+                    for t, w1, w2, neg_text in cands:
+                        rows.append((text_hash, text, neg_text, t, w1, w2))
+
+            part = pl.DataFrame(rows, schema=["text_hash", "processed_text", "neg_text", "t", "w1", "w2"], orient="row")
+            tmp = part_path.with_suffix(".tmp.parquet")
+            part.write_parquet(tmp)
+            tmp.rename(part_path)
+            logger.info(
+                f"Part {k + 1}/{n_parts}: {len(items)} captions -> {part.height} candidates, "
+                f"{n_with_any} captions with >=1 candidate ({time.time() - t0:.0f}s elapsed)"
+            )
+    finally:
+        pool.close()
+        pool.join()
+
+    all_parts = pl.concat([pl.read_parquet(p) for p in sorted(parts_dir.glob("part_*.parquet"))])
+    n_covered = all_parts["text_hash"].n_unique()
+    n_obj = (all_parts["t"] == "obj").sum()
+    n_attr = (all_parts["t"] == "attr").sum()
+    logger.info(
+        f"Enumeration done: {df.height} captions, {n_covered} with >=1 candidate "
+        f"({100 * n_covered / max(1, df.height):.1f}%), "
+        f"obj/cap={n_obj / max(1, df.height):.2f} attr/cap={n_attr / max(1, df.height):.2f} "
+        f"({n_obj} obj, {n_attr} attr) in {time.time() - t0:.0f}s. "
+        f"Reference (colleague's release): 98.8% coverage, 3.62 cand/caption."
+    )
+
+
+# ---------------------------------------------------------------- stage: score
 
 
 def clip_word_similarities(pairs: set[tuple[str, str]], device: str) -> dict[tuple[str, str], float]:
     """h per word pair = cos of CLIP text embeddings, template 'a photo of a {}'."""
+    import torch
+    import torch.nn.functional as F
     from transformers import CLIPModel, CLIPProcessor
 
     words = sorted({w for p in pairs for w in p})
@@ -195,116 +338,15 @@ def clip_word_similarities(pairs: set[tuple[str, str]], device: str) -> dict[tup
     return {(a, b): round(float(emb[a] @ emb[b]), 4) for a, b in pairs}
 
 
-# ---------------------------------------------------------------- main
-
-
-def load_unique_captions(parquets: list[str]) -> pl.DataFrame:
-    frames = []
-    for p in parquets:
-        if not Path(p).exists():
-            logger.warning(f"Parquet not found, skipping: {p}")
-            continue
-        frames.append(pl.read_parquet(p, columns=["text_hash", "processed_text"]))
-    df = pl.concat(frames).unique(subset=["text_hash"], keep="first")
-    logger.info(f"{df.height} unique captions across {len(frames)} parquets.")
-    return df
-
-
-def fetch_tree(caches: list[diskcache.Cache], tokenizer, text: str):
-    """Replicates CachedBobcatParser's key: str((tokens, tokenised=True, suppress_exceptions=False))."""
-    tokens = tokenizer.tokenize(text)
-    key = str((tokens, True, False))
-    for cache in caches:
-        if key in cache:
-            return tokens, cache[key]
-    return tokens, None
-
-
-CHUNK = 50_000  # captions per resumable part-file
-
-
-def _enumerate_chunk(chunk_df: pl.DataFrame, caches, tokenizer) -> tuple[list[tuple], int]:
-    """Swap-enumerate one chunk of (text_hash, processed_text) rows.
-    Returns (rows, cache_misses); rows = (text_hash, processed_text, neg_text, t, w1, w2)."""
-    rows: list[tuple] = []
-    misses = 0
-    for text_hash, text in chunk_df.iter_rows():
-        tokens, tree = fetch_tree(caches, tokenizer, text)
-        if tree is None:
-            misses += 1
-            continue
-        leaves = _leaves(tree)
-        lemmas = tokenizer.lemmatize(tokens) if len(tokens) == len(leaves) else [None] * len(leaves)
-        order = [LeafRecord(l.text, lemma, str(l.biclosed_type)) for l, lemma in zip(leaves, lemmas)]
-        order_index = {id(l): k for k, l in enumerate(leaves)}
-
-        obj = object_swaps(order)
-        attr = attribute_swaps(tree, order_index, order)
-        for t, swaps in (("obj", obj), ("attr", attr)):
-            for i, j in swaps:
-                w1, w2 = sorted((order[i].norm, order[j].norm))
-                rows.append((text_hash, text, materialize(order, i, j), t, w1, w2))
-    return rows, misses
-
-
-def run(parquets: list[str], output: str, limit: int | None = None) -> None:
-    from qnlp.discoviz.models.bobcat_text_processor import Tokenizer
+def score_stage(output: str) -> None:
+    import torch
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    tokenizer = Tokenizer()
-    caches = []
-    for path in (BOBCAT_CACHE, TREE_CACHE):
-        if Path(path).exists():
-            caches.append(diskcache.Cache(path))
-        else:
-            logger.warning(f"diskcache not found: {path}")
-    if not caches:
-        raise RuntimeError("No bobcat diskcache available — run on the cluster from PROJECT_DIR.")
-
-    # Deterministic order so chunk boundaries are identical across restarts.
-    df = load_unique_captions(parquets).sort("text_hash")
-    if limit:
-        df = df.head(limit)
-
-    # Resumable enumeration: one part-file per CHUNK captions; existing parts are
-    # skipped, so a killed job picks up at the first missing part on rerun.
-    # Parts are written atomically (tmp + rename) so a mid-write kill can't leave
-    # a truncated part behind. h is NOT in the parts — it's scored over all parts
-    # at the end (cheap), keeping parts independent of the global word vocabulary.
     parts_dir = Path(str(output).replace(".parquet", "_parts"))
-    parts_dir.mkdir(parents=True, exist_ok=True)
-    n_parts = (df.height + CHUNK - 1) // CHUNK
-    t0 = time.time()
-    total_misses = 0
-
-    for k in range(n_parts):
-        part_path = parts_dir / f"part_{k:05d}.parquet"
-        if part_path.exists():
-            logger.info(f"Part {k + 1}/{n_parts} exists — skipping (resume).")
-            continue
-        chunk_df = df.slice(k * CHUNK, CHUNK)
-        rows, misses = _enumerate_chunk(chunk_df, caches, tokenizer)
-        total_misses += misses
-        part = pl.DataFrame(rows, schema=["text_hash", "processed_text", "neg_text", "t", "w1", "w2"], orient="row")
-        tmp = part_path.with_suffix(".tmp.parquet")
-        part.write_parquet(tmp)
-        tmp.rename(part_path)
-        logger.info(
-            f"Part {k + 1}/{n_parts}: {chunk_df.height} captions -> {part.height} candidates, "
-            f"{misses} cache misses ({time.time() - t0:.0f}s elapsed)"
-        )
-
-    all_parts = pl.concat([pl.read_parquet(p) for p in sorted(parts_dir.glob("part_*.parquet"))])
-    n_covered = all_parts["text_hash"].n_unique()
-    n_obj = (all_parts["t"] == "obj").sum()
-    n_attr = (all_parts["t"] == "attr").sum()
-    logger.info(
-        f"Enumeration done: {df.height} captions, {total_misses} cache misses THIS run "
-        f"(misses in resumed parts not re-counted), {n_covered} with >=1 candidate "
-        f"({100 * n_covered / max(1, df.height):.1f}%), "
-        f"obj/cap={n_obj / max(1, df.height):.2f} attr/cap={n_attr / max(1, df.height):.2f} "
-        f"({n_obj} obj, {n_attr} attr)"
-    )
+    part_files = sorted(parts_dir.glob("part_*.parquet"))
+    if not part_files:
+        raise RuntimeError(f"No parts found in {parts_dir} — run the 'enumerate' stage first.")
+    all_parts = pl.concat([pl.read_parquet(p) for p in part_files])
 
     word_pairs = {(w1, w2) for w1, w2 in all_parts.select("w1", "w2").unique().iter_rows()}
     h_by_pair = clip_word_similarities(word_pairs, device)
@@ -324,15 +366,26 @@ def run(parquets: list[str], output: str, limit: int | None = None) -> None:
         f"Wrote {out.height} candidates for {out['text_hash'].n_unique()} captions -> {output}\n"
         f"  mean cand/caption (over covered): {out.height / max(1, out['text_hash'].n_unique()):.2f}\n"
         f"  h: mean={h.mean():.3f} p5={h.quantile(0.05):.3f} p95={h.quantile(0.95):.3f} "
-        f"frac(h>0.95)={(h > 0.95).mean():.3%}\n"
-        f"  (colleague's reference: 98.8% coverage, mean 3.62 cand/caption)"
+        f"frac(h>0.95)={(h > 0.95).mean():.3%}"
     )
 
 
+# ---------------------------------------------------------------- main
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Generate hard-negative swap candidates (Phase A0).")
+    ap.add_argument("stage", choices=["enumerate", "score"])
     ap.add_argument("--parquets", nargs="+", default=DEFAULT_PARQUETS)
     ap.add_argument("--output", default=OUTPUT)
-    ap.add_argument("--limit", type=int, default=None, help="Cap #captions (smoke test).")
+    ap.add_argument("--limit", type=int, default=None, help="Cap #captions (smoke test, enumerate stage only).")
+    ap.add_argument("--max-workers", type=int, default=4)
+    ap.add_argument("--worker-batch-size", type=int, default=200)
+    ap.add_argument("--max-tasks-per-child", type=int, default=5)
     args = ap.parse_args()
-    run(args.parquets, args.output, args.limit)
+
+    if args.stage == "enumerate":
+        enumerate_stage(
+            args.parquets, args.output, args.limit, args.max_workers, args.worker_batch_size, args.max_tasks_per_child
+        )
+    else:
+        score_stage(args.output)
