@@ -46,7 +46,10 @@ echo "========================================="
 
 cd $PROJECT_DIR
 
-$PYTHON -m qnlp.scripts.coco_multi_caption.generate_hard_negatives score
+$PYTHON -m qnlp.scripts.coco_multi_caption.generate_hard_negatives score || {
+    echo "SCORE STAGE FAILED (exit $?) — skipping validation, job unsuccessful."
+    exit 1
+}
 
 echo "--- Validating port against colleague's negs (exact-match subset) ---"
 $PYTHON -m qnlp.scripts.coco_multi_caption.validate_hard_negatives

@@ -543,7 +543,20 @@ def clip_word_similarities(pairs: set[tuple[str, str]], device: str) -> dict[tup
 
     words = sorted({w for p in pairs for w in p})
     logger.info(f"Encoding {len(words)} unique swap words with {CLIP_NAME} on {device}...")
-    model = CLIPModel.from_pretrained(CLIP_NAME).to(device).eval()
+    model = CLIPModel.from_pretrained(CLIP_NAME)
+    try:
+        model = model.to(device)
+    except RuntimeError as e:
+        # torch.cuda.is_available() can be True while the device is actually
+        # unusable (seen on the cluster: another user's rogue process squatting
+        # the card, CUDA_VISIBLE_DEVICES left empty by the scheduler -> "device
+        # busy or unavailable" on .to()). The vocabulary here is small (~17k
+        # words, ~34 batches of 512), so CPU finishes in minutes — fall back
+        # rather than dying and needing a manual resubmit.
+        logger.warning(f"Moving CLIP to {device} failed ({e}) — falling back to CPU.")
+        device = "cpu"
+        model = model.to(device)
+    model = model.eval()
     proc = CLIPProcessor.from_pretrained(CLIP_NAME)
     emb: dict[str, torch.Tensor] = {}
     with torch.no_grad():
