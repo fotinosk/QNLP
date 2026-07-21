@@ -862,10 +862,25 @@ the plan doc above):**
    `max_workers=5` and `max_tasks_per_child=10` (item 7) remain applied — both
    are resume-safe since neither affects batch indexing, only how batches get
    distributed/processed and how often workers reload.
-   **Final settings for the next resubmission:** `tmem=24G`, `max_workers=5`,
-   `worker_batch_size=100` (unchanged from 7085501), `max_tasks_per_child=10`,
-   `WORKER_INIT_JITTER_SECONDS=60` (unchanged). Recycle every `100*10=1,000`
-   captions/worker; max captions lost per kill `100*5=500`.
+
+9. **`tmem` reduced back 24G -> 16G (2026-07-21) — the resubmission got stuck
+   queued (not running), because `tmem=24G x 5 slots = 120G` is a much larger
+   reservation than the job needs, and the scheduler couldn't find room for it.**
+   Now justified by real data rather than a guess in either direction: job
+   7085501 (at `tmem=24G`, i.e. plenty of room) empirically peaked at only
+   `maxvmem=37.950G`. 16G x 5 = 80G total gives ~2x real headroom above that
+   observed peak — smaller reservation than 24G (should schedule faster) while
+   still safely above what's actually been seen, including with the now-doubled
+   `max_tasks_per_child=10` recycle interval. (16G happens to match the
+   ORIGINAL pre-fix value, but that value was an unvalidated guess at the time
+   it first proved insufficient — THIS time it's backed by an actual
+   measurement at comparable settings, not a coincidence to be confused with
+   "reverting the original bug.")
+   **Final settings for the next resubmission:** `tmem=16G` (80G total),
+   `max_workers=5`, `worker_batch_size=100` (unchanged from 7085501),
+   `max_tasks_per_child=10`, `WORKER_INIT_JITTER_SECONDS=60` (unchanged).
+   Recycle every `100*10=1,000` captions/worker; max captions lost per kill
+   `100*5=500`.
 
 **NOT yet done (must happen before the real cluster run):**
 - `qdel` the currently-stuck job and resubmit fresh with all of: `tmem=24G`,

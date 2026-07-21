@@ -1,11 +1,13 @@
 #!/bin/bash
-#$ -l tmem=24G
+#$ -l tmem=16G
 #$ -l h_rt=72:0:0
 # CPU-only bobcat parsing (tagging + CCG search), no GPU needed. 5 slots for memory
 # headroom, matching submit_coco_create_dataset*.sh (same parser, similar cost shape).
-# tmem bumped 16G->24G (5 slots => ~120G total): observed maxvmem~90G with 5 fully-
-# loaded workers (parser+tagger+ansatz each) at tmem=16G (~80G total) — was undersized,
-# not a leak (see HARD_NEG_PI_SWEEP_PLAN.md).
+# tmem history: 16G (undersized guess, ~90G peaks from SYNCHRONIZED worker reloads,
+# fixed via jitter not memory) -> 24G (untested overcorrection, caused long queue wait
+# at 120G total) -> back to 16G (~80G total), now justified by job 7085501's actual
+# maxvmem=37.950G at these settings — ~2x real headroom, not a guess. See
+# HARD_NEG_PI_SWEEP_PLAN.md for the full diagnosis.
 #$ -pe smp 5
 #$ -R y
 #$ -S /bin/bash
