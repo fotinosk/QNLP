@@ -1489,6 +1489,60 @@ Either 4 new scripts reading `PI` from `qsub -v PI=0.25`, or SGE array over π.
 - Readout: SugarCrepe swap-obj/swap-attr (aggregate dilutes ~7×), ARO, Winoground,
   COCO retrieval — all already produced by run.py/run_frozen.py report.
 
+**STATUS: SUBMIT SCRIPTS WRITTEN 2026-07-22 (not yet submitted — score stage must
+finish first so the hard-negatives parquets exist).** Chose the SGE-array option
+(one array per cell, `-t 1-5`, task ID -> pi via `PI_VALUES=(0 0.1 0.25 0.5 1.0)`)
+over per-run `qsub -v PI=...` — matches the sharding pattern already established,
+one qsub launches a cell's 5 runs, and `qsub -t N <script>` reruns a single failed
+pi. Four new scripts:
+- `scripts/submit_pi_sweep_bobcat_linear.sh` (bobcat/linear/non-frozen -> `run`)
+- `scripts/submit_pi_sweep_bobcat_linear_frozen.sh` (bobcat/linear/frozen -> `run_frozen`)
+- `scripts/submit_pi_sweep_tree_linear.sh` (tree/linear/non-frozen -> `run`)
+- `scripts/submit_pi_sweep_tree_linear_frozen.sh` (tree/linear/frozen -> `run_frozen`)
+Each based on its corresponding existing `submit_coco_multi_caption_*` script
+(tmem=32G, h_rt=48h, gpu, batch 256, LR 0.002 etc. unchanged), plus
+`ML_HARD_NEG_PI=$PI`, `ML_HARD_NEGS_DATASET` (bobcat: `coco_hard_negs`; tree:
+`coco_hard_negs_tree_no_type`), `MLFLOW_RUN_NAME` suffixed `_pi${PI}`, and mail
+set to abort-only (`-m a`) to avoid 5x begin/end mail per cell.
+
+**⭐ Deliberate deviation from the base bobcat scripts, found while writing these:**
+the existing bobcat linear cells DEFAULT to `coco_single_caption` (no `_nlc`
+suffix — run.py's linear-mode fallback), but the hard negatives were enumerated
+from `coco_single_caption_nlc_train.parquet`'s captions (`BOBCAT_TRAIN` in
+`generate_hard_negatives.py`) and are joined at train time by `text_hash`.
+Training bobcat on the non-nlc dataset would make the join silently miss any
+caption not shared between the two builds — reduced coverage with no error. So
+BOTH bobcat sweep scripts explicitly set `ML_DATASET_NAME=coco_single_caption_nlc`
+(linear mode ignores the nlc build's `path` column; the tree cells already read
+an nlc-named dataset in linear mode, so this is the same established pattern,
+just made explicit for bobcat). Consequence: the pi=0 bobcat cells are NOT
+byte-comparable to older `coco_single_caption`(non-nlc) baseline runs — they're
+comparable within this sweep (which is the comparison that matters), and pi=0 is
+included in the grid precisely for that reason.
+Also note: no existing bobcat multi-caption LINEAR frozen submit script existed
+to copy (`submit_coco_multi_caption_frozen.sh` is the NON-linear variant) — the
+bobcat frozen sweep script derives from the tree linear frozen one minus the
+tree-specific env.
+
+**Verified locally:** all 4 scripts pass `bash -n`; the task-ID -> pi mapping
+produces exactly {0, 0.1, 0.25, 0.5, 1.0} with matching `_pi{PI}` run-name
+suffixes; and the full env chain (`ML_HARD_NEG_PI`, `ML_HARD_NEGS_DATASET`,
+`ML_DATASET_NAME`, `ML_USE_NON_LINEAR_CONTRACTIONS`) round-trips correctly into
+`ExperimentConfig` fields in the real qnlp env. Not verified: an actual cluster
+submission (blocked on the score stage producing the hard-negatives parquets).
+
+**To launch (after score stage completes + a pi=1 frozen smoke run):**
+```
+qsub scripts/submit_pi_sweep_bobcat_linear_frozen.sh    # frozen cells first (cheap)
+qsub scripts/submit_pi_sweep_tree_linear_frozen.sh
+qsub scripts/submit_pi_sweep_bobcat_linear.sh           # non-frozen (expensive half)
+qsub scripts/submit_pi_sweep_tree_linear.sh
+# 4 arrays x 5 tasks = 20 runs; each task requests 1 GPU (up to 20 GPUs if the
+# scheduler runs everything at once — stagger the qsubs if queue-limited, per
+# the budget note above: non-frozen pi in {0, 0.25, 1.0} first via e.g.
+#   qsub -t 1 ...; qsub -t 3 ...; qsub -t 5 ...
+```
+
 ### Verification
 
 1. Unit-ish check: build script on a 1k-row slice locally (bobcat) — assert join rate,
