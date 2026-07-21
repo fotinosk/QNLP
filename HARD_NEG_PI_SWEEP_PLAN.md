@@ -343,37 +343,34 @@ image, a 20-sample spot-check of multi-caption images lands consistently,
 reslice, no recompute), schema/dtypes match the originals exactly, and
 `split_by_groups` is now genuinely reproducible.
 
-**⚠️ Open consequence, not yet decided — how this interacts with the
-already-in-flight hard-negative generation:** the sharded `enumerate` job
-(20 shards, running against `coco_single_caption_nlc_train.parquet` /
-`coco_single_caption_nlc_tree_no_type_train.parquet` — the ORIGINAL,
-unmatched splits) was started, and has real progress, BEFORE Phase 0 was
-implemented. Running Phase 0 now does NOT retroactively change what that job
-already generated — its output is scoped to the old, divergent splits.
-Options, not yet chosen:
-1. Let the in-flight generation finish against the old splits, treat Phase 0
-   as a separate future improvement, and decide at Phase C time whether the
-   sweep runs against the old or new (matched) datasets.
-2. Regenerate hard negatives from scratch against the NEW matched datasets
-   once Phase 0's output is verified (re-run `enumerate`/`score` pointed at
-   `coco_single_caption_nlc_matched_train.parquet` /
-   `coco_single_caption_nlc_tree_no_type_matched_train.parquet` instead) —
-   the "right" methodological outcome per Phase 0's own motivation (removing
-   the bobcat-vs-tree confound), but throws away the in-flight job's progress
-   and costs a fresh multi-hour run.
-Not decided — needs the user's call, ideally before Phase C is scripted, since
-Phase C's submit scripts need to know which dataset names to point at.
+**⚠️ DECIDED 2026-07-22 — option 1 chosen: this sweep proceeds on the ORIGINAL
+(unmatched) splits. Phase 0 is implemented but NOT applied to this generation.**
+User's explicit call: the sharded `enumerate` job finished and its output is
+the source of truth going forward — it will NOT be regenerated. This isn't
+just a compute-cost tradeoff; it's the only consistent choice given what's
+already built: `enumerate_stage` only ever scanned the ORIGINAL `_train
+.parquet` files (never val/test) to decide which captions get hard-negative
+candidates. If training later switched to the Phase 0 *matched* train sets,
+any caption that moves from old-val/test into new-matched-train would have
+ZERO candidates available (never enumerated) — a silent coverage gap, not
+just a missed methodological nicety. Keeping the original splits keeps every
+already-generated hard-negative fully valid, no mismatch.
+Practical consequence: Phase C submit scripts (not yet written) must point
+`ML_DATASET_NAME` at the ORIGINAL dataset names (`coco_single_caption_nlc`,
+`coco_single_caption_nlc_tree_no_type`), NOT the `_matched` ones —
+`unify_splits.py`'s output is currently unused by this sweep. Phase 0 remains
+available as a future improvement if a later, from-scratch hard-negative
+generation round is ever done, but is explicitly NOT part of this run.
 
-**NOT yet done (still needed before trusting this on the cluster):**
+**NOT yet done (still needed before trusting Phase 0 if/when it IS used later):**
 - Actually run `unify_splits.py` on the cluster against the real
   463,075/542,040-row pools (only tested locally against a small synthetic
   fixture) — row-count-scale behavior (memory, join performance on real data)
-  unverified.
+  unverified. Not blocking THIS sweep (see decision above), but worth doing at
+  some point if Phase 0 is ever going to be used for real.
 - Checks E and F (end-to-end smoke test through the training scripts; grep the
-  sweep's submit scripts for `ML_DATASET_NAME`) — both explicitly manual,
-  not yet done.
-- The fork above (in-flight generation vs. regenerate against matched
-  datasets) — needs a decision.
+  sweep's submit scripts for `ML_DATASET_NAME`) — both explicitly manual, not
+  done, and now only relevant to a future Phase-0-using run, not this one.
 
 **Verification plan — run ALL of these immediately after generating the matched
 files, BEFORE starting hard-negative generation on top of them (a bug here would
