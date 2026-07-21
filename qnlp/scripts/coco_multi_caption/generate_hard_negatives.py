@@ -439,11 +439,24 @@ def enumerate_stage(
     worker_batch_size: int,
     max_tasks_per_child: int,
     cache_path: str = BOBCAT_CACHE,
+    num_shards: int = 1,
+    shard_index: int = 0,
 ) -> None:
     """Resumable at BATCH granularity (not chunk/part): each worker_batch_size-sized
     batch gets its own two part files, written the moment that batch's result comes
     back — never accumulated across batches in the main process. If killed, restart
-    with the same command; only the batch(es) in flight at kill time are redone."""
+    with the same command; only the batch(es) in flight at kill time are redone.
+
+    num_shards/shard_index: batch indices are GLOBAL (computed over the full sorted
+    caption list regardless of sharding), so multiple independent processes/jobs can
+    safely run concurrently against the SAME parts_dir — each only ever touches
+    batches where `bi % num_shards == shard_index`, so there is no possibility of two
+    shards writing the same file. Re-running a shard (or all shards) after a failure
+    is just resubmitting the same command again — already-written batches (from this
+    shard or any other) are skipped exactly as in the non-sharded case."""
+    if not (0 <= shard_index < num_shards):
+        raise ValueError(f"shard_index ({shard_index}) must be in [0, num_shards={num_shards})")
+
     df = load_unique_captions(bobcat_train, tree_train).sort("text_hash")
     if limit:
         df = df.head(limit)
@@ -458,11 +471,14 @@ def enumerate_stage(
     def _paths(bi: int) -> tuple[Path, Path]:
         return parts_path / f"part_bobcat_{bi:06d}.parquet", parts_path / f"part_tree_{bi:06d}.parquet"
 
-    pending = [(bi, batch) for bi, batch in enumerate(all_batches) if not all(p.exists() for p in _paths(bi))]
-    n_skipped = n_batches - len(pending)
+    shard_batches = [(bi, batch) for bi, batch in enumerate(all_batches) if bi % num_shards == shard_index]
+    pending = [(bi, batch) for bi, batch in shard_batches if not all(p.exists() for p in _paths(bi))]
+    n_shard_total = len(shard_batches)
+    n_skipped = n_shard_total - len(pending)
     logger.info(
-        f"{len(items)} captions -> {n_batches} batches of ~{worker_batch_size}. "
-        f"{n_skipped} batches already done (resume), {len(pending)} remaining."
+        f"{len(items)} captions -> {n_batches} batches of ~{worker_batch_size} total "
+        f"(shard {shard_index}/{num_shards}: {n_shard_total} batches assigned to this shard). "
+        f"{n_skipped} of this shard's batches already done (resume), {len(pending)} remaining."
     )
 
     t0 = time.time()
@@ -605,7 +621,7 @@ if __name__ == "__main__":
     ap.add_argument("--output-bobcat", default=OUTPUT_BOBCAT)
     ap.add_argument("--output-tree", default=OUTPUT_TREE)
     ap.add_argument("--limit", type=int, default=None, help="Cap #captions (smoke test, enumerate stage only).")
-    ap.add_argument("--max-workers", type=int, default=5)
+    ap.add_argument("--max-workers", type=int, default=4)
     # Each worker restarts every max_tasks_per_child*worker_batch_size captions
     # (lambeq CCG compile memory leak mitigation, see project_lambeq_tree_memory_leak
     # memory). The original pipeline's tuning (1000 captions/worker-lifetime) was for
@@ -628,6 +644,14 @@ if __name__ == "__main__":
     ap.add_argument(
         "--cache-path", default=BOBCAT_CACHE, help="Bobcat parse diskcache dir (override for local testing)."
     )
+    # Sharding: run N independent processes (e.g. separate SGE array-job tasks),
+    # each handling batches where bi % num_shards == shard_index. Safe to run
+    # concurrently against the same --parts-dir (global batch indices, no file
+    # collisions possible) — but give each shard its OWN --cache-path when running
+    # concurrently, since the diskcache write-race seen earlier was plausibly caused
+    # by multiple processes sharing one cache dir concurrently.
+    ap.add_argument("--num-shards", type=int, default=1)
+    ap.add_argument("--shard-index", type=int, default=0)
     args = ap.parse_args()
 
     if args.stage == "enumerate":
@@ -640,6 +664,8 @@ if __name__ == "__main__":
             args.worker_batch_size,
             args.max_tasks_per_child,
             args.cache_path,
+            args.num_shards,
+            args.shard_index,
         )
     else:
         PARTS_DIR = args.parts_dir

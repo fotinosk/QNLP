@@ -882,6 +882,65 @@ the plan doc above):**
    Recycle every `100*10=1,000` captions/worker; max captions lost per kill
    `100*5=500`.
 
+10. **`maxvmem` recurrence at the settings from item 9 — `max_workers=5,
+    max_tasks_per_child=10` combo hit `maxvmem=90.359G`, OVER the 80G budget
+    (2026-07-21).** Confirmed via resume-correctness check first (mtime split
+    cleanly showed old vs. new batches, no corruption — the resume mechanism
+    itself is solid; this is purely a memory-tuning problem, not a data-
+    integrity one). Math doesn't support "just the extra worker" as the cause:
+    7085501 (4 workers, `max_tasks_per_child=5`) peaked at 38G, ~9.5G/worker if
+    linear — 5 workers alone would predict ~47.5G, not 90G. The `max_tasks_per_
+    child` 5->10 change (item 6/7's untested-at-this-combination loosening) is
+    the more likely driver — doubling how long a worker holds accumulated state
+    before recycling, consistent with a genuine (if slow) per-worker leak that
+    doesn't scale linearly with the recycle window. **`max_workers` reverted
+    5 -> 4** per user's explicit request (only that one knob, `max_tasks_per_
+    child` deliberately left at 10 to isolate which change is actually
+    responsible next time it's checked). **Current settings:** `tmem=16G`,
+    `max_workers=4`, `worker_batch_size=100`, `max_tasks_per_child=10`,
+    jitter=60s — NOT the same combination as 7085501 (which had
+    `max_tasks_per_child=5`), so still worth a `qstat vmem` check once this has
+    run a while; if it still creeps up, `max_tasks_per_child=10` is confirmed
+    as the culprit and should also revert to 5.
+
+11. **Sharding added (2026-07-21, user request: run multiple independent jobs
+    against dedicated data chunks, each independently resumable/rerunnable).**
+    Natural fit for the existing design since batch file names are already
+    GLOBAL, positional indices (`part_{bi:06d}.parquet` over the full sorted
+    508,058-caption list) — multiple concurrent processes can safely write into
+    the SAME `--parts-dir` with zero collision risk, as long as each only
+    claims a disjoint subset of batch indices.
+    - New `--num-shards`/`--shard-index` CLI args on `enumerate_stage`. Batches
+      assigned via `bi % num_shards == shard_index` (interleaved, not
+      contiguous ranges — fine either way since captions are sorted by hash,
+      i.e. already effectively random order, so both give similar load
+      balance; interleaving maps cleanly onto SGE array-job task IDs).
+      Resume/rerun is "free": re-running one failed shard, or even the WHOLE
+      array again, just skips whatever's already done (from ANY shard) exactly
+      like the non-sharded case — no new bookkeeping needed.
+    - New `scripts/submit_generate_hard_negatives_enumerate_sharded.sh`: SGE
+      array job (`-t 1-10`, `SHARD_INDEX=$((SGE_TASK_ID-1))`), 2 workers/task
+      (`-pe smp 2`), `tmem=12G` (24G/task — much smaller PER-TASK reservation
+      than the single-job version's 80G, should schedule more easily). Each
+      task gets its OWN `--cache-path` (`.../lambeq_bobcat_shard_{i}/diskcache`)
+      — avoids the diskcache write-race risk from multiple processes sharing
+      one cache dir (suspected cause of the earlier crash), at effectively no
+      cost since cache-hit benefit within this job is already near-zero.
+      Deliberately uses `max_tasks_per_child=5` (the VALIDATED-safe value from
+      7085501), not the untested `10` the non-sharded script currently
+      defaults to — not worth compounding an unvalidated setting with a new
+      untested mechanism (sharding) at the same time. Mail notifications set to
+      `-m a` (abort only, not begin/end) to avoid ~30 emails across 10 tasks.
+      **Must NOT run alongside the non-sharded submit script** — that one
+      claims ALL batches (`num_shards=1` default), so running both
+      simultaneously would have every shard racing it over the same
+      not-yet-done batches (wasteful duplicate compute, not corruption, but
+      pointless) — kill one before starting the other.
+    - **Verified locally**: ran 3 shards concurrently (`num_shards=3`) against
+      the same `parts_dir` with 4 toy captions — correct disjoint batch
+      assignment (`{0,3}`/`{1}`/`{2}`, matching `bi % 3`), no file collisions,
+      no duplicates, all 4 batches covered exactly once across the 3 shards.
+
 **NOT yet done (must happen before the real cluster run):**
 - `qdel` the currently-stuck job and resubmit fresh with all of: `tmem=24G`,
   per-batch resumable `enumerate_stage`, `worker_batch_size=30`. `parts_dir`

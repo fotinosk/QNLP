@@ -53,11 +53,11 @@ if [ -n "$SMOKE" ]; then
     echo "SMOKE RUN: limiting to $SMOKE captions"
     $PYTHON -m qnlp.scripts.coco_multi_caption.generate_hard_negatives enumerate \
         --limit "$SMOKE" --parts-dir data/datasets/coco_hard_negs_compiled_smoke_parts \
-        --max-workers "${MAX_WORKERS:-5}" --worker-batch-size "${WORKER_BATCH_SIZE:-100}" \
+        --max-workers "${MAX_WORKERS:-4}" --worker-batch-size "${WORKER_BATCH_SIZE:-100}" \
         --max-tasks-per-child "${MAX_TASKS_PER_CHILD:-10}"
 else
     $PYTHON -m qnlp.scripts.coco_multi_caption.generate_hard_negatives enumerate \
-        --max-workers "${MAX_WORKERS:-5}" --worker-batch-size "${WORKER_BATCH_SIZE:-100}" \
+        --max-workers "${MAX_WORKERS:-4}" --worker-batch-size "${WORKER_BATCH_SIZE:-100}" \
         --max-tasks-per-child "${MAX_TASKS_PER_CHILD:-10}"
 fi
 
