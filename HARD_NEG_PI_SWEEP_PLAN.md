@@ -705,27 +705,135 @@ the plan doc above):**
    stuck/thrashing indefinitely at the memory ceiling, not merely slow — before
    resubmitting with this fix.**
 
+4. **`CHUNK=5,000` fix (above) turned out NOT to be the real fix — superseded
+   2026-07-21, same day.** Resubmitted job hit the identical ~90G ceiling again
+   (`maxvmem=90.265G`, essentially the same as the original 50k-chunk run's
+   `90.277G`), despite a 10x smaller chunk — and this time stalled MID-part
+   (batch 24/25), not at a chunk boundary, ruling out the "whole-chunk
+   accumulation in the main process" theory as the explanation (no DataFrame
+   build happens mid-batch). Two observations converged on the real cause:
+   - It always died on the SECOND-TO-LAST logged batch of a part (i.e. on the
+     LAST batch, which never got to log). Arithmetic: at the time, `CHUNK/
+     worker_batch_size` (50,000/200=250, then 5,000/200=25) was, in BOTH cases,
+     an EXACT multiple of `max_tasks_per_child=5` (250/5=50, 25/5=5). Since all
+     workers start together and process similarly-timed batches, they drift into
+     lockstep — meaning every worker hits its 5th-task recycle trigger on the
+     SAME batch, every part, and that batch is always the last one. A
+     synchronized recycle means ALL workers get killed and reloaded (full
+     `BobcatParser`+tagger+`CustomMPSAnsatz` reload, independently measured
+     ~226s cold) AT ONCE.
+   - But the peak (~90G) was nearly IDENTICAL between the 50k-chunk and
+     5k-chunk runs, which a pure "leak that grows with data processed" theory
+     doesn't explain (10x less data should mean a much smaller peak if that
+     were the driver). A roughly CONSTANT peak regardless of how much data has
+     been processed is what you'd expect from a STEADY-STATE cost instead: 5
+     concurrently active workers, each holding a fully-loaded parser+tagger+
+     ansatz stack, simply cost close to ~90G combined once several of them are
+     active/reloading around the same time — not a growing leak, a
+     resource-sizing problem. `tmem=16G` x `pe smp 5` (~80G total, assuming
+     per-slot semantics) was very plausibly just undersized for that.
+   **Real fix (2026-07-21, supersedes the CHUNK-based fix):**
+   - **`tmem` bumped 16G -> 24G** in `submit_generate_hard_negatives_enumerate.sh`
+     (~120G total across 5 slots), giving real headroom above the observed ~90G
+     peak rather than trying to out-tune batch sizes against a steady-state cost.
+   - **`enumerate_stage` rewritten for per-BATCH resumability** (at the user's
+     explicit request: "kill and restart manually whenever it gets stuck," so
+     make that cheap). `CHUNK`/"parts" (chunk-of-many-batches) removed entirely.
+     Every `worker_batch_size`-sized batch now gets its own two part files
+     (`part_bobcat_{bi:06d}.parquet` / `part_tree_{bi:06d}.parquet`, global
+     batch index across the WHOLE job, not per-part), written the instant that
+     batch's result comes back from `pool.imap_unordered` — nothing is
+     accumulated across batches in the main process anymore, which also fully
+     obsoletes the earlier accumulate-then-build memory concern as a side
+     effect. `_worker_process_batch` now takes/returns `(batch_index, ...)` so
+     results can be matched to their batch correctly even though
+     `imap_unordered` yields out of order. Resume: skip any batch index whose
+     both output files already exist — checked once per batch instead of once
+     per (much larger) chunk, so a kill loses at most a few in-flight batches
+     (`worker_batch_size` x `max_workers`-ish captions), not up to 5,000/50,000.
+   - `worker_batch_size` default stays at 30 (from the earlier leak-budget fix)
+     — also means `5,000/30` and `50,000/30` etc. no longer land on an exact
+     multiple of `max_tasks_per_child=5` within any given span, breaking the
+     synchronized-recycle resonance too, though this is incidental now that
+     "parts" don't exist as a concept to resonate against — batches are just a
+     flat, continuous stream over the whole 508,058-caption job.
+   **Verified locally:** fresh run writes correctly indexed batch part files
+   out of arrival order; rerunning with the same parts-dir correctly reports
+   "N batches already done (resume), 0 remaining" and does no work; a
+   kill-mid-run test (batches too fast to actually interrupt mid-flight at this
+   toy scale, but the resume-skip mechanism itself is directly verified) left a
+   consistent set of 8 files (4 batches x 2 parsers) that the resume check
+   correctly recognizes as complete.
+
+5. **Worker-restart staggering added (2026-07-21, user request) as a durable
+   hedge against the synchronized-recycle mechanism identified in #4** — even
+   though the new flat batch stream mostly avoids exact resonance now, workers
+   started together and processing similarly-timed tasks can still drift back
+   toward lockstep over a long (72h) job. New `WORKER_INIT_JITTER_SECONDS = 60`:
+   `_worker_init` sleeps `random.uniform(0, 60)`s before loading the parser/
+   tagger/ansatz stack, on EVERY worker (re)start — including every
+   `maxtasksperchild`-triggered respawn, not just the initial pool creation
+   (`_worker_init` re-runs on every respawn, so this keeps re-randomizing
+   offsets throughout the job, not just once at the start). Since recycling is
+   task-count-based (fires after N tasks) rather than time-based, a per-worker
+   time offset established at startup persists across that worker's whole
+   lifetime rather than decaying — so staggered start times keep workers'
+   recycle *moments* staggered too, even if their task *counts* eventually
+   realign. Tradeoff: adds up to 60s (avg ~30s) of pure idle time per worker
+   recycle — acceptable given 72h budget slack, in exchange for workers never
+   reloading simultaneously again. Verified locally: startup jitter visibly
+   adds delay before the first batch completes (20s vs. ~5-8s pre-jitter in an
+   equivalent run), job still completes correctly.
+
+6. **`worker_batch_size` bumped 30 -> 100 (2026-07-21, user request: "a worker
+   recycle takes a long time, we should have it as infrequently as possible").**
+   The `30`/`max_tasks_per_child=5` combo (150 captions/worker-lifetime) was
+   itself overly conservative — it came from directly reusing the ORIGINAL
+   pipeline's `maxtasksperchild=5` tuning without rescaling `worker_batch_size`
+   for this script's ~7x heavier per-caption compile load; the original budget
+   (5 x 1,000 = 5,000 captions/worker-lifetime, 1 diagram/caption) rescales to
+   ~5,000/7 ~= 700-1,000 captions/worker-lifetime as the equivalent-safe budget,
+   not 150. At `worker_batch_size=100` (unchanged `max_tasks_per_child=5`),
+   recycling now happens every `100*5=500` captions/worker — still
+   conservatively inside the rescaled-safe range, but ~3.3x less frequent than
+   before, cutting reload overhead accordingly. Deliberately changed
+   `worker_batch_size` (not `max_tasks_per_child`) because the former also sets
+   write/resume granularity (a kill now loses at most ~100 x `max_workers`
+   captions of in-flight work, e.g. ~400 at `max_workers=4` — still far better
+   than the old 5,000-50,000/chunk) while the latter only controls reload
+   frequency; kept them as separate, independently-tunable knobs (documented
+   inline in the CLI arg comment). Side benefit: total output file count drops
+   from ~33,870 to ~10,162 (fewer, slightly larger batch files). Submit script's
+   `WORKER_BATCH_SIZE` default updated to match (100).
+
 **NOT yet done (must happen before the real cluster run):**
-- `qdel 7082661` (memory-blown, stuck since ~12:29) and resubmit fresh with the
-  `CHUNK=5,000` + logging fix. `cached_bobcat.py` stays UNCHANGED from its
-  original state (fix #1 above reverted) — do not resubmit believing that's
+- `qdel` the currently-stuck job and resubmit fresh with all of: `tmem=24G`,
+  per-batch resumable `enumerate_stage`, `worker_batch_size=30`. `parts_dir`
+  should be cleared first (`rm -rf data/datasets/coco_hard_negs_compiled_parts`)
+  since old part filenames (`part_bobcat_00000.parquet`, 5-digit chunk-index
+  style) are NOT the same indexing scheme as the new per-batch 6-digit
+  global-batch-index files — leftover old-style files would just sit there
+  unused, not corrupt anything, but clearing avoids confusion.
+- `cached_bobcat.py` stays UNCHANGED from its original state (the diskcache-
+  write-race fix from earlier was reverted) — do not resubmit believing that's
   fixed, it isn't; watch for the diskcache race recurring specifically if
-  multiple jobs against this script are ever run concurrently again.
+  multiple jobs against this script are ever run concurrently again (e.g. don't
+  run smoke and full simultaneously).
 - Cluster smoke test needed to (a) confirm coverage/candidate-rate stats still
   match the ~99%/3.5-3.6-per-caption reference now that lemmatize+dual-compile
-  runs inside the same worker call, and (b) measure real per-caption throughput of
+  runs inside the same worker call, (b) measure real per-caption throughput of
   the COMBINED parse+compile pipeline, which is new cost the earlier
-  (~1h/50k-caption-part) throughput numbers from the enumerate-only design did NOT
-  include — do not assume the old timing extrapolation still holds before
-  checking. Also re-check the new memory ceiling at the smaller `CHUNK=5,000`
-  before trusting the full 11-part (now more chunks at the smaller size) run not
-  to hit the same wall.
+  (~1h/50k-caption-part) throughput numbers from the enumerate-only design did
+  NOT include, and (c) confirm `tmem=24G` actually holds this time (watch
+  `qstat -j <id> | grep vmem` at a couple of checkpoints, don't just assume).
 - Decide fate of the OLD job 7081533 (enumerate-only design, string-swap-only,
   still possibly running on the cluster as of this writing) — asked the user,
   not yet confirmed either way (kill vs let finish and ignore output). User said
   (2026-07-21) they'll let it keep running since it doesn't hurt anything; its
   output remains not directly usable by the new design (see "operational note"
-  above), at most useful later as an independent cross-check.
+  above), at most useful later as an independent cross-check. Worth
+  reconsidering given it shares the same diskcache path and was the suspected
+  (though unconfirmed) trigger for the one diskcache-race crash seen so far.
 - Phase 0 (unified bobcat/tree split) is still NOT implemented — this combined
   script's per-parser conditional-compile logic is currently load-bearing (real
   ~59% train-set divergence), not the no-op safety net it becomes once Phase 0

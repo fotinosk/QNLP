@@ -25,8 +25,13 @@ work and keeps each output file precisely scoped to that parser's actual trainin
 rows; see HARD_NEG_PI_SWEEP_PLAN.md "CORRECTION 2026-07-21").
 
 Two stages, run as separate cluster jobs (see submit scripts):
-  enumerate — CPU only. Parse + lemmatize + enumerate + dual-compile per caption,
-    resumable 50k-caption part files (no hardness yet).
+  enumerate — CPU only. Parse + lemmatize + enumerate + dual-compile per caption.
+    Resumable at BATCH granularity (worker_batch_size captions, not a large
+    chunk): each batch's two part files are written the instant that batch's
+    result comes back from the worker pool, never accumulated across batches in
+    the main process. Safe to kill and restart at any point with the same
+    command — only whichever batch(es) were in flight get redone (no hardness
+    yet).
   score — GPU, short. CLIP-embeds the unique swapped words once, joins h onto
     both parsers' outputs by (w1, w2), writes the two final parquets.
 
@@ -75,11 +80,13 @@ logger = setup_logger(log_name="generate_hard_negatives")
 MAXK = 6
 CLIP_NAME = "openai/clip-vit-base-patch32"
 TEMPLATE = "a photo of a {}"
-CHUNK = 5_000  # captions per resumable part-file (kept small: the whole chunk's rows are
-# held in the main process as Python lists before being built into a DataFrame and
-# written — a 50k chunk peaked at ~90G maxvmem on the cluster, see plan doc)
 EMBEDDING_DIM = 512  # matches every linear submit script's ML_EMBEDDING_DIM in this sweep
 BOND_DIM = 10  # matches every linear submit script's ML_BOND_DIM in this sweep
+# Random startup delay applied on every worker (re)start (see _worker_init) so
+# maxtasksperchild-triggered recycles across workers can't converge into a
+# synchronized reload burst (all workers reloading parser+tagger+ansatz at once
+# was the real driver of the ~90G memory peaks — see HARD_NEG_PI_SWEEP_PLAN.md).
+WORKER_INIT_JITTER_SECONDS = 60
 # Exact rule list from CCGCompilerStep.__init__ — must match what positives were
 # compiled with, or negatives' rewritten diagrams diverge from the trained topology.
 REWRITE_RULES = [
@@ -305,8 +312,15 @@ _worker_tree_hashes = None
 def _worker_init(cache_path: str, bobcat_train_path: str, tree_train_path: str):
     global _worker_parser, _worker_tokenizer, _worker_ansatz, _worker_rewriter
     global _worker_bobcat_hashes, _worker_tree_hashes
+    import random
+    import time as _time
+
     from lambeq import AtomicType, Rewriter
     from lambeq.backend.tensor import Dim
+
+    # Runs on EVERY worker (re)start, including maxtasksperchild-triggered
+    # respawns, not just the first launch — see WORKER_INIT_JITTER_SECONDS.
+    _time.sleep(random.uniform(0, WORKER_INIT_JITTER_SECONDS))
 
     from qnlp.discoviz.models.bobcat_text_processor import Tokenizer
     from qnlp.discoviz.parser.asnsatz import CustomMPSAnsatz
@@ -327,13 +341,19 @@ def _worker_init(cache_path: str, bobcat_train_path: str, tree_train_path: str):
     _worker_tree_hashes = set(pl.read_parquet(tree_train_path, columns=["text_hash"])["text_hash"].to_list())
 
 
-def _worker_process_batch(items: list[tuple[str, str]]) -> tuple[list[tuple], list[tuple], int, int, int]:
-    """items: (text_hash, processed_text). Returns (bobcat_rows, tree_rows,
-    n_with_any_candidate, n_compile_fail, n_items) where each row is
-    (text_hash, processed_text, neg_text, t, w1, w2, diagram, symbols_json)."""
+def _worker_process_batch(
+    payload: tuple[int, list[tuple[str, str]]],
+) -> tuple[int, list[tuple], list[tuple], int, int, int]:
+    """payload: (batch_index, [(text_hash, processed_text), ...]). Returns
+    (batch_index, bobcat_rows, tree_rows, n_with_any_candidate, n_compile_fail,
+    n_items) where each row is (text_hash, processed_text, neg_text, t, w1, w2,
+    diagram, symbols_json). The batch_index is carried through so the caller can
+    match a result back to its batch even though imap_unordered returns results
+    out of order."""
     global _worker_parser, _worker_tokenizer, _worker_ansatz, _worker_rewriter
     global _worker_bobcat_hashes, _worker_tree_hashes
 
+    bi, items = payload
     texts = [t for _, t in items]
     tokens_list = [_worker_tokenizer.tokenize(t) for t in texts]
     trees = _worker_parser.sentences2trees(tokens_list, tokenised=True, suppress_exceptions=True, verbose="suppress")
@@ -392,7 +412,7 @@ def _worker_process_batch(items: list[tuple[str, str]]) -> tuple[list[tuple], li
                     tree_rows.append((text_hash, text, neg_text, t, w1, w2, diagram_str, symbols_json))
 
     gc.collect()
-    return bobcat_rows, tree_rows, n_with_any, n_fail, len(items)
+    return bi, bobcat_rows, tree_rows, n_with_any, n_fail, len(items)
 
 
 # ---------------------------------------------------------------- stage: enumerate
@@ -420,14 +440,35 @@ def enumerate_stage(
     max_tasks_per_child: int,
     cache_path: str = BOBCAT_CACHE,
 ) -> None:
+    """Resumable at BATCH granularity (not chunk/part): each worker_batch_size-sized
+    batch gets its own two part files, written the moment that batch's result comes
+    back — never accumulated across batches in the main process. If killed, restart
+    with the same command; only the batch(es) in flight at kill time are redone."""
     df = load_unique_captions(bobcat_train, tree_train).sort("text_hash")
     if limit:
         df = df.head(limit)
 
     parts_path = Path(parts_dir)
     parts_path.mkdir(parents=True, exist_ok=True)
-    n_parts = (df.height + CHUNK - 1) // CHUNK
+
+    items = list(df.iter_rows())
+    all_batches = [items[i : i + worker_batch_size] for i in range(0, len(items), worker_batch_size)]
+    n_batches = len(all_batches)
+
+    def _paths(bi: int) -> tuple[Path, Path]:
+        return parts_path / f"part_bobcat_{bi:06d}.parquet", parts_path / f"part_tree_{bi:06d}.parquet"
+
+    pending = [(bi, batch) for bi, batch in enumerate(all_batches) if not all(p.exists() for p in _paths(bi))]
+    n_skipped = n_batches - len(pending)
+    logger.info(
+        f"{len(items)} captions -> {n_batches} batches of ~{worker_batch_size}. "
+        f"{n_skipped} batches already done (resume), {len(pending)} remaining."
+    )
+
     t0 = time.time()
+    n_with_any_total = 0
+    n_fail_total = 0
+    n_done = 0
 
     pool = mp.get_context("spawn").Pool(
         processes=max_workers,
@@ -436,57 +477,25 @@ def enumerate_stage(
         maxtasksperchild=max_tasks_per_child,
     )
     try:
-        for k in range(n_parts):
-            bobcat_part_path = parts_path / f"part_bobcat_{k:05d}.parquet"
-            tree_part_path = parts_path / f"part_tree_{k:05d}.parquet"
-            if bobcat_part_path.exists() and tree_part_path.exists():
-                logger.info(f"Part {k + 1}/{n_parts} exists — skipping (resume).")
-                continue
-            chunk_df = df.slice(k * CHUNK, CHUNK)
-            items = list(chunk_df.iter_rows())
-            batches = [items[i : i + worker_batch_size] for i in range(0, len(items), worker_batch_size)]
-
-            bobcat_rows, tree_rows = [], []
-            n_with_any = 0
-            n_fail = 0
-            n_done = 0
-            t_batches = time.time()
-            for bi, (b_rows, t_rows, with_any, fail, n_items) in enumerate(
-                pool.imap_unordered(_worker_process_batch, batches, chunksize=1)
-            ):
-                bobcat_rows.extend(b_rows)
-                tree_rows.extend(t_rows)
-                n_with_any += with_any
-                n_fail += fail
-                n_done += n_items
-                logger.info(
-                    f"  batch {bi + 1}/{len(batches)} done ({n_items} captions): "
-                    f"{n_done}/{len(items)} so far, {time.time() - t_batches:.0f}s since part start "
-                    f"({(time.time() - t_batches) / max(1, n_done):.2f}s/caption avg)"
-                )
-
-            logger.info(
-                f"  all batches done for part {k + 1}/{n_parts}: {len(bobcat_rows)} bobcat rows + "
-                f"{len(tree_rows)} tree rows accumulated ({time.time() - t_batches:.0f}s since part start) "
-                f"— building DataFrames..."
-            )
-            t_build = time.time()
+        for bi, bobcat_rows, tree_rows, with_any, fail, n_items in pool.imap_unordered(
+            _worker_process_batch, pending, chunksize=1
+        ):
+            bobcat_path, tree_path = _paths(bi)
             bobcat_part = pl.DataFrame(bobcat_rows, schema=_ROW_SCHEMA, orient="row")
             tree_part = pl.DataFrame(tree_rows, schema=_ROW_SCHEMA, orient="row")
-            logger.info(f"  DataFrames built in {time.time() - t_build:.0f}s — writing parquet...")
-            t_write = time.time()
-            for label, part, path in (("bobcat", bobcat_part, bobcat_part_path), ("tree", tree_part, tree_part_path)):
+            for part, path in ((bobcat_part, bobcat_path), (tree_part, tree_path)):
                 tmp = path.with_suffix(".tmp.parquet")
                 part.write_parquet(tmp)
                 tmp.rename(path)
-                logger.info(
-                    f"  wrote {label} part ({part.height} rows) -> {path} ({time.time() - t_write:.0f}s so far)"
-                )
+
+            n_with_any_total += with_any
+            n_fail_total += fail
+            n_done += n_items
             logger.info(
-                f"Part {k + 1}/{n_parts}: {len(items)} captions -> "
-                f"{bobcat_part.height} bobcat + {tree_part.height} tree candidates, "
-                f"{n_with_any} captions with >=1 candidate, {n_fail} compile failures "
-                f"({time.time() - t0:.0f}s elapsed)"
+                f"batch {bi} done ({n_items} captions, {len(bobcat_rows)} bobcat + {len(tree_rows)} tree rows): "
+                f"{n_done}/{len(pending) * worker_batch_size} so far (approx), "
+                f"{time.time() - t0:.0f}s elapsed ({(time.time() - t0) / max(1, n_done):.2f}s/caption avg), "
+                f"{n_with_any_total} with >=1 candidate, {n_fail_total} compile failures so far"
             )
     finally:
         pool.close()
@@ -597,7 +606,17 @@ if __name__ == "__main__":
     ap.add_argument("--output-tree", default=OUTPUT_TREE)
     ap.add_argument("--limit", type=int, default=None, help="Cap #captions (smoke test, enumerate stage only).")
     ap.add_argument("--max-workers", type=int, default=4)
-    ap.add_argument("--worker-batch-size", type=int, default=200)
+    # Each worker restarts every max_tasks_per_child*worker_batch_size captions
+    # (lambeq CCG compile memory leak mitigation, see project_lambeq_tree_memory_leak
+    # memory). The original pipeline's tuning (1000 captions/worker-lifetime) was for
+    # 1 diagram/caption; this script compiles up to ~7 (up to 6 obj + 6 attr swap
+    # candidates x 2 diagram types), so the equivalent-safe budget rescales to
+    # ~1000/7 ~= 700-1000 captions/worker-lifetime. 100*5=500 lands conservatively
+    # within that range. worker_batch_size ALSO sets write/resume granularity (a kill
+    # loses at most ~worker_batch_size*max_workers captions of in-flight work) — keep
+    # that in mind before raising it further; max_tasks_per_child is the knob to use
+    # if only reload FREQUENCY (not resume granularity) needs adjusting.
+    ap.add_argument("--worker-batch-size", type=int, default=100)
     ap.add_argument("--max-tasks-per-child", type=int, default=5)
     ap.add_argument(
         "--cache-path", default=BOBCAT_CACHE, help="Bobcat parse diskcache dir (override for local testing)."

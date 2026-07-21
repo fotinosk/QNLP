@@ -1,8 +1,11 @@
 #!/bin/bash
-#$ -l tmem=16G
+#$ -l tmem=24G
 #$ -l h_rt=72:0:0
 # CPU-only bobcat parsing (tagging + CCG search), no GPU needed. 5 slots for memory
 # headroom, matching submit_coco_create_dataset*.sh (same parser, similar cost shape).
+# tmem bumped 16G->24G (5 slots => ~120G total): observed maxvmem~90G with 5 fully-
+# loaded workers (parser+tagger+ansatz each) at tmem=16G (~80G total) — was undersized,
+# not a leak (see HARD_NEG_PI_SWEEP_PLAN.md).
 #$ -pe smp 5
 #$ -R y
 #$ -S /bin/bash
@@ -48,10 +51,12 @@ if [ -n "$SMOKE" ]; then
     echo "SMOKE RUN: limiting to $SMOKE captions"
     $PYTHON -m qnlp.scripts.coco_multi_caption.generate_hard_negatives enumerate \
         --limit "$SMOKE" --parts-dir data/datasets/coco_hard_negs_compiled_smoke_parts \
-        --max-workers "${MAX_WORKERS:-4}" --worker-batch-size "${WORKER_BATCH_SIZE:-200}"
+        --max-workers "${MAX_WORKERS:-4}" --worker-batch-size "${WORKER_BATCH_SIZE:-100}" \
+        --max-tasks-per-child "${MAX_TASKS_PER_CHILD:-5}"
 else
     $PYTHON -m qnlp.scripts.coco_multi_caption.generate_hard_negatives enumerate \
-        --max-workers "${MAX_WORKERS:-4}" --worker-batch-size "${WORKER_BATCH_SIZE:-200}"
+        --max-workers "${MAX_WORKERS:-4}" --worker-batch-size "${WORKER_BATCH_SIZE:-100}" \
+        --max-tasks-per-child "${MAX_TASKS_PER_CHILD:-5}"
 fi
 
 echo "========================================="
