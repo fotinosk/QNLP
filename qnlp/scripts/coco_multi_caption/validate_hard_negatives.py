@@ -25,7 +25,7 @@ from qnlp.utils.logging import setup_logger
 logger = setup_logger(log_name="validate_hard_negatives")
 
 NEGS_JSONL = "/SAN/intelsys/discoviz/systematic/data_release_v3/negs_karpathy_dedup.jsonl"
-SPECS = "data/datasets/coco_hard_neg_specs.parquet"
+SPECS = "data/datasets/coco_hard_negs_train.parquet"
 TRAIN = "data/datasets/coco_single_caption_nlc_train.parquet"
 _ID_RX = re.compile(r"_(\d+)\.jpg$")
 

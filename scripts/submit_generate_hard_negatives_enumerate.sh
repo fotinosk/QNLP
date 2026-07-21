@@ -38,7 +38,7 @@ echo "========================================="
 echo "Job started: $(date)"
 echo "Job ID: $JOB_ID"
 echo "Running on: $(hostname)"
-echo "Phase A0 [enumerate]: bobcat-parse missing captions + enumerate swap candidates"
+echo "[enumerate]: bobcat-parse + lemmatize + enumerate swaps + dual-compile (bobcat + tree_no_type)"
 echo "========================================="
 
 cd $PROJECT_DIR
@@ -47,7 +47,7 @@ cd $PROJECT_DIR
 if [ -n "$SMOKE" ]; then
     echo "SMOKE RUN: limiting to $SMOKE captions"
     $PYTHON -m qnlp.scripts.coco_multi_caption.generate_hard_negatives enumerate \
-        --limit "$SMOKE" --output data/datasets/coco_hard_neg_specs_smoke.parquet \
+        --limit "$SMOKE" --parts-dir data/datasets/coco_hard_negs_compiled_smoke_parts \
         --max-workers "${MAX_WORKERS:-4}" --worker-batch-size "${WORKER_BATCH_SIZE:-200}"
 else
     $PYTHON -m qnlp.scripts.coco_multi_caption.generate_hard_negatives enumerate \
@@ -57,5 +57,5 @@ fi
 echo "========================================="
 echo "Job finished successfully at $(date)"
 echo "If killed/timed out: just resubmit this same script — completed parts under"
-echo "data/datasets/coco_hard_neg_specs*_parts/ are skipped automatically."
+echo "data/datasets/coco_hard_negs_compiled*_parts/ are skipped automatically."
 echo "========================================="

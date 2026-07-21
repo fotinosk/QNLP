@@ -1,23 +1,34 @@
-"""Generate hard-negative swap candidates for OUR COCO captions (Phase A0).
+"""Generate hard-negative training pairs for OUR COCO captions (combined design,
+2026-07-21 architecture revision — supersedes the old enumerate-only Phase A0 +
+separate Phase A recompile).
 
-Port of the colleague's caption-level generator (discoviz-repo/llm/systematic/
-gen_hard_negs_v2.py + score_negs_hardness.py) onto our artifacts.
+A swap only exchanges two leaves that already share a CCG type (two `n` nouns, or
+two `n/n` adjectives), so it never changes the derivation tree's structure — only
+two leaves' text. This means a negative's CCGTree is built by deep-copying the
+POSITIVE's already-parsed (and lemmatized) tree and mutating two leaves, with no
+fresh CCG search and no separate recompile pass:
 
-IMPORTANT (found via smoke test, job 7081219, 2026-07-20): the CachedBobcatParser
-diskcache is NOT a complete mirror of the training set. CCGCompilerStep checks the
-LMDB diagram store (keyed by text_hash) FIRST and only invokes the parser — hence
-only populates the tree diskcache — for captions that were not already compiled
-there at some point in the past. So most captions have NO cached tree and must be
-PARSED here. This is a real, CPU-bound bobcat parsing job (hours), not a fast
-lookup pass.
+  parse once -> lemmatize the tree once -> enumerate swaps on the lemmatized
+  leaves -> per swap, deep-copy + mutate two leaves -> compile that tree straight
+  to BOTH diagram types (bobcat grammatical-cups, tree_no_type) -> write two
+  companion parquets, one per parser's training data.
+
+Trained tensor symbol names are lemma-based (`{lemma}_{index}__{CCG_type}` —
+see BobcatTextProcessor.lemmatize_tree), so lemmatizing BEFORE enumerating and
+swapping lemma text directly (not raw surface tokens) is required for the
+compiled negative symbols to land in the same vocabulary as the positives.
+
+Each caption's two parquets are only in a parser's training data if `text_hash`
+is in that parser's own `*_train.parquet` (bobcat and tree_no_type currently have
+different train sets — ~59% overlap — so this conditional compile avoids wasted
+work and keeps each output file precisely scoped to that parser's actual training
+rows; see HARD_NEG_PI_SWEEP_PLAN.md "CORRECTION 2026-07-21").
 
 Two stages, run as separate cluster jobs (see submit scripts):
-  enumerate — CPU only. For each caption: get its CCGTree (diskcache hit, or a real
-    bobcat parse via a worker pool with recycling — the same memory-leak mitigation
-    used by CCGCompilerStep, since lambeq CCG objects leak cumulatively), enumerate
-    obj/attr swaps, write resumable per-chunk part files (no hardness yet).
-  score — GPU. Loads all parts, CLIP-embeds the unique swapped words once, joins on
-    h, writes the final output.
+  enumerate — CPU only. Parse + lemmatize + enumerate + dual-compile per caption,
+    resumable 50k-caption part files (no hardness yet).
+  score — GPU, short. CLIP-embeds the unique swapped words once, joins h onto
+    both parsers' outputs by (w1, w2), writes the two final parquets.
 
 Swap rules (verbatim from gen_hard_negs_v2, CCG grammar):
   OBJECT   : two distinct head nouns (type "n") with a predicate leaf (type
@@ -28,15 +39,17 @@ Swap rules (verbatim from gen_hard_negs_v2, CCG grammar):
              application) modifying DIFFERENT head nouns; identical adjectives
              skipped; one adjective kept per distinct head noun.
 Both capped at MAXK=6 candidates per type per caption. Word identity uses the
-normalized form (lemma if available, lowercased, punctuation-stripped).
+lemma-normalized form (lowercased, punctuation-stripped).
 
 Hardness h = cosine similarity of the two swapped words' CLIP text embeddings
 (openai/clip-vit-base-patch32 via transformers, template "a photo of a {}"),
 higher = harder. Matches score_negs_hardness.py exactly.
 
-Output: data/datasets/coco_hard_neg_specs.parquet with columns
-  text_hash, processed_text, neg_text, t ("obj"|"attr"), h, w1, w2
-keyed by the POSITIVE row's text_hash (joins 1:1 onto both train parquets).
+Output (per parser, keyed by the POSITIVE row's text_hash):
+  data/datasets/coco_hard_negs_train.parquet
+  data/datasets/coco_hard_negs_tree_no_type_train.parquet
+  columns: text_hash, processed_text, neg_text, t ("obj"|"attr"), w1, w2, h,
+           diagram, symbols
 
 Run on the cluster from PROJECT_DIR:
   python -m qnlp.scripts.coco_multi_caption.generate_hard_negatives enumerate
@@ -46,10 +59,13 @@ Run on the cluster from PROJECT_DIR:
 import argparse
 import gc
 import multiprocessing as mp
+import re
 import string
 import time
+from dataclasses import asdict
 from pathlib import Path
 
+import orjson
 import polars as pl
 
 from qnlp.utils.logging import setup_logger
@@ -60,14 +76,36 @@ MAXK = 6
 CLIP_NAME = "openai/clip-vit-base-patch32"
 TEMPLATE = "a photo of a {}"
 CHUNK = 50_000  # captions per resumable part-file
+EMBEDDING_DIM = 512  # matches every linear submit script's ML_EMBEDDING_DIM in this sweep
+BOND_DIM = 10  # matches every linear submit script's ML_BOND_DIM in this sweep
+# Exact rule list from CCGCompilerStep.__init__ — must match what positives were
+# compiled with, or negatives' rewritten diagrams diverge from the trained topology.
+REWRITE_RULES = [
+    "auxiliary",
+    "connector",
+    "determiner",
+    "postadverb",
+    "preadverb",
+    "prepositional_phrase",
+    "coordination",
+    "object_rel_pronoun",
+    "subject_rel_pronoun",
+]
+
+# NOTE: resume only checks whether a part file exists, not whether it matches the
+# current code. If you change enumerate_stage's logic, delete the parts_dir before
+# rerunning — do not resume into parts built by older code.
 
 BOBCAT_CACHE = "/SAN/intelsys/discoviz/fotinos/QNLP/.cache/lambeq/bobcat/diskcache"
 
-DEFAULT_PARQUETS = [
-    "data/datasets/coco_single_caption_nlc_train.parquet",
-    "data/datasets/coco_single_caption_nlc_tree_no_type_train.parquet",
-]
-OUTPUT = "data/datasets/coco_hard_neg_specs.parquet"
+BOBCAT_TRAIN = "data/datasets/coco_single_caption_nlc_train.parquet"
+TREE_TRAIN = "data/datasets/coco_single_caption_nlc_tree_no_type_train.parquet"
+OUTPUT_BOBCAT = "data/datasets/coco_hard_negs_train.parquet"
+OUTPUT_TREE = "data/datasets/coco_hard_negs_tree_no_type_train.parquet"
+PARTS_DIR = "data/datasets/coco_hard_negs_compiled_parts"
+
+_ROW_SCHEMA = ["text_hash", "processed_text", "neg_text", "t", "w1", "w2", "diagram", "symbols"]
+_LETTER_RE = re.compile(r"[^\W\d_]")
 
 
 # ---------------------------------------------------------------- tree access
@@ -88,16 +126,15 @@ def _norm(word: str) -> str:
 
 
 class LeafRecord:
-    __slots__ = ("text", "lemma", "type")
+    __slots__ = ("text", "type")
 
-    def __init__(self, text: str, lemma: str | None, type_: str):
+    def __init__(self, text: str, type_: str):
         self.text = text
-        self.lemma = lemma
         self.type = type_
 
     @property
     def norm(self) -> str:
-        return _norm(self.lemma or self.text)
+        return _norm(self.text)
 
 
 def _is_pred_type(ty: str) -> bool:
@@ -177,138 +214,283 @@ def attribute_swaps(tree, order_index: dict[int, int], order: list[LeafRecord]) 
     return out
 
 
-def materialize(order: list[LeafRecord], i: int, j: int) -> str:
-    tokens = [l.text for l in order]
-    tokens[i], tokens[j] = tokens[j], tokens[i]
-    return " ".join(tokens)
+# ---------------------------------------------------------------- compile
 
 
-def _enumerate_from_tree(tree, tokens: list[str], tokenizer) -> list[tuple[str, str, str]]:
-    """(t, w1, w2, neg_text) candidates for one already-parsed tree."""
-    leaves = _leaves(tree)
-    lemmas = tokenizer.lemmatize(tokens) if len(tokens) == len(leaves) else [None] * len(leaves)
-    order = [LeafRecord(l.text, lemma, str(l.biclosed_type)) for l, lemma in zip(leaves, lemmas)]
-    order_index = {id(l): k for k, l in enumerate(leaves)}
-    obj = object_swaps(order)
-    attr = attribute_swaps(tree, order_index, order)
-    out = []
-    for t, swaps in (("obj", obj), ("attr", attr)):
-        for i, j in swaps:
-            w1, w2 = sorted((order[i].norm, order[j].norm))
-            out.append((t, w1, w2, materialize(order, i, j)))
-    return out
+def _unify_rank(einsum_str: str) -> str:
+    """Port of UnifyEinsumRankStep: if the diagram resolves to >1 open output wire,
+    keep only the first output index (traces out the rest via implicit summation).
+    Must match what positives went through so negatives share the same rank-1
+    output convention the model expects."""
+    if "->" not in einsum_str:
+        return einsum_str
+    lhs, rhs = einsum_str.rsplit("->", 1)
+    return f"{lhs}->{rhs[:1]}" if len(rhs) > 1 else einsum_str
+
+
+def _is_1d(einsum_str: str) -> bool:
+    if "->" not in einsum_str:
+        return True
+    return len(_LETTER_RE.findall(einsum_str.rsplit("->", 1)[-1])) == 1
+
+
+def _compile_diagram(diagram, ansatz) -> tuple[str, str] | None:
+    """diagram -> (einsum_str, symbols_json) or None on rank/compile failure."""
+    from qnlp.discoviz.models.bobcat_text_processor import tn_to_einsum
+
+    circuit = ansatz(diagram)
+    einsum_str, tensors = tn_to_einsum(circuit)
+    einsum_str = _unify_rank(einsum_str)
+    if not _is_1d(einsum_str):
+        return None
+    symbols = [[asdict(x[0]), x[1]] for x in tensors]
+    return einsum_str, orjson.dumps(symbols).decode()
+
+
+def _compile_bobcat(tree, ansatz, rewriter) -> tuple[str, str] | None:
+    diagram = rewriter(tree.to_diagram()).remove_snakes()
+    return _compile_diagram(diagram, ansatz)
+
+
+def _compile_tree_no_type(tree, ansatz) -> tuple[str, str] | None:
+    from lambeq import TreeReader, TreeReaderMode
+
+    diagram = TreeReader.tree2diagram(tree, mode=TreeReaderMode.NO_TYPE)
+    return _compile_diagram(diagram, ansatz)
+
+
+def _lemmatize_tree(tree, lemmas: list[str]):
+    """Port of BobcatTextProcessor.lemmatize_tree — deep-copies the tree and
+    overwrites every leaf's text with its lemma, in surface order."""
+    import copy
+
+    tree = copy.deepcopy(tree)
+
+    def traverse(node, lemma_iter):
+        if node.is_leaf:
+            node._text = next(lemma_iter)
+        else:
+            for child in node.children:
+                traverse(child, lemma_iter)
+
+    traverse(tree, iter(lemmas))
+    return tree
+
+
+def _swap_tree(lemma_tree, i: int, j: int):
+    """Deep-copy the lemmatized tree and swap two leaves' text by surface position."""
+    import copy
+
+    swapped = copy.deepcopy(lemma_tree)
+    leaves = _leaves(swapped)
+    leaves[i]._text, leaves[j]._text = leaves[j]._text, leaves[i]._text
+    return swapped
 
 
 # ---------------------------------------------------------------- worker pool
-# Mirrors compiler_step.py's pattern: heavy CachedBobcatParser loaded once per
-# worker, maxtasksperchild forces periodic restart to bound the lambeq CCG
-# compile memory leak (see memory: project_lambeq_tree_memory_leak).
+# Mirrors compiler_step.py's pattern: heavy parser/ansatz loaded once per worker,
+# maxtasksperchild forces periodic restart to bound the lambeq CCG compile memory
+# leak (see memory: project_lambeq_tree_memory_leak).
 
 _worker_parser = None
 _worker_tokenizer = None
+_worker_ansatz = None
+_worker_rewriter = None
+_worker_bobcat_hashes = None
+_worker_tree_hashes = None
 
 
-def _worker_init(cache_path: str):
-    global _worker_parser, _worker_tokenizer
+def _worker_init(cache_path: str, bobcat_train_path: str, tree_train_path: str):
+    global _worker_parser, _worker_tokenizer, _worker_ansatz, _worker_rewriter
+    global _worker_bobcat_hashes, _worker_tree_hashes
+    from lambeq import AtomicType, Rewriter
+    from lambeq.backend.tensor import Dim
+
     from qnlp.discoviz.models.bobcat_text_processor import Tokenizer
+    from qnlp.discoviz.parser.asnsatz import CustomMPSAnsatz
     from qnlp.discoviz.parser.cached_bobcat import CachedBobcatParser
 
     _worker_tokenizer = Tokenizer()
     _worker_parser = CachedBobcatParser(device="cpu", cache_path=cache_path, load_parser=True)
+    _worker_ansatz = CustomMPSAnsatz(
+        {
+            AtomicType.SENTENCE: Dim(EMBEDDING_DIM),
+            AtomicType.NOUN: Dim(EMBEDDING_DIM),
+            AtomicType.PREPOSITIONAL_PHRASE: Dim(EMBEDDING_DIM),
+        },
+        bond_dim=BOND_DIM,
+    )
+    _worker_rewriter = Rewriter(REWRITE_RULES)
+    _worker_bobcat_hashes = set(pl.read_parquet(bobcat_train_path, columns=["text_hash"])["text_hash"].to_list())
+    _worker_tree_hashes = set(pl.read_parquet(tree_train_path, columns=["text_hash"])["text_hash"].to_list())
 
 
-def _worker_process_batch(items: list[tuple[str, str]]) -> list[tuple[str, str, list]]:
-    """items: (text_hash, processed_text). Returns (text_hash, processed_text, candidates)
-    where candidates = [(t, w1, w2, neg_text), ...]."""
-    global _worker_parser, _worker_tokenizer
+def _worker_process_batch(items: list[tuple[str, str]]) -> tuple[list[tuple], list[tuple], int, int, int]:
+    """items: (text_hash, processed_text). Returns (bobcat_rows, tree_rows,
+    n_with_any_candidate, n_compile_fail, n_items) where each row is
+    (text_hash, processed_text, neg_text, t, w1, w2, diagram, symbols_json)."""
+    global _worker_parser, _worker_tokenizer, _worker_ansatz, _worker_rewriter
+    global _worker_bobcat_hashes, _worker_tree_hashes
+
     texts = [t for _, t in items]
     tokens_list = [_worker_tokenizer.tokenize(t) for t in texts]
     trees = _worker_parser.sentences2trees(tokens_list, tokenised=True, suppress_exceptions=True, verbose="suppress")
-    results = []
+
+    bobcat_rows, tree_rows = [], []
+    n_with_any = 0
+    n_fail = 0
     for (text_hash, text), tokens, tree in zip(items, tokens_list, trees):
-        cands = _enumerate_from_tree(tree, tokens, _worker_tokenizer) if tree is not None else []
-        results.append((text_hash, text, cands))
+        if tree is None:
+            continue
+        want_bobcat = text_hash in _worker_bobcat_hashes
+        want_tree = text_hash in _worker_tree_hashes
+        if not want_bobcat and not want_tree:
+            continue
+
+        lemmas = _worker_tokenizer.lemmatize(tokens)
+        leaves = _leaves(tree)
+        if len(lemmas) != len(leaves):
+            continue
+        lemma_tree = _lemmatize_tree(tree, lemmas)
+        lemma_leaves = _leaves(lemma_tree)
+        order = [LeafRecord(l._text, str(l.biclosed_type)) for l in lemma_leaves]
+        order_index = {id(l): k for k, l in enumerate(lemma_leaves)}
+
+        obj = object_swaps(order)
+        attr = attribute_swaps(lemma_tree, order_index, order)
+        candidates = [(t, i, j) for t, swaps in (("obj", obj), ("attr", attr)) for i, j in swaps]
+        if candidates:
+            n_with_any += 1
+
+        for t, i, j in candidates:
+            w1, w2 = sorted((order[i].norm, order[j].norm))
+            swapped = _swap_tree(lemma_tree, i, j)
+            neg_text = " ".join(l._text for l in _leaves(swapped))
+
+            if want_bobcat:
+                try:
+                    res = _compile_bobcat(swapped, _worker_ansatz, _worker_rewriter)
+                except Exception:
+                    res = None
+                if res is None:
+                    n_fail += 1
+                else:
+                    diagram_str, symbols_json = res
+                    bobcat_rows.append((text_hash, text, neg_text, t, w1, w2, diagram_str, symbols_json))
+
+            if want_tree:
+                try:
+                    res = _compile_tree_no_type(swapped, _worker_ansatz)
+                except Exception:
+                    res = None
+                if res is None:
+                    n_fail += 1
+                else:
+                    diagram_str, symbols_json = res
+                    tree_rows.append((text_hash, text, neg_text, t, w1, w2, diagram_str, symbols_json))
+
     gc.collect()
-    return results
+    return bobcat_rows, tree_rows, n_with_any, n_fail, len(items)
 
 
 # ---------------------------------------------------------------- stage: enumerate
 
 
-def load_unique_captions(parquets: list[str]) -> pl.DataFrame:
+def load_unique_captions(bobcat_train: str, tree_train: str) -> pl.DataFrame:
     frames = []
-    for p in parquets:
+    for p in (bobcat_train, tree_train):
         if not Path(p).exists():
             logger.warning(f"Parquet not found, skipping: {p}")
             continue
         frames.append(pl.read_parquet(p, columns=["text_hash", "processed_text"]))
     df = pl.concat(frames).unique(subset=["text_hash"], keep="first")
-    logger.info(f"{df.height} unique captions across {len(frames)} parquets.")
+    logger.info(f"{df.height} unique captions across the union of both parsers' train sets.")
     return df
 
 
 def enumerate_stage(
-    parquets: list[str],
-    output: str,
+    bobcat_train: str,
+    tree_train: str,
+    parts_dir: str,
     limit: int | None,
     max_workers: int,
     worker_batch_size: int,
     max_tasks_per_child: int,
 ) -> None:
-    df = load_unique_captions(parquets).sort("text_hash")
+    df = load_unique_captions(bobcat_train, tree_train).sort("text_hash")
     if limit:
         df = df.head(limit)
 
-    parts_dir = Path(str(output).replace(".parquet", "_parts"))
-    parts_dir.mkdir(parents=True, exist_ok=True)
+    parts_path = Path(parts_dir)
+    parts_path.mkdir(parents=True, exist_ok=True)
     n_parts = (df.height + CHUNK - 1) // CHUNK
     t0 = time.time()
 
     pool = mp.get_context("spawn").Pool(
-        processes=max_workers, initializer=_worker_init, initargs=(BOBCAT_CACHE,), maxtasksperchild=max_tasks_per_child
+        processes=max_workers,
+        initializer=_worker_init,
+        initargs=(BOBCAT_CACHE, bobcat_train, tree_train),
+        maxtasksperchild=max_tasks_per_child,
     )
     try:
         for k in range(n_parts):
-            part_path = parts_dir / f"part_{k:05d}.parquet"
-            if part_path.exists():
+            bobcat_part_path = parts_path / f"part_bobcat_{k:05d}.parquet"
+            tree_part_path = parts_path / f"part_tree_{k:05d}.parquet"
+            if bobcat_part_path.exists() and tree_part_path.exists():
                 logger.info(f"Part {k + 1}/{n_parts} exists — skipping (resume).")
                 continue
             chunk_df = df.slice(k * CHUNK, CHUNK)
             items = list(chunk_df.iter_rows())
             batches = [items[i : i + worker_batch_size] for i in range(0, len(items), worker_batch_size)]
 
-            rows = []
+            bobcat_rows, tree_rows = [], []
             n_with_any = 0
-            for batch_results in pool.imap_unordered(_worker_process_batch, batches, chunksize=1):
-                for text_hash, text, cands in batch_results:
-                    if cands:
-                        n_with_any += 1
-                    for t, w1, w2, neg_text in cands:
-                        rows.append((text_hash, text, neg_text, t, w1, w2))
+            n_fail = 0
+            n_done = 0
+            t_batches = time.time()
+            for bi, (b_rows, t_rows, with_any, fail, n_items) in enumerate(
+                pool.imap_unordered(_worker_process_batch, batches, chunksize=1)
+            ):
+                bobcat_rows.extend(b_rows)
+                tree_rows.extend(t_rows)
+                n_with_any += with_any
+                n_fail += fail
+                n_done += n_items
+                logger.info(
+                    f"  batch {bi + 1}/{len(batches)} done ({n_items} captions): "
+                    f"{n_done}/{len(items)} so far, {time.time() - t_batches:.0f}s since part start "
+                    f"({(time.time() - t_batches) / max(1, n_done):.2f}s/caption avg)"
+                )
 
-            part = pl.DataFrame(rows, schema=["text_hash", "processed_text", "neg_text", "t", "w1", "w2"], orient="row")
-            tmp = part_path.with_suffix(".tmp.parquet")
-            part.write_parquet(tmp)
-            tmp.rename(part_path)
+            bobcat_part = pl.DataFrame(bobcat_rows, schema=_ROW_SCHEMA, orient="row")
+            tree_part = pl.DataFrame(tree_rows, schema=_ROW_SCHEMA, orient="row")
+            for part, path in ((bobcat_part, bobcat_part_path), (tree_part, tree_part_path)):
+                tmp = path.with_suffix(".tmp.parquet")
+                part.write_parquet(tmp)
+                tmp.rename(path)
             logger.info(
-                f"Part {k + 1}/{n_parts}: {len(items)} captions -> {part.height} candidates, "
-                f"{n_with_any} captions with >=1 candidate ({time.time() - t0:.0f}s elapsed)"
+                f"Part {k + 1}/{n_parts}: {len(items)} captions -> "
+                f"{bobcat_part.height} bobcat + {tree_part.height} tree candidates, "
+                f"{n_with_any} captions with >=1 candidate, {n_fail} compile failures "
+                f"({time.time() - t0:.0f}s elapsed)"
             )
     finally:
         pool.close()
         pool.join()
 
-    all_parts = pl.concat([pl.read_parquet(p) for p in sorted(parts_dir.glob("part_*.parquet"))])
-    n_covered = all_parts["text_hash"].n_unique()
-    n_obj = (all_parts["t"] == "obj").sum()
-    n_attr = (all_parts["t"] == "attr").sum()
-    logger.info(
-        f"Enumeration done: {df.height} captions, {n_covered} with >=1 candidate "
-        f"({100 * n_covered / max(1, df.height):.1f}%), "
-        f"obj/cap={n_obj / max(1, df.height):.2f} attr/cap={n_attr / max(1, df.height):.2f} "
-        f"({n_obj} obj, {n_attr} attr) in {time.time() - t0:.0f}s. "
-        f"Reference (colleague's release): 98.8% coverage, 3.62 cand/caption."
-    )
+    for label, prefix in (("bobcat", "part_bobcat_"), ("tree_no_type", "part_tree_")):
+        parts = sorted(parts_path.glob(f"{prefix}*.parquet"))
+        if not parts:
+            continue
+        all_parts = pl.concat([pl.read_parquet(p) for p in parts])
+        n_covered = all_parts["text_hash"].n_unique()
+        n_obj = (all_parts["t"] == "obj").sum()
+        n_attr = (all_parts["t"] == "attr").sum()
+        logger.info(
+            f"[{label}] Enumeration+compile done: {n_covered} captions with >=1 candidate, "
+            f"obj={n_obj} attr={n_attr} ({time.time() - t0:.0f}s elapsed). "
+            f"Reference (colleague's release): 98.8% coverage, 3.62 cand/caption."
+        )
 
 
 # ---------------------------------------------------------------- stage: score
@@ -338,18 +520,16 @@ def clip_word_similarities(pairs: set[tuple[str, str]], device: str) -> dict[tup
     return {(a, b): round(float(emb[a] @ emb[b]), 4) for a, b in pairs}
 
 
-def score_stage(output: str) -> None:
-    import torch
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    parts_dir = Path(str(output).replace(".parquet", "_parts"))
-    part_files = sorted(parts_dir.glob("part_*.parquet"))
+def _score_one(parts_glob: str, output: str, device: str, h_by_pair: dict[tuple[str, str], float] | None) -> dict:
+    parts_path = Path(PARTS_DIR)
+    part_files = sorted(parts_path.glob(parts_glob))
     if not part_files:
-        raise RuntimeError(f"No parts found in {parts_dir} — run the 'enumerate' stage first.")
+        raise RuntimeError(f"No parts found matching {parts_path / parts_glob} — run the 'enumerate' stage first.")
     all_parts = pl.concat([pl.read_parquet(p) for p in part_files])
 
-    word_pairs = {(w1, w2) for w1, w2 in all_parts.select("w1", "w2").unique().iter_rows()}
-    h_by_pair = clip_word_similarities(word_pairs, device)
+    if h_by_pair is None:
+        word_pairs = {(w1, w2) for w1, w2 in all_parts.select("w1", "w2").unique().iter_rows()}
+        h_by_pair = clip_word_similarities(word_pairs, device)
 
     out = all_parts.with_columns(
         pl.struct(["w1", "w2"])
@@ -368,15 +548,39 @@ def score_stage(output: str) -> None:
         f"  h: mean={h.mean():.3f} p5={h.quantile(0.05):.3f} p95={h.quantile(0.95):.3f} "
         f"frac(h>0.95)={(h > 0.95).mean():.3%}"
     )
+    return h_by_pair
+
+
+def score_stage(output_bobcat: str, output_tree: str) -> None:
+    import torch
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # Score once over the union of both parsers' (w1, w2) pairs — hardness is a
+    # pure function of the two words, independent of t or which parser the
+    # candidate ended up scoped to (see plan doc "join key" correction).
+    parts_path = Path(PARTS_DIR)
+    all_files = sorted(parts_path.glob("part_bobcat_*.parquet")) + sorted(parts_path.glob("part_tree_*.parquet"))
+    if not all_files:
+        raise RuntimeError(f"No parts found in {parts_path} — run the 'enumerate' stage first.")
+    union_pairs = {
+        (w1, w2) for p in all_files for w1, w2 in pl.read_parquet(p, columns=["w1", "w2"]).unique().iter_rows()
+    }
+    h_by_pair = clip_word_similarities(union_pairs, device)
+
+    _score_one("part_bobcat_*.parquet", output_bobcat, device, h_by_pair)
+    _score_one("part_tree_*.parquet", output_tree, device, h_by_pair)
 
 
 # ---------------------------------------------------------------- main
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="Generate hard-negative swap candidates (Phase A0).")
+    ap = argparse.ArgumentParser(description="Generate hard-negative training pairs (combined design).")
     ap.add_argument("stage", choices=["enumerate", "score"])
-    ap.add_argument("--parquets", nargs="+", default=DEFAULT_PARQUETS)
-    ap.add_argument("--output", default=OUTPUT)
+    ap.add_argument("--bobcat-train", default=BOBCAT_TRAIN)
+    ap.add_argument("--tree-train", default=TREE_TRAIN)
+    ap.add_argument("--parts-dir", default=PARTS_DIR)
+    ap.add_argument("--output-bobcat", default=OUTPUT_BOBCAT)
+    ap.add_argument("--output-tree", default=OUTPUT_TREE)
     ap.add_argument("--limit", type=int, default=None, help="Cap #captions (smoke test, enumerate stage only).")
     ap.add_argument("--max-workers", type=int, default=4)
     ap.add_argument("--worker-batch-size", type=int, default=200)
@@ -385,7 +589,14 @@ if __name__ == "__main__":
 
     if args.stage == "enumerate":
         enumerate_stage(
-            args.parquets, args.output, args.limit, args.max_workers, args.worker_batch_size, args.max_tasks_per_child
+            args.bobcat_train,
+            args.tree_train,
+            args.parts_dir,
+            args.limit,
+            args.max_workers,
+            args.worker_batch_size,
+            args.max_tasks_per_child,
         )
     else:
-        score_stage(args.output)
+        PARTS_DIR = args.parts_dir
+        score_stage(args.output_bobcat, args.output_tree)

@@ -210,7 +210,444 @@ Rows without a match get no negatives (their protocol allows this).
 
 ## Implementation plan
 
-### Phase A0 — generating hard negatives OURSELVES (own-generation path)
+### ⭐⭐ NEW PHASE 0 (2026-07-21) — unify bobcat/tree train-val-test split, READ BEFORE THE REVISION BELOW
+
+**Not yet implemented. Proposed by user, verified feasible, recommended — do this
+BEFORE hard-negative generation, it simplifies it.**
+
+**Problem this solves:** bobcat and tree_no_type currently have DIFFERENT
+train/val/test splits (see the correction below: only ~59% overlap between their
+train sets). This isn't just an inconvenience for hard-neg generation — it's a
+methodological confound for the whole π-sweep: bobcat vs tree cells are currently
+trained on different image pools, not just different parsers, so any bobcat-vs-tree
+difference in results is partly attributable to that, not the parser alone.
+
+**Root cause (verified, read-only on beaker):**
+`qnlp/core/data_engine/dataset_creator/dataset_generator.py::split_by_groups`
+(called from `create_train_val_test_datasets`) already splits at the correct level
+— image (`group_column="sample_id"` default) — via `_split_ids`: deterministic
+`np.random.default_rng(seed)` shuffle + cutoff, default `ratios=(0.8,0.1,0.1)`,
+default `seed=42`. Both bobcat (built 2026-06-19) and tree_no_type (built
+2026-07-17) used this SAME function with the SAME seed — but the atlas is ingested
+incrementally (`load_coco_to_atlas.py::ingest_data_from_remote`), so tree's build
+had more images available than bobcat's did a month earlier. A shuffle+cutoff split
+is sensitive to the size of the pool being shuffled, so identical seed+ratios over
+different-sized universes produces different membership — this fully explains the
+divergence (not a bug, just a consequence of incremental ingestion between builds).
+
+**Verified (read-only on beaker) — bobcat's full pool is a STRICT SUBSET of tree's:**
+```
+bobcat full pool (train+val+test): 463,075
+tree full pool (train+val+test):   542,040
+intersection:                       463,075   (= 100% of bobcat's pool)
+bobcat-only:                        0
+tree-only:                          78,965 (14.6% of tree's pool)
+```
+Every caption bobcat has ever compiled already exists somewhere in tree's data too
+(just possibly in a different split file) — so a matched split can be built with
+**zero re-parsing or re-compiling**, purely by reshuffling existing rows.
+
+**Proposed Phase 0 steps:**
+1. Common pool = bobcat's full 463,075-caption pool (the limiting/smaller side;
+   tree's extra 78,965 captions are simply unused for this purpose, no compute lost
+   since they were never bobcat-compiled anyway).
+2. Run `split_by_groups`-equivalent ONE time over this common pool (reuse the
+   existing function/defaults for consistency: `ratios=(0.8,0.1,0.1)`, `seed=42`,
+   `group_column="sample_id"`) → one shared train/val/test image assignment.
+   ⚠️ NEEDS USER CONFIRMATION: defaulting to reusing the existing ratios/seed
+   convention unless told otherwise.
+3. For EACH parser, pull existing compiled rows (already has `diagram`/`symbols`
+   from its own existing `_train/_val/_test.parquet`) for exactly the common-pool
+   captions, and reassign them into NEW files per the new split assignment — a pure
+   filter+regroup of existing rows, no recomputation.
+4. Write as NEW files, do NOT overwrite the originals (standing rule — see "MUST
+   create NEW output files" below): suggest
+   `coco_single_caption_nlc_matched_{train,val,test}.parquet` (bobcat) and
+   `coco_single_caption_nlc_tree_no_type_matched_{train,val,test}.parquet` (tree).
+   Naming not finalized — confirm before implementing.
+5. Consequence for hard-neg generation: SIMPLIFIES it back to the original design —
+   since both parsers now train on the IDENTICAL caption set by construction, the
+   per-parser conditional-compile logic (added in the correction below to handle
+   divergent splits) becomes unnecessary; every caption in the new unified train set
+   gets both diagrams compiled unconditionally again. Keep the conditional-compile
+   CODE PATH anyway (cheap safety net) but it should become a no-op once Phase 0 is
+   in place — every candidate will be in both hash sets by construction.
+6. Consequence for Phase C (the 20-run grid): submit scripts need
+   `ML_DATASET_NAME` pointed at the new matched dataset names instead of the
+   originals — a small change, not yet made (submit scripts still reference the
+   original names as of this writing).
+
+**Ratios/seed CONFIRMED by user 2026-07-21: keep existing convention (0.8/0.1/0.1,
+seed=42).** File naming still open — will confirm at implementation time.
+
+**Verification plan — run ALL of these immediately after generating the matched
+files, BEFORE starting hard-negative generation on top of them (a bug here would
+silently invalidate everything built after it):**
+
+**A. Structural integrity (per parser, per split file)**
+1. No row loss / no duplication: `len(matched_train) + len(matched_val) + len(matched_test) == 463,075`
+   (bobcat) and likewise for tree restricted to the common pool — every common-pool
+   caption appears in EXACTLY ONE split file, none dropped, none duplicated.
+2. `text_hash` values in the matched files are a SUBSET of (for tree) or EQUAL to
+   (for bobcat) the union of `text_hash` across that parser's ORIGINAL
+   train+val+test — confirms we only ever reused existing compiled rows, never
+   invented or recomputed anything.
+3. Tree-only captions (the 78,965 not in bobcat's pool) are ABSENT from all three
+   tree matched files — confirms the common-pool restriction was applied correctly,
+   not just to train but to val/test too.
+
+**B. Cross-parser consistency (the actual point of Phase 0 — check this hardest)**
+4. Build `sample_id -> split` maps from bobcat-matched and tree-matched separately;
+   assert they are IDENTICAL for every sample_id in the common pool. This is the
+   core correctness property: same image, same split, in both parsers.
+5. Pick ~20 random `sample_id`s with multiple captions in the common pool; for each,
+   confirm ALL of that image's captions (across both parsers) landed in the SAME
+   split file. Directly validates image-level (not caption-level) grouping was
+   preserved through the reslice — a caption-level bug here would leak an image's
+   other captions across train/test, a real eval-validity failure that row-count
+   checks alone would NOT catch.
+6. No `sample_id` appears in more than one of {train, val, test} for either parser
+   (the fundamental no-leakage property — verify directly, don't just trust
+   `split_by_groups`'s docstring claim).
+
+**C. Data fidelity (didn't corrupt anything while reslicing)**
+7. For a random sample of ~50 text_hashes present in both the OLD and NEW files for
+   a parser, assert `diagram` and `symbols` bytes are byte-identical between old and
+   new — confirms the reslice only filtered/regrouped rows and never touched the
+   compiled payload.
+8. Schema match: matched files have identical column names/dtypes to the originals
+   (`sample_id, local_image_path, processed_text, text_hash, diagram, symbols[, path]`)
+   — required for the training code (`get_dataloaders`, `FrozenCOCODataset`, etc.)
+   to consume them as a drop-in replacement via `ML_DATASET_NAME`.
+
+**D. Reproducibility**
+9. Re-run the Phase 0 split step twice with the same seed; assert the resulting
+   `sample_id -> split` assignment is bit-identical both times. Guards against
+   accidentally introducing nondeterminism (e.g. relying on dict/set iteration
+   order, which isn't guaranteed stable) when reimplementing `split_by_groups`'s
+   logic rather than calling it directly — PREFER calling the existing function
+   directly over reimplementing it, precisely to avoid this risk.
+
+**E. End-to-end smoke test (the check that catches what data-only checks can't)**
+10. Point `ML_DATASET_NAME` at the new matched dataset and run a FEW BATCHES (not a
+    full training run) through both `run.py` and `run_frozen.py` for both parsers —
+    confirms `collect_symbol_sizes`, `TopologyBucketSampler`, and the dedup val/test
+    loaders all work unmodified against the new files, before committing to a full
+    20-run grid that depends on this.
+
+**F. Process guard rail (prevents a future silent regression, not a one-time check)**
+11. Once matched files are verified, explicitly grep the sweep's submit scripts to
+    confirm ALL FOUR linear cells' `ML_DATASET_NAME` (or default) point at the
+    matched files, not the originals — easy to forget for one cell and silently
+    train it on the old, unmatched split. Do this check again right before
+    launching Phase C, not just once at Phase 0 completion.
+
+---
+
+### ⭐ ARCHITECTURE REVISION 2026-07-21 — READ THIS SECOND, SUPERSEDES Phase A0 + Phase A BELOW
+
+**Decision: merge Phase A0 (enumerate swaps) and Phase A (compile negatives to
+diagrams) into ONE combined pipeline that reuses a single CCG parse per caption for
+everything — no re-parsing of swapped strings, no separate compile pass.** Not yet
+implemented (next session's task). The Phase A0 / Phase A sections further below are
+KEPT for historical/technical reference (they contain code paths, constants, and
+rule-port details still needed) but their *staging* (separate enumerate→specs-file→
+recompile) is obsolete. Read this section, then pull needed details from below.
+
+**Why this is correct, not just simpler:** a swap only exchanges two leaves that
+already share a CCG type (two `n` nouns, or two `n/n` adjectives) — so the swap
+NEVER changes the derivation tree structure, only two leaves' text. This means the
+negative's CCGTree can be built by deep-copying the POSITIVE's already-parsed tree
+and mutating two leaves — no fresh CCG search needed for the negative sentence at
+all (which also sidesteps worrying whether a swapped sentence is independently
+grammatical/parseable — it inherits the positive's valid derivation by construction).
+
+**Critical correctness fix this caught (would have been a silent bug in the old
+staged plan):** trained tensor symbol names are `{lemma}_{index}__{CCG_type}` —
+lemma-based, not surface-token-based. Confirmed by reading
+`qnlp/discoviz/models/bobcat_text_processor.py::BobcatTextProcessor.lemmatize_tree`:
+it deep-copies the tree and overwrites EVERY leaf's `._text` with its NLTK lemma
+(`node._text = next(lemma_iter)`) before compilation — this is what the real
+positive-compilation pipeline does. The OLD (currently-running-on-cluster,
+job 7081533) design swaps raw SURFACE tokens for the materialized `neg_text`
+string, not lemmas. If that had fed into a separate re-compile step, the negative's
+compiled symbols could mismatch the model's existing lemma-based vocabulary. The
+combined design fixes this structurally: lemmatize the tree ONCE (right after
+parsing, before enumeration), enumerate swaps on the now-lemma leaves, and swap
+LEMMA text directly — so compiled negative symbols are guaranteed consistent.
+(Side effect: this also makes moot the earlier open question of "should
+LemmatizeStep re-run on the swapped text" — negatives never go back through raw-text
+processing at all; everything happens at the tree level from the positive's parse.)
+
+**Combined pipeline per caption (one worker-pool job, CPU-bound, same resumable
+part-file pattern as before):**
+1. Tokenize (`Tokenizer.tokenize`, from `bobcat_text_processor.py`).
+2. Parse: `CachedBobcatParser(cache_path=BOBCAT_CACHE, load_parser=True).sentences2trees(tokens, tokenised=True, suppress_exceptions=True)`
+   — as now; hits the diskcache when available, parses (and caches) on miss. This is
+   ADDITIVE to the existing `bobcat/diskcache` — safe to keep writing into it (content-
+   addressed by exact token sequence, no collision/corruption risk with existing entries).
+3. Lemmatize the tree: NLTK lemmas via `Tokenizer.lemmatize(tokens)`, then apply the
+   SAME leaf-overwrite as `BobcatTextProcessor.lemmatize_tree` (deepcopy + traverse +
+   `node._text = lemma`) — reuse that exact method by instantiating a
+   `BobcatTextProcessor` per worker (simplest: call its `.lemmatize_tree()` directly
+   rather than reimplementing).
+4. Enumerate obj/attr swaps on the LEMMATIZED tree's leaves (same rules as before:
+   object = two `n` nouns with a predicate between, not coordinate; attribute = two
+   `n/n` adjectives under forward application on different head nouns; MAXK=6/type;
+   ported from `gen_hard_negs_v2.py`, already implemented and validated in the current
+   `generate_hard_negatives.py` — reuse `object_swaps`/`attribute_swaps`/`_leaves`
+   almost as-is, just fed the lemmatized tree instead of a raw one).
+5. Per swap (i,j,t): deep-copy the LEMMATIZED tree, swap `leaf._text` at i,j (this
+   now correctly swaps lemma-identity). Compile that tree TWICE, no re-parsing:
+   - **bobcat**: `diagram = tree.to_diagram()`; `diagram = Rewriter(rules)(diagram).remove_snakes()`
+     where `rules = ["auxiliary","connector","determiner","postadverb","preadverb","prepositional_phrase","coordination","object_rel_pronoun","subject_rel_pronoun"]`
+     (exact list from `CCGCompilerStep.__init__`); `circuit = ansatz(diagram)`;
+     `einsum_inputs = tn_to_einsum(circuit)` (`tn_to_einsum` lives in
+     `bobcat_text_processor.py`).
+   - **tree_no_type**: `diagram = TreeReader.tree2diagram(tree, mode=TreeReaderMode.NO_TYPE)`
+     (NO rewriter — tree diagrams have no cups/snakes, per `pipeline_tree_no_type.py`);
+     `circuit = ansatz(diagram)`; `einsum_inputs = tn_to_einsum(circuit)`.
+   - `ansatz = CustomMPSAnsatz({AtomicType.SENTENCE: Dim(512), AtomicType.NOUN: Dim(512), AtomicType.PREPOSITIONAL_PHRASE: Dim(512)}, bond_dim=10)`
+     from `qnlp.discoviz.parser.asnsatz.CustomMPSAnsatz` — embedding_dim=512, bond_dim=10
+     matches `constants.embedding_dim`/`constants.bond_dim` AND every linear submit
+     script's `ML_EMBEDDING_DIM`/`ML_BOND_DIM` in this sweep. ONE shared ansatz instance
+     serves both diagram types (only diagram conversion differs).
+   - Symbols serialization — copy exactly from `compiler_step.py::_worker_process_batch`
+     so it's byte-compatible with what `collect_symbol_sizes`/`EinsumModel` expect:
+     `symbols = [[asdict(x[0]), x[1]] for x in einsum_inputs[1]]` (needs
+     `from dataclasses import asdict`); `diagram_out = einsum_inputs[0]`.
+   - **No contraction-path computation** — this sweep is linear-only, so skip whatever
+     `compute_contraction_paths=True` does; just diagram+symbols columns, matching the
+     bobcat `coco_single_caption_train.parquet` (no `_nlc` suffix, no `path` column)
+     schema. (Tree's own `coco_single_caption_nlc_tree_no_type_train.parquet` DOES carry
+     a path column, but linear training ignores it — so it's fine/simplest for OUR
+     negative companion files to omit `path` for BOTH parsers.)
+   - `neg_text` for logging/validation/hardness = `" ".join(leaf.text for leaf in _leaves(swapped_lemma_tree))`
+     — this is now the lemma-form sentence (consistent with what's actually compiled/trained on).
+
+**⚠️ MUST create NEW output files — do NOT override or touch existing data:**
+- Do NOT write to `data/sentence_mapping/` (LMDB) — that's the positives' authoritative
+  compiled-diagram store; negatives never go there.
+- Do NOT modify/overwrite `coco_single_caption*_train.parquet` /
+  `coco_single_caption_nlc*_train.parquet` (bobcat or tree_no_type) — those existing
+  training datasets stay exactly as they are; negatives are purely ADDITIVE companion
+  files, joined at training time via `text_hash` (Phase B, not yet implemented).
+- OK to keep reading/writing `bobcat/diskcache` (the raw-tree parse cache) — additive,
+  content-addressed, no risk to existing entries.
+- New output files (names TBD at implementation time, suggest):
+  `data/datasets/coco_hard_negs_train.parquet` (bobcat: text_hash, processed_text,
+  neg_text, t, w1, w2, diagram, symbols) and
+  `data/datasets/coco_hard_negs_tree_no_type_train.parquet` (same, tree_no_type
+  diagram/symbols). Confirmed 2026-07-21: these columns are sufficient to compute
+  and join h — w1/w2 (already lemma-normalized) are exactly the CLIP scoring input,
+  text_hash/processed_text trace back to the source caption. `h` (hardness) joined
+  on afterward — CLIP-scoring stays a SEPARATE, short GPU pass over the accumulated
+  unique (w1,w2) pairs across all parts (unchanged from the old design), run once,
+  joined onto both per-parser outputs by **(w1, w2) alone** — `t` (obj/attr) is NOT
+  part of the join key, since hardness is purely a function of the two words'
+  CLIP similarity and doesn't depend on which swap rule produced the pair (a
+  correction from an earlier, imprecise "(t, w1, w2)" note — including t is
+  harmless/redundant, not required).
+- Resumability: keep the same 50k-caption-chunk part-file pattern + worker pool with
+  `maxtasksperchild` recycling (lambeq CCG memory leak mitigation), but each part now
+  carries BOTH compiled outputs per candidate. Use a NEW parts-dir name distinct from
+  the old `coco_hard_neg_specs*_parts/` (e.g. `coco_hard_negs_compiled_parts/`) so
+  there's no risk of the new job resuming into old-design leftovers (see the earlier
+  "resume gotcha" — still no automatic guard, per user's earlier explicit preference;
+  just use a different name).
+
+**Operational note — the OLD design's job is now obsolete:**
+Job 7081533 (started 2026-07-21 02:59, old string-swap-only `generate_hard_negatives.py`)
+does not produce compiled diagrams and swaps raw surface tokens, not lemmas — its
+output cannot feed the new combined design. It was ~5h in / 3 of 11 parts done at
+last check. User has NOT yet decided whether to `qdel` it or let it run to
+completion (its output has no further use either way under this revision) — I have
+NOT killed it myself, that's the user's call on their own compute budget. The old
+`coco_hard_neg_specs*.parquet` / `coco_hard_neg_specs*_parts/` artifacts (and
+`qnlp/scripts/coco_multi_caption/generate_hard_negatives.py` +
+`validate_hard_negatives.py` + the two `submit_generate_hard_negatives_*.sh` scripts)
+should be treated as SUPERSEDED once the combined script exists — either rewritten
+in place or replaced by new files; not yet decided which.
+
+**⚠️ CORRECTION 2026-07-21 — the two parsers' train splits are NOT the same set of
+captions (verified, read-only on beaker):**
+
+| | unique captions |
+|---|---|
+| bobcat train | 372,073 |
+| tree_no_type train | 435,358 |
+| **intersection** | 299,373 |
+| bobcat-only | 72,700 (19.5% of bobcat train) |
+| tree-only | 135,985 (31.2% of tree train) |
+| union | 508,058 |
+
+Only ~59% of the union is shared. Compiling BOTH diagrams unconditionally for every
+caption in the union (as the pipeline description above implies) would waste compute
+on ~136k bobcat-diagram compiles and ~73k tree-diagram compiles that are never
+looked up by the parser that doesn't actually have that caption in its train set —
+and worse, would leave each output file ambiguously scoped (containing rows for
+captions not actually in that parser's own train set).
+
+**FIX — compile step must be conditional per parser:** the shared part stays shared
+(parse + lemmatize + enumerate over the union of 508,058 captions — the CCG
+derivation doesn't care which split a caption belongs to, so this part is correctly
+deduplicated). Before the main loop, build two hash sets — `bobcat_train_hashes`
+and `tree_train_hashes` — from the two source `*_train.parquet` files. Then, per
+swap candidate: compile the bobcat diagram ONLY IF `text_hash ∈ bobcat_train_hashes`;
+compile the tree diagram ONLY IF `text_hash ∈ tree_train_hashes`. A caption in only
+one parser's train set gets only that parser's diagram compiled (no wasted work);
+a caption in both (the 299,373 intersection) gets both, still from the single shared
+parse. Each output file ends up precisely scoped: `coco_hard_negs_train.parquet` has
+entries for AT MOST 372,073 captions (bobcat's own train set exactly), and
+`coco_hard_negs_tree_no_type_train.parquet` for AT MOST 435,358 (tree's own train
+set exactly) — matching each parser's actual training data 1:1, with no ambiguity
+about which rows are valid for which parser.
+
+**Why read the existing train parquets rather than start from raw COCO data
+(considered and rejected 2026-07-21):** it's not a shortcut, it's the only version
+guaranteed consistent with what's actually trained on. (1) We don't know the exact
+train/val/test split logic/seed used at dataset-creation time — reconstructing it
+ourselves from raw data risks silently misclassifying a val/test caption as train,
+i.e. an eval-leak bug that wouldn't be obvious. (2) The join key is
+`text_hash = sha256(processed_text)`, and `processed_text` is `LemmatizeStep`'s
+output (spaCy-based rewrite — verb conjugation, capitalization, restructuring); any
+tiny discrepancy from recomputing it ourselves (library version, tokenizer
+edge case) produces a different hash and the negatives silently fail to join onto
+the real training rows — no error, just zero matches. Reading `processed_text`
+straight from the parquet is byte-identical by construction. (3) No compute is
+saved anyway — the CCG parse (the expensive step) needs `processed_text` regardless
+of how we got there, so redoing lemmatization from raw data just adds cost for no
+benefit while adding both risks above. Conclusion: always source captions/hashes
+from the existing `*_train.parquet` files, never re-derive from raw COCO data.
+
+**Output scope — confirmed 2026-07-21, no dataset pipeline / splits involved:**
+The combined script is a standalone flat-file generator, NOT a run through the
+atlas/`derived_v1`/LMDB dataset-pipeline machinery — no manifest, no atlas metadata.
+Input is explicitly restricted to `coco_single_caption*_train.parquet` (both parsers)
+— val/test parquets are NEVER read. So the output (`coco_hard_negs_train.parquet` /
+`..._tree_no_type_train.parquet`) is train-only BY CONSTRUCTION, not something that
+needs a train/val/test split step afterward — it's a `text_hash → candidate
+negatives` lookup table that only ever contains entries for captions already in the
+train split. Nothing to partition.
+At training time (Phase B), the `HardNegativeBank` lookup must be wired ONLY into
+the TRAIN forward/loss step — val/test evaluation code paths (`_dedup_loader`,
+`_collect_retrieval_metrics`, benchmark evaluators in `evaluate.py`) are separate
+and must never call it. NOTE the join key is `text_hash` (hash of the caption
+STRING), not `(cocoid, cap_idx)` — if some generic caption string happened to
+appear verbatim in val/test for a different image it would share a `text_hash`
+with a train row, which is harmless ONLY because the lookup is exclusively
+consulted from the train step. Be deliberate about this when wiring Phase B: do
+not create a shared "look up negatives for this row" utility that both train and
+eval code could accidentally call.
+
+**Next step (this is what "we will implement it" refers to):** write the combined
+enumerate+compile script (working name `generate_hard_negatives.py` v3, or a new
+file), reusing `object_swaps`/`attribute_swaps`/`_leaves`/`MAXK` from the current
+implementation almost unchanged, adding the lemmatize-tree step and the dual-compile
+step described above, and new submit script(s). Validation
+(`validate_hard_negatives.py`'s Jaccard-vs-colleague's-negs check) should still run,
+pointed at the new output's `(w1, w2)` columns (unchanged semantics, new file path).
+
+**STATUS: v3 combined script IMPLEMENTED 2026-07-21 (rewritten in place; old
+enumerate/score-only design is gone from git history but recoverable, not kept
+side-by-side).** `qnlp/scripts/coco_multi_caption/generate_hard_negatives.py` now
+does everything described above in one `enumerate` stage:
+- `_worker_init` loads `CachedBobcatParser` (plain `bobcat/diskcache`, unversioned
+  — parses+caches on miss, same as before), a `Tokenizer`, ONE shared
+  `CustomMPSAnsatz(embedding_dim=512, bond_dim=10)` (hardcoded as module constants
+  `EMBEDDING_DIM`/`BOND_DIM`, matching every linear submit script's
+  `ML_EMBEDDING_DIM`/`ML_BOND_DIM` — verified by reading the 4 scripts directly,
+  not just trusting the doc above), and `Rewriter(REWRITE_RULES)` where
+  `REWRITE_RULES` is copy-pasted verbatim from `CCGCompilerStep.__init__`.
+  Also loads `bobcat_train_hashes`/`tree_train_hashes` as plain Python `set`s by
+  reading only the `text_hash` column of each parser's `*_train.parquet` — one
+  read per worker at startup, not per batch.
+- `_worker_process_batch`: tokenize -> `parser.sentences2trees(...)` (batched) ->
+  per caption: skip if `text_hash` in neither hash set; else NLTK-lemmatize
+  (`Tokenizer.lemmatize`) and build the lemmatized tree via a direct port of
+  `BobcatTextProcessor.lemmatize_tree` (`_lemmatize_tree` — deepcopy + leaf-text
+  overwrite, avoids depending on a full `BobcatTextProcessor` instance); enumerate
+  obj/attr swaps on the lemmatized leaves (unchanged rule logic); per swap,
+  `_swap_tree` deep-copies the lemmatized tree ONCE and swaps two leaves' `_text`,
+  shared for both compiles; `_compile_bobcat` (`to_diagram` -> `Rewriter(...).
+  remove_snakes()` -> ansatz -> `tn_to_einsum`) if the caption is in bobcat's
+  train set, `_compile_tree_no_type` (`TreeReader.tree2diagram(NO_TYPE)` -> ansatz
+  -> `tn_to_einsum`) if in tree's — both gated independently per the "CORRECTION"
+  conditional-compile design above.
+- **New fix found while implementing, not in the plan doc above:** the real
+  pipeline (`compiler_step.py::_worker_process_batch` + `dataset_generator.py`'s
+  `UnifyEinsumRankStep`) doesn't just emit whatever einsum string
+  `tn_to_einsum` produces — it truncates the diagram's output signature to a
+  SINGLE index (tracing out the rest) whenever the CCG resolves to >1 open wire,
+  and drops rows that still aren't rank-1 after that. The plan doc's compile
+  steps above didn't mention this. Ported directly (`_unify_rank`/`_is_1d`,
+  regex-equivalent to `UnifyEinsumRankStep`'s string replace, verified against it
+  line-by-line) and applied inside `_compile_diagram` before a row is kept —
+  skipping this would have produced diagrams with the wrong output rank for
+  `EinsumModel` to consume, a silent shape-mismatch bug at training time, not a
+  crash at generation time.
+- Output: two independent resumable part-file streams per 50k-caption chunk,
+  `part_bobcat_{k}.parquet` / `part_tree_{k}.parquet` under
+  `data/datasets/coco_hard_negs_compiled_parts/` (new dir, per the plan's "use a
+  different parts-dir name" rule — cannot collide with the old design's
+  `coco_hard_neg_specs*_parts/`). A chunk resumes only when BOTH files for that
+  chunk exist. Columns: `text_hash, processed_text, neg_text, t, w1, w2, diagram,
+  symbols` (`symbols` stored as an `orjson`-serialized JSON string, matching how
+  the real pipeline stores it in the training parquets).
+- `score` stage: gathers the UNION of `(w1, w2)` pairs across both parts sets
+  (not just one), CLIP-scores once, joins `h` onto each parser's parts separately,
+  writes `data/datasets/coco_hard_negs_train.parquet` and
+  `data/datasets/coco_hard_negs_tree_no_type_train.parquet`.
+- `scripts/submit_generate_hard_negatives_enumerate.sh` and
+  `..._score.sh` updated in place: new `--parts-dir`/output paths, updated echo
+  text (no longer describes a "Phase A0 enumerate-only" job). `SMOKE` mode now
+  writes to `coco_hard_negs_compiled_smoke_parts/`.
+  `validate_hard_negatives.py`'s default `SPECS` path updated to
+  `coco_hard_negs_train.parquet` (still reads the same `(text_hash, t, w1, w2)`
+  columns, so its Jaccard-vs-colleague's-negs logic needed no other changes).
+- **Verified locally (no cluster, `qnlp` conda env), 2026-07-21:**
+  1. Parsed `"A red dog chases a small cat"` with a real `CachedBobcatParser` and
+     confirmed, post-lemmatization, `object_swaps`/`attribute_swaps` still recover
+     `dog↔cat` (obj) and `red↔small` (attr) — the lemmatize-before-enumerate
+     reordering didn't break the rule port.
+  2. Ran `_compile_bobcat` and `_compile_tree_no_type` on the swapped tree end to
+     end: both produced valid rank-1 einsum diagrams (`...->i`, `...->W` — single
+     output index each), confirming the ansatz/rewriter/rank-truncation wiring is
+     correct, not just importable.
+  3. Unit-checked `_unify_rank`/`_is_1d` against a synthetic multi-output-wire
+     einsum string (`ab,cd->bcd` -> `ab,cd->b`) — matches `UnifyEinsumRankStep`'s
+     behavior exactly.
+  4. Launched a tiny end-to-end run of the actual `enumerate` CLI stage (2 synthetic
+     captions, 2 workers, real multiprocessing pool + part-file writing) to
+     smoke-test the plumbing around the verified logic — **result not yet known
+     as of this writing, still running** (cold bobcat-parser load per worker is
+     slow, consistent with the ~226s/cold-call finding earlier in this doc, so a
+     2-worker pool startup on a laptop taking several minutes is expected, not a
+     hang — confirmed both worker processes alive and CPU-active via `ps`, not
+     stuck). Check this before trusting the plumbing on the cluster.
+
+**NOT yet done (must happen before the real cluster run):**
+- Confirm the local 2-caption smoke test above actually completes and produces
+  well-formed `part_bobcat_00000.parquet` / `part_tree_00000.parquet` files with
+  the expected columns/row counts.
+- Cluster smoke test (`qsub -v SMOKE=2000 scripts/submit_generate_hard_negatives_enumerate.sh`)
+  — needed to (a) confirm coverage/candidate-rate stats still match the ~99%/3.5-
+  3.6-per-caption reference now that lemmatize+dual-compile runs inside the same
+  worker call, and (b) measure real per-caption throughput of the COMBINED
+  parse+compile pipeline, which is new cost the earlier (~1h/50k-caption-part)
+  throughput numbers from the enumerate-only design did NOT include — do not
+  assume the old timing extrapolation still holds before checking.
+- Decide fate of the OLD job 7081533 (enumerate-only design, string-swap-only,
+  still possibly running on the cluster as of this writing) — asked the user,
+  not yet confirmed either way (kill vs let finish and ignore output).
+- Phase 0 (unified bobcat/tree split) is still NOT implemented — this combined
+  script's per-parser conditional-compile logic is currently load-bearing (real
+  ~59% train-set divergence), not the no-op safety net it becomes once Phase 0
+  lands.
+
+---
+
+### Phase A0 — generating hard negatives OURSELVES (own-generation path) [STAGING SUPERSEDED — see revision above; technical details below still apply]
 
 **STATUS: IMPLEMENTED 2026-07-21 (locally, on branch coco-training-nlc; not yet run on
 cluster).** Files:
@@ -277,6 +714,18 @@ via CLI positional arg):
   path) — both parsers share the same underlying CCG trees, this generation step
   doesn't care which store a tree came from, and using one cache halves the
   redundant parsing work versus checking two.
+- SCOPE vs the real preprocessing pipeline (clarified 2026-07-21): A0 redoes only
+  the CCG PARSE (tagging + CKY search) — NOT the ansatz/rewriter/einsum-compile
+  steps that turn a tree into a training diagram (those are unavoidably
+  parser-specific and belong to Phase A, applied to the negative strings this
+  step produces). The parse itself is parser-INDEPENDENT (bobcat and tree_no_type
+  share identical CCG trees; tree_no_type only changes diagram conversion,
+  downstream of parsing) and captions are deduped by text_hash across both train
+  parquets, so each caption is parsed ONCE regardless of which dataset(s) it's
+  in — not twice. Same for CLIP hardness scoring (one pass over unique words).
+  Phase A, by contrast, DOES need to run twice (once per parser) since diagram
+  compilation genuinely differs — that's real, unavoidable duplication, but over
+  the cheaper compile step, not the expensive parse.
 - Verified locally (no cluster needed): synthetic-tree swap enumeration still
   correct after the refactor into `_enumerate_from_tree`; `CCGTree` confirmed
   plain-attribute (safe for `to_json`/pickling, though we no longer need to move
@@ -300,6 +749,48 @@ qsub -v SMOKE=2000 scripts/submit_generate_hard_negatives_enumerate.sh   # smoke
 qsub scripts/submit_generate_hard_negatives_enumerate.sh                 # full (resumable — rerun same cmd if killed)
 qsub scripts/submit_generate_hard_negatives_score.sh                     # after all parts exist; also runs validation
 ```
+
+**SMOKE TEST v2 RESULT (2026-07-21, after delete+rerun with the redesigned enumerate
+stage): CORRECTNESS CONFIRMED, THROUGHPUT UNKNOWN.** 500 captions: 99.2% coverage
+(496/500, vs his 98.8% reference), 3.19 obj/cap + 0.35 attr/cap = 3.54 cand/cap total
+(vs his 3.62) — the parser-based fix works and the rule port is validated.
+BUT: took 2007s (33 min) wall time, and a standalone probe of a single cold parse call
+earlier measured 226s for ONE sentence (clearly a one-time model-load cost, not
+steady-state). With only 3 batches (worker_batch_size=200) across 4 workers, this smoke
+test is too small to separate pool-startup cost from real per-caption throughput — and
+taken at face value, 500 caps/2007s extrapolated to the ~391k captions still needing a
+real parse (77% of 508k unique, from the original miss-rate finding) would be ~2-3 WEEKS,
+far over the 72h budget. Added per-batch timing logs (first batch includes startup,
+later batches show steady-state) to `enumerate_stage` so a single run can distinguish
+them. NEXT STEP: rerun a LARGER smoke test (suggest SMOKE=5000, several batches per
+worker) and check the per-batch log — if batches after the first settle to a much lower
+s/caption, we're fine; if not, need more workers or a rethink (e.g. batch multiple
+sentences into one `sentences2trees` call more aggressively, or accept a much longer
+walltime / split the 72h job into several resumed submissions).
+
+**THROUGHPUT RESOLVED (2026-07-21, full run job 7081533, launched directly instead of
+the bigger-smoke-test step above — worked out fine).** Real per-part timings from the
+job log: part 1 9226s (≈2h34m, pays one-time 4-worker pool startup/model-load cost),
+part 2 4152s, part 3 3727s (≈1h/part) — clearly converged to steady state by part 2.
+Extrapolated total enumerate-stage wall time for all 11 parts (508,058 unique
+captions): ≈13.5h, well inside the 72h budget. Quality holds at scale: ~178k
+candidates/50k-caption part (3.56/cap) and ~98.6–98.7% coverage per part, consistent
+with the smoke test (3.54/cap, 99.2%) and the colleague's reference (3.62/cap, 98.8%).
+No further action needed — job runs to completion unattended; if SGE kills it before
+then, resubmit the same script and it resumes from the first missing part.
+
+⚠️ **Resume gotcha (hit once, 2026-07-21, decided NOT to auto-guard):** resuming only
+checks whether a `part_NNNNN.parquet` file exists — NOT whether it was produced by the
+current code. The first smoke run (job 7081219, pre-redesign dict-lookup version, 77%
+miss) left `coco_hard_neg_specs_smoke_parts/part_00000.parquet`; rerunning the redesigned
+script silently reused that stale/wrong part instead of regenerating it ("Part 1/1 exists
+— skipping"). Considered adding a version-marker check; user explicitly declined
+(prefers manual delete-and-rerun over that machinery). RULE: whenever
+`generate_hard_negatives.py`'s enumerate logic changes, manually delete the relevant
+`*_parts/` directory before rerunning — smoke and full runs use separate parts dirs
+(`coco_hard_neg_specs_smoke_parts/` vs `coco_hard_neg_specs_parts/`) so they can't
+cross-contaminate each other, but a stale dir from an OLDER version of the same stage
+will not be detected automatically.
 
 #### Original design notes (kept)
 
@@ -349,7 +840,7 @@ diskcache is synced — cluster copy is authoritative).
 DECIDED (2026-07-21): own-generation is THE path. The join alternative is retired
 (kept above only as history/context for the 66% overlap finding).
 
-### Phase A — offline: build parsed hard-negative companion datasets (per parser)
+### Phase A — offline: build parsed hard-negative companion datasets (per parser) [SUPERSEDED — folded into the combined pipeline in the revision section above; this whole phase as a SEPARATE re-parse step is gone. Kept only for the "no contraction path needed" / output-schema notes, already carried into the revision above.]
 
 New script `qnlp/scripts/coco_multi_caption/build_hard_negatives.py` (PARSER_VERSION-aware),
 plus 2 submit scripts (bobcat / tree_no_type). Steps:
