@@ -278,7 +278,102 @@ Every caption bobcat has ever compiled already exists somewhere in tree's data t
    original names as of this writing).
 
 **Ratios/seed CONFIRMED by user 2026-07-21: keep existing convention (0.8/0.1/0.1,
-seed=42).** File naming still open — will confirm at implementation time.
+seed=42).** File naming: used the doc's own suggested names directly (not
+reconfirmed separately) — `coco_single_caption_nlc_matched_{train,val,test}
+.parquet` (bobcat), `coco_single_caption_nlc_tree_no_type_matched_{train,val,test}
+.parquet` (tree).
+
+**STATUS: IMPLEMENTED 2026-07-21 (locally verified against a synthetic fixture
+mirroring the real scenario; NOT yet run on the cluster against real data).**
+New `qnlp/scripts/coco_multi_caption/unify_splits.py`:
+- `build()`: concats bobcat's own train+val+test -> its full pool, calls
+  `split_by_groups` (imported directly from `dataset_generator.py`, per the
+  doc's own preference to call rather than reimplement) ONCE on that pool ->
+  this direct result IS bobcat's matched output (no separate "step 3 reslice"
+  needed for bobcat itself, since the pool passed in already carries
+  diagram/symbols). Builds a `sample_id -> split` map from that result;
+  concats tree's own train+val+test, filters to `text_hash` values present in
+  the common pool (drops tree-only captions from all three splits, not just
+  train), inner-joins the remaining rows against the split map to assign each
+  to train/val/test. Inner join (not a naive filter) deliberately handles an
+  edge case the plan sketch didn't call out: a caption text that happens to be
+  identical (same `text_hash`) but attached to a DIFFERENT `sample_id` in
+  tree's independently-ingested data than in bobcat's would otherwise have no
+  well-defined split — the join safely drops such rows instead of guessing,
+  and logs loudly if this is ever nonzero (expected to be zero in practice).
+- `verify()`: implements checks A1-A3, B4-B6, C7-C8, D9 from the plan's
+  verification list (11 items across A-F) as automated pass/fail assertions,
+  runnable standalone via `--verify-only` against already-written output.
+  Checks E (end-to-end smoke test through `run.py`/`run_frozen.py`) and F
+  (submit-script `ML_DATASET_NAME` grep) are explicitly NOT automated here —
+  do those separately, by hand, before Phase C.
+
+**⭐ Real bug found and fixed while testing D9 (reproducibility) — not scoped to
+Phase 0, affects shared production code:** `split_by_groups`/`_split_ids` in
+`qnlp/core/data_engine/dataset_creator/dataset_generator.py` claims to
+"shuffle deterministically" given a seed, but `_split_ids` built its shuffle
+input from `atoms[group_column].unique().to_list()` — and `polars.Series
+.unique()`'s output ORDER is not guaranteed stable, confirmed empirically
+(same Series, 5 calls, 5 different orders). Since `np.random.default_rng
+(seed).shuffle(...)` shuffles whatever order it's handed, a different starting
+order each call produces a DIFFERENT final split membership despite the
+identical seed — the "same seed -> same split" contract this function's own
+docstring promises was not actually being honored. **Fix:** `_split_ids` now
+sorts `ids` before shuffling (`np.array(sorted(ids))`), making the starting
+order canonical so determinism genuinely comes from the seed alone. Verified:
+10 repeated calls with the same seed now produce bit-identical output (were
+non-deterministic before the fix). This is shared code — every OTHER caller
+(`coco_contrastive`, `coco_single_caption`, `coco_short_caption`, `winoground`
+dataset-creation scripts) was equally exposed; the fix is a strict correctness
+improvement with no plausible caller depending on the old (undocumented,
+non-reproducible) behavior, since nothing could have been relying on a
+specific past nondeterministic outcome in a reproducible way. No existing test
+suite covers this function.
+
+**Verified locally (synthetic fixture: 20 shared images x 5 captions = 100
+bobcat rows, plus 4 tree-only images x 5 captions = 20 extra tree rows,
+mirroring the real bobcat-strict-subset-of-tree relationship at small scale):**
+all 25 automated checks (A1-A3, B4-B6, C7-C8 x3 splits x2 parsers, D9) pass,
+both via a fresh `build()` and via `--verify-only` against already-written
+output. Confirms: no row loss/duplication, `text_hash` subset/equality
+correct, tree-only captions excluded from all three tree matched files,
+`sample_id -> split` agrees identically across both parsers for every shared
+image, a 20-sample spot-check of multi-caption images lands consistently,
+`diagram`/`symbols` bytes are byte-identical to the originals (pure
+reslice, no recompute), schema/dtypes match the originals exactly, and
+`split_by_groups` is now genuinely reproducible.
+
+**⚠️ Open consequence, not yet decided — how this interacts with the
+already-in-flight hard-negative generation:** the sharded `enumerate` job
+(20 shards, running against `coco_single_caption_nlc_train.parquet` /
+`coco_single_caption_nlc_tree_no_type_train.parquet` — the ORIGINAL,
+unmatched splits) was started, and has real progress, BEFORE Phase 0 was
+implemented. Running Phase 0 now does NOT retroactively change what that job
+already generated — its output is scoped to the old, divergent splits.
+Options, not yet chosen:
+1. Let the in-flight generation finish against the old splits, treat Phase 0
+   as a separate future improvement, and decide at Phase C time whether the
+   sweep runs against the old or new (matched) datasets.
+2. Regenerate hard negatives from scratch against the NEW matched datasets
+   once Phase 0's output is verified (re-run `enumerate`/`score` pointed at
+   `coco_single_caption_nlc_matched_train.parquet` /
+   `coco_single_caption_nlc_tree_no_type_matched_train.parquet` instead) —
+   the "right" methodological outcome per Phase 0's own motivation (removing
+   the bobcat-vs-tree confound), but throws away the in-flight job's progress
+   and costs a fresh multi-hour run.
+Not decided — needs the user's call, ideally before Phase C is scripted, since
+Phase C's submit scripts need to know which dataset names to point at.
+
+**NOT yet done (still needed before trusting this on the cluster):**
+- Actually run `unify_splits.py` on the cluster against the real
+  463,075/542,040-row pools (only tested locally against a small synthetic
+  fixture) — row-count-scale behavior (memory, join performance on real data)
+  unverified.
+- Checks E and F (end-to-end smoke test through the training scripts; grep the
+  sweep's submit scripts for `ML_DATASET_NAME`) — both explicitly manual,
+  not yet done.
+- The fork above (in-flight generation vs. regenerate against matched
+  datasets) — needs a decision.
 
 **Verification plan — run ALL of these immediately after generating the matched
 files, BEFORE starting hard-negative generation on top of them (a bug here would

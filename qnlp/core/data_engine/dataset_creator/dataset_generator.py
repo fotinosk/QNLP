@@ -229,10 +229,20 @@ def _split_ids(
     ratios: tuple[float, float, float],
     seed: int,
 ) -> tuple[list[str], list[str], list[str]]:
-    """Shuffle sample_ids deterministically and split into train/val/test."""
+    """Shuffle sample_ids deterministically and split into train/val/test.
+
+    ids is sorted before shuffling: callers commonly derive it from
+    polars .unique(), whose output ORDER is not guaranteed stable across calls
+    on identical data (confirmed empirically — same Series, different order
+    each call). Without sorting first, the seeded rng.shuffle below shuffles a
+    different starting order each time, silently breaking the "same seed ->
+    same split" contract this function's docstring (and every caller) relies
+    on. Sorting first makes the starting order canonical, so determinism
+    genuinely comes from the seed alone, as intended.
+    """
     assert abs(sum(ratios) - 1.0) < 1e-9, f"Ratios must sum to 1.0, got {sum(ratios)}"
     rng = np.random.default_rng(seed)
-    shuffled = np.array(ids)
+    shuffled = np.array(sorted(ids))
     rng.shuffle(shuffled)
 
     n = len(shuffled)
