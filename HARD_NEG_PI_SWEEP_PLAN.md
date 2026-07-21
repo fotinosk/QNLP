@@ -806,6 +806,67 @@ the plan doc above):**
    from ~33,870 to ~10,162 (fewer, slightly larger batch files). Submit script's
    `WORKER_BATCH_SIZE` default updated to match (100).
 
+7. **First real cluster success — job 7085501 (2026-07-21, submitted 15:20,
+   settings: `tmem=24G`, `worker_batch_size=100`, `max_tasks_per_child=5`,
+   `max_workers=4`, jitter=60s).** Processed 20k+ captions without stopping;
+   checked at 130 and 168 completed batches via the content-level health check
+   (leaked-hash / rank-1 / symbols-JSON checks) — all zero, cand/caption
+   3.34 (bobcat) / 3.65 (tree, near-exact match to the 3.62 reference), steady
+   0.17-0.18s/caption, 0 compile failures. `qstat` showed `maxvmem=37.950G` —
+   BELOW even the OLD insufficient 80G budget (16G x 5), let alone the new 120G
+   one. Diagnostic conclusion: since a genuine steady-state-footprint theory
+   would still land near the old ~90G peak regardless of the `tmem` bump, this
+   result instead confirms the peaks were specifically caused by SYNCHRONIZED
+   simultaneous worker reloads (all workers' full parser+tagger+ansatz reload
+   overlapping in time) — the jitter fix (item 5) is what actually broke that,
+   not the `tmem` increase (which turned out to be unneeded headroom this run,
+   not the load-bearing fix).
+   **Follow-up speed tuning (2026-07-21, user request, applied to the NEXT
+   resubmission — NOT to the currently-running 7085501, left alone since
+   healthy):**
+   - `max_workers` 4 -> 5: the submit script reserves `pe smp 5` but only spawned
+     4 workers by default, leaving a slot idle — free ~25% throughput.
+   - `max_tasks_per_child` 5 -> 10: recycle every `100*10=1,000` captions/worker
+     instead of 500 — sits at the top of, not comfortably inside, the rescaled
+     ~700-1,000 safe range, but justified by 7085501's ~38G/120G (~32%) memory
+     utilization giving real margin to spend. Halves the number of reload events
+     (and therefore total jitter-wait + reload-cost overhead) versus the
+     previous setting.
+   - Jitter (`WORKER_INIT_JITTER_SECONDS=60`) left UNCHANGED — user asked for
+     items 1 (`max_workers`) and 3 (`max_tasks_per_child`) from the offered
+     list of three speed levers, not item 2 (shrinking the jitter window).
+   - Resumability confirmed unaffected by either change: batch indices/
+     boundaries depend only on `worker_batch_size` and the sorted caption list
+     (unchanged) — `max_workers`/`max_tasks_per_child` only affect HOW batches
+     get processed, not which batches exist or how they're numbered. Killing
+     7085501 and resubmitting with the new settings will correctly skip every
+     batch already written.
+
+8. **`worker_batch_size` bumped 100 -> 400, then REVERTED back to 100 within the
+   same session (2026-07-21).** Initially bumped to 400 on user request for more
+   speed (see tradeoffs above — ~4x past the rescaled-safe leak-budget estimate,
+   not yet empirically validated at that lifetime). User then clarified they did
+   NOT want to restart job 7085501 (already ~20k+ captions / 200+ batches in,
+   running healthy) — and `worker_batch_size` is NOT safe to change without a
+   restart, unlike `max_workers`/`max_tasks_per_child`: batch file naming
+   (`part_{bi:06d}.parquet`) is purely positional over `worker_batch_size`-sized
+   spans of the sorted caption list, so changing it makes EXISTING part files
+   silently mismatched with the NEW batch boundaries — same filename, different
+   (smaller) caption span than the new scheme expects — which would cause the
+   resume check to wrongly treat a partially-covering old file as "this new,
+   larger batch is already done," silently DROPPING captions, not just failing
+   to resume cleanly. This is a sharper version of the already-documented
+   "resume only checks file existence, not code/parameter version" gotcha.
+   Reverted to 100 (matching 7085501's already-written files) so the next
+   resubmission can safely resume rather than requiring `rm -rf` + full restart.
+   `max_workers=5` and `max_tasks_per_child=10` (item 7) remain applied — both
+   are resume-safe since neither affects batch indexing, only how batches get
+   distributed/processed and how often workers reload.
+   **Final settings for the next resubmission:** `tmem=24G`, `max_workers=5`,
+   `worker_batch_size=100` (unchanged from 7085501), `max_tasks_per_child=10`,
+   `WORKER_INIT_JITTER_SECONDS=60` (unchanged). Recycle every `100*10=1,000`
+   captions/worker; max captions lost per kill `100*5=500`.
+
 **NOT yet done (must happen before the real cluster run):**
 - `qdel` the currently-stuck job and resubmit fresh with all of: `tmem=24G`,
   per-batch resumable `enumerate_stage`, `worker_batch_size=30`. `parts_dir`

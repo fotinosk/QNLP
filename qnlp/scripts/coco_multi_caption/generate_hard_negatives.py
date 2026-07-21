@@ -605,19 +605,26 @@ if __name__ == "__main__":
     ap.add_argument("--output-bobcat", default=OUTPUT_BOBCAT)
     ap.add_argument("--output-tree", default=OUTPUT_TREE)
     ap.add_argument("--limit", type=int, default=None, help="Cap #captions (smoke test, enumerate stage only).")
-    ap.add_argument("--max-workers", type=int, default=4)
+    ap.add_argument("--max-workers", type=int, default=5)
     # Each worker restarts every max_tasks_per_child*worker_batch_size captions
     # (lambeq CCG compile memory leak mitigation, see project_lambeq_tree_memory_leak
     # memory). The original pipeline's tuning (1000 captions/worker-lifetime) was for
     # 1 diagram/caption; this script compiles up to ~7 (up to 6 obj + 6 attr swap
     # candidates x 2 diagram types), so the equivalent-safe budget rescales to
-    # ~1000/7 ~= 700-1000 captions/worker-lifetime. 100*5=500 lands conservatively
-    # within that range. worker_batch_size ALSO sets write/resume granularity (a kill
-    # loses at most ~worker_batch_size*max_workers captions of in-flight work) — keep
-    # that in mind before raising it further; max_tasks_per_child is the knob to use
-    # if only reload FREQUENCY (not resume granularity) needs adjusting.
+    # ~1000/7 ~= 700-1000 captions/worker-lifetime. 100*10=1000 sits at the top of
+    # that range — loosened from 500 once job 7085501 confirmed maxvmem~38G against
+    # a 120G budget (tmem=24G x 5), well under budget, so less margin here is fine.
+    # worker_batch_size ALSO sets write/resume granularity (a kill loses at most
+    # ~worker_batch_size*max_workers captions of in-flight work) AND, critically, the
+    # batch INDEX/filename scheme (part_{bi}.parquet where bi is positional over
+    # worker_batch_size-sized spans) — changing it makes existing part files from a
+    # different worker_batch_size silently mismatched with the new batch boundaries
+    # (same filename, different caption span), NOT just "less resumable". Deliberately
+    # kept at 100 (reverted from a 400 experiment) so job 7085501's already-written
+    # part files stay resumable rather than forcing a restart. Bump max_tasks_per_child
+    # instead if only reload FREQUENCY needs adjusting without this hazard.
     ap.add_argument("--worker-batch-size", type=int, default=100)
-    ap.add_argument("--max-tasks-per-child", type=int, default=5)
+    ap.add_argument("--max-tasks-per-child", type=int, default=10)
     ap.add_argument(
         "--cache-path", default=BOBCAT_CACHE, help="Bobcat parse diskcache dir (override for local testing)."
     )
