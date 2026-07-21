@@ -48,17 +48,27 @@ echo "========================================="
 
 cd $PROJECT_DIR
 
+# BOBCAT_TRAIN/TREE_TRAIN let you point this at the Phase 0 matched datasets
+# instead of the originals — see submit_generate_hard_negatives_enumerate_sharded.sh
+# for the exact qsub -v example. Unset (default) falls back to
+# generate_hard_negatives.py's own BOBCAT_TRAIN/TREE_TRAIN constants (originals).
+TRAIN_PATH_ARGS=()
+[ -n "$BOBCAT_TRAIN" ] && TRAIN_PATH_ARGS+=(--bobcat-train "$BOBCAT_TRAIN")
+[ -n "$TREE_TRAIN" ] && TRAIN_PATH_ARGS+=(--tree-train "$TREE_TRAIN")
+
 # Smoke-test first: qsub -v SMOKE=2000 scripts/submit_generate_hard_negatives_enumerate.sh
 if [ -n "$SMOKE" ]; then
     echo "SMOKE RUN: limiting to $SMOKE captions"
     $PYTHON -m qnlp.scripts.coco_multi_caption.generate_hard_negatives enumerate \
         --limit "$SMOKE" --parts-dir data/datasets/coco_hard_negs_compiled_smoke_parts \
         --max-workers "${MAX_WORKERS:-4}" --worker-batch-size "${WORKER_BATCH_SIZE:-100}" \
-        --max-tasks-per-child "${MAX_TASKS_PER_CHILD:-10}"
+        --max-tasks-per-child "${MAX_TASKS_PER_CHILD:-10}" \
+        "${TRAIN_PATH_ARGS[@]}"
 else
     $PYTHON -m qnlp.scripts.coco_multi_caption.generate_hard_negatives enumerate \
         --max-workers "${MAX_WORKERS:-4}" --worker-batch-size "${WORKER_BATCH_SIZE:-100}" \
-        --max-tasks-per-child "${MAX_TASKS_PER_CHILD:-10}"
+        --max-tasks-per-child "${MAX_TASKS_PER_CHILD:-10}" \
+        "${TRAIN_PATH_ARGS[@]}"
 fi
 
 echo "========================================="

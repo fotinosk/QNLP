@@ -73,6 +73,17 @@ echo "========================================="
 
 cd $PROJECT_DIR
 
+# BOBCAT_TRAIN/TREE_TRAIN let you point this at the Phase 0 matched datasets
+# instead of the originals, e.g.:
+#   qsub -v BOBCAT_TRAIN=data/datasets/coco_single_caption_nlc_matched_train.parquet,\
+#TREE_TRAIN=data/datasets/coco_single_caption_nlc_tree_no_type_matched_train.parquet \
+#   scripts/submit_generate_hard_negatives_enumerate_sharded.sh
+# Unset (default) falls back to generate_hard_negatives.py's own BOBCAT_TRAIN/TREE_TRAIN
+# constants (the original, unmatched datasets).
+TRAIN_PATH_ARGS=()
+[ -n "$BOBCAT_TRAIN" ] && TRAIN_PATH_ARGS+=(--bobcat-train "$BOBCAT_TRAIN")
+[ -n "$TREE_TRAIN" ] && TRAIN_PATH_ARGS+=(--tree-train "$TREE_TRAIN")
+
 # Smoke-test first: qsub -v SMOKE=2000 scripts/submit_generate_hard_negatives_enumerate_sharded.sh
 if [ -n "$SMOKE" ]; then
     echo "SMOKE RUN: limiting to $SMOKE captions"
@@ -81,13 +92,15 @@ if [ -n "$SMOKE" ]; then
         --cache-path "$SHARD_CACHE_PATH" \
         --max-workers "${MAX_WORKERS:-2}" --worker-batch-size "${WORKER_BATCH_SIZE:-100}" \
         --max-tasks-per-child "${MAX_TASKS_PER_CHILD:-5}" \
-        --num-shards "$NUM_SHARDS" --shard-index "$SHARD_INDEX"
+        --num-shards "$NUM_SHARDS" --shard-index "$SHARD_INDEX" \
+        "${TRAIN_PATH_ARGS[@]}"
 else
     $PYTHON -m qnlp.scripts.coco_multi_caption.generate_hard_negatives enumerate \
         --cache-path "$SHARD_CACHE_PATH" \
         --max-workers "${MAX_WORKERS:-2}" --worker-batch-size "${WORKER_BATCH_SIZE:-100}" \
         --max-tasks-per-child "${MAX_TASKS_PER_CHILD:-5}" \
-        --num-shards "$NUM_SHARDS" --shard-index "$SHARD_INDEX"
+        --num-shards "$NUM_SHARDS" --shard-index "$SHARD_INDEX" \
+        "${TRAIN_PATH_ARGS[@]}"
 fi
 
 echo "========================================="
