@@ -59,6 +59,10 @@ export ML_BATCH_SIZE=256
 export ML_TEXT_LR=0.002
 export ML_TEXT_WEIGHT_DECAY=0.001
 
+# --- No early stopping this rerun: patience > max_epochs (50) so every cell
+# trains the full schedule, removing epoch count as a confound between cells. ---
+export ML_PATIENCE=1000
+
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export MLFLOW_DISABLED=true
 export MLFLOW_RUN_NAME="${RUN_NAME:-pi_sweep_tree_linear_frozen}_pi${PI}"
@@ -78,7 +82,10 @@ echo "========================================="
 
 cd $PROJECT_DIR
 
-$PYTHON -m qnlp.scripts.coco_multi_caption.run_frozen
+$PYTHON -m qnlp.scripts.coco_multi_caption.run_frozen || {
+    echo "Task $SGE_TASK_ID (pi=$PI) FAILED (exit $?)"
+    exit 1
+}
 
 echo "========================================="
 echo "Task $SGE_TASK_ID (pi=$PI) finished successfully at $(date)"

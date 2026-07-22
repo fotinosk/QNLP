@@ -137,6 +137,15 @@ class Trainer:
                 self.scheduler.step()
 
         logger.info(f"Training complete. Best epoch: {best_epoch}. Running test evaluation.")
+        # Free the optimizer (Adam keeps ~2x model size in state) and any cached
+        # allocator blocks before reloading the checkpoint — right after a long
+        # training run the GPU is typically fragmented enough that even a modest
+        # checkpoint load can OOM otherwise.
+        del self.optimizer
+        if self.scheduler is not None:
+            del self.scheduler
+        if self.device.type == "cuda":
+            torch.cuda.empty_cache()
         self._load_checkpoint()
 
         test_metrics = self._run_epoch(self.test_loader, train=False)
@@ -185,7 +194,10 @@ class Trainer:
         )
 
     def _load_checkpoint(self) -> None:
-        checkpoint = torch.load(self.checkpoint_path, map_location=self.device)
+        # Deserialize to CPU first, then move — unpickling straight to CUDA
+        # allocates each tensor's storage on the GPU as it's read, which is the
+        # step that OOMs when the allocator is still fragmented post-training.
+        checkpoint = torch.load(self.checkpoint_path, map_location="cpu")
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.model.to(self.device)
         logger.info(f"Loaded checkpoint from epoch {checkpoint['epoch']}.")

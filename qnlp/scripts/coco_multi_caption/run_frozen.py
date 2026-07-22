@@ -450,9 +450,17 @@ def run() -> None:
                 logger.info(f"Early stopping at epoch {epoch}.")
                 break
 
-        best = torch.load(checkpoint_path, map_location=device)
+        # Free cached allocator blocks, then deserialize to CPU first — same
+        # fragmentation-OOM fix as Trainer._load_checkpoint. Optimizer stays alive:
+        # _run_epoch below still takes it positionally even though train=False
+        # means it's never stepped.
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+        best = torch.load(checkpoint_path, map_location="cpu")
         text_model.load_state_dict(best["text_model_state_dict"])
         text_head.load_state_dict(best["text_head_state_dict"])
+        text_model.to(device)
+        text_head.to(device)
 
         test_metrics = _run_epoch(
             text_model, text_head, image_cache, loaders["test"], loss_fn, optimizer, device, train=False
