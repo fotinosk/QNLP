@@ -151,9 +151,9 @@ COCO-trained models, which sit at ARO chance.
 
 Plan: `HARD_NEG_PI_SWEEP_PLAN.md`. 4 cells × 5 π ∈ {0, 0.1, 0.25, 0.5, 1.0} = 20 runs,
 SGE arrays (task 1→π=0 ... task 5→π=1.0). Checked live via `ssh beaker`, updated
-2026-07-22 ~11:50. 13/20 done (12 in-process + 1 via standalone re-eval, retrieval
-missing for that one — see † below), 7 actively training (fresh log lines within
-the last 10 min, not stuck).
+2026-07-22 ~11:55. 15/20 done (14 in-process + 1 via standalone re-eval, retrieval
+missing for that one — see † below), 5 actively training (fresh log lines within
+the last 15 min, not stuck).
 
 ⚠️ Bug found while pulling these: `submit_pi_sweep_bobcat_linear.sh` (and presumably the
 other 3) print "finished successfully" regardless of exit code — task 3 below crashed
@@ -170,14 +170,14 @@ stage submit script; worth adding `|| exit 1` guards, not yet done.
 | 0.5 | 12 | 0.0100/0.0552 | 0.0030/0.0278 | .118/.154/.061 | 0.4987 | 0.6209 | 0.5499 |
 | 1.0 | 12 | 0.0090/0.0528 | 0.0034/0.0186 | .111/.176/.039 | 0.5031 | 0.6181 | 0.5416 |
 
-### C2. Bobcat, non-frozen / TTN (job 7091908)
+### C2. Bobcat, non-frozen / TTN (job 7091908) — 4/5 done, 1 running
 
 | π | ep | i2t R@1/R10 | t2i R@1/R10 | Wino t/i/g | ARO overall | SC full | SC++ |
 |---|---|---|---|---|---|---|---|
 | 0 | 2 | 0.0002/0.0028 | 0.0004/0.0028 | .272/.237/.133 | 0.4977 | 0.4982 | 0.4930 |
 | 0.1 | 10 | 0.0000/0.0022 | 0.0006/0.0026 | .201/.154/.090 | 0.4988* | 0.6195 | 0.5627 |
 | 0.25 | 6§ | n/c† | n/c† | .022/.229/.004 | 0.5031* | 0.5324 | 0.5196 |
-| 0.5 | — RUNNING, epoch 18/50 (job 7091908.4, last log 10:48) — | | | | | | |
+| 0.5 | — RUNNING, epoch 20/50 (job 7091908.4, last log 11:54) — | | | | | | |
 | 1.0 | 2 | 0.0000/0.0018 | 0.0002/0.0022 | .075/.186/.043 | 0.4969 | 0.5183 | 0.5081 |
 
 \* π=0.1 and π=0.25 ARO rows: true_cos/false_cos ≈0.83 and ≈0.977 respectively (vs.
@@ -197,14 +197,14 @@ used `run.py`'s in-process eval, unaffected) — not yet fixed.
 not the final training epoch reached — inconsistent with the "ep" column's meaning in
 every other row (training epochs reached), flagged for clarity, not a data error.
 
-### C3. Tree, frozen (job 7091907) — 1/5 done, 4 running
+### C3. Tree, frozen (job 7091907) — 3/5 done, 2 running
 
 | π | ep | i2t R@1/R10 | t2i R@1/R10 | Wino t/i/g | ARO overall | SC full | SC++ |
 |---|---|---|---|---|---|---|---|
-| 0 | — RUNNING, epoch 48/50 (job 7091907.1, last log 10:45) — | | | | | | |
-| 0.1 | — RUNNING, epoch 24/50 (job 7091907.2, last log 10:53) — | | | | | | |
-| 0.25 | — RUNNING, epoch 22/50 (job 7091907.3, last log 10:34) — | | | | | | |
-| 0.5 | — RUNNING, epoch 32/50 (job 7091907.4, last log 10:48) — | | | | | | |
+| 0 | 50 (max, no early stop) | 0.0004/0.0046 | 0.0002/0.0024 | .120/.057/.017 | 0.5134 | 0.5232 | 0.5237 |
+| 0.1 | — RUNNING, epoch 27/50 (job 7091907.2, last log 11:41) — | | | | | | |
+| 0.25 | — RUNNING, epoch 25/50 (job 7091907.3, last log 11:39) — | | | | | | |
+| 0.5 | 34 | 0.0004/0.0024 | 0.0002/0.0016 | .185/.031/.014 | 0.4993 | 0.4836 | 0.4911 |
 | 1.0 | 25 | 0.0004/0.0026 | 0.0000/0.0018 | .180/.051/.031 | 0.4950 | 0.4940 | 0.4972 |
 
 ### C4. Tree, non-frozen / TTN (job 7091909) — 3/5 done, 2 running
@@ -212,13 +212,16 @@ every other row (training epochs reached), flagged for clarity, not a data error
 | π | ep | i2t R@1/R10 | t2i R@1/R10 | Wino t/i/g | ARO overall | SC full | SC++ |
 |---|---|---|---|---|---|---|---|
 | 0 | 6 | 0.0002/0.0018 | 0.0002/0.0018 | .168/.094/.034 | 0.4995 | 0.4759 | 0.4916 |
-| 0.1 | — RUNNING, epoch 14/50 (job 7091909.2, last log 10:47) — | | | | | | |
+| 0.1 | — RUNNING, epoch 16/50 (job 7091909.2, last log 11:50) — | | | | | | |
 | 0.25 | 10 | 0.0004/0.0024 | 0.0002/0.0026 | .205/.063/.054 | 0.4985 | 0.4969 | 0.4935 |
 | 0.5 | 3 | 0.0000/0.0022 | 0.0004/0.0026 | .254/.048/.003 | 0.4973 | 0.4914 | 0.4902 |
-| 1.0 | — RUNNING, epoch 9/50 (job 7091909.5, last log 10:53) — | | | | | | |
+| 1.0 | — RUNNING, epoch 10/50 (job 7091909.5, last log 11:27) — | | | | | | |
 
-**Early read (9/20 cells still pending):** bobcat frozen is the standout so far — SC
+**Early read (5/20 cells still pending):** bobcat frozen remains the standout — SC
 full/++ (0.55-0.63) and Wino group scores (0.04-0.09) both clear of chance, consistent
 with the pre-sweep best run (job 7076697, SC full 0.540). No π value in that cell is
 yet a clear winner over π=0. Both non-frozen (TTN) cells and tree-frozen sit at chance
-across the board, echoing the family A1 takeaway. Revisit once the remaining 9 land.
+across the board, echoing the family A1 takeaway — tree-frozen π=0 (50 full epochs,
+the longest-trained cell so far) is the only tree-frozen row with ARO/SC nudging
+(barely) past 0.50, still far short of bobcat-frozen's margin. Revisit once the
+remaining 5 land.
