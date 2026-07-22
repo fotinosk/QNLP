@@ -18,6 +18,12 @@
 # over after training, in a FRESH process/GPU context here instead).
 # Usage: qsub -v CHECKPOINT=runs/checkpoints/coco_multi_caption/<ts>/best_model.pt \
 #   scripts/submit_evaluate_checkpoint.sh
+# DATASET (optional): override the retrieval test-set dataset name — REQUIRED if
+# the original training run set ML_DATASET_NAME explicitly (e.g. every bobcat cell
+# in the pi-sweep pins coco_single_caption_nlc). Without it, evaluate.py's
+# linear/non-linear heuristic can silently grab the wrong test set and crash with
+# a symbol KeyError (hit once already — see HARD_NEG_PI_SWEEP_PLAN.md / RESULTS.md).
+#   qsub -v CHECKPOINT=...,DATASET=coco_single_caption_nlc scripts/submit_evaluate_checkpoint.sh
 
 mkdir -p /SAN/intelsys/discoviz/fotinos/QNLP/job_outputs
 mkdir -p /SAN/intelsys/discoviz/fotinos/cache/nltk_data
@@ -52,12 +58,16 @@ echo "Job ID: $JOB_ID"
 echo "Running on: $(hostname)"
 echo "[evaluate]: standalone retrieval+benchmark eval"
 echo "Checkpoint: $CHECKPOINT"
+echo "Dataset override: ${DATASET:-(none — using built-in heuristic)}"
 echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
 echo "========================================="
 
 cd $PROJECT_DIR
 
-$PYTHON -m qnlp.scripts.coco_multi_caption.evaluate "$CHECKPOINT" || {
+DATASET_ARGS=()
+[ -n "$DATASET" ] && DATASET_ARGS+=(--dataset "$DATASET")
+
+$PYTHON -m qnlp.scripts.coco_multi_caption.evaluate "$CHECKPOINT" "${DATASET_ARGS[@]}" || {
     echo "EVAL FAILED (exit $?)"
     exit 1
 }

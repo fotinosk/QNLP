@@ -878,11 +878,22 @@ def evaluate_retrieval(
     model: ContrastiveVLM,
     device: torch.device,
     batch_size: int,
+    dataset_name: str | None = None,
 ) -> dict[str, float]:
     """COCO test-set i2t/t2i retrieval, deduplicated to one caption per image
-    (capped at TEST_SIZE). Uses the dataset matching the checkpoint's mode."""
+    (capped at TEST_SIZE).
+
+    dataset_name: explicit override (e.g. "coco_single_caption_nlc"). Needed
+    whenever training used ML_DATASET_NAME to point at a non-default dataset —
+    the checkpoint alone doesn't record which dataset it was trained on (only
+    embedding_dim/non_linear/mlp_head are inferred from the state dict), so the
+    fallback heuristic below can silently pick the WRONG test set (a caption
+    using a symbol this checkpoint never saw -> KeyError in EinsumModel). If
+    omitted, falls back to the old heuristic (kept for backward compatibility
+    with runs that used the actual default dataset for their mode).
+    """
     non_linear = model.text_model.non_linear_contractions
-    dataset = "coco_single_caption_nlc" if non_linear else "coco_single_caption"
+    dataset = dataset_name or ("coco_single_caption_nlc" if non_linear else "coco_single_caption")
     parquet = constants.datasets_path / f"{dataset}{constants.artifact_suffix}_test.parquet"
     if not parquet.exists():
         # A non-linear dataset serves linear models too (the path column is just
@@ -928,12 +939,13 @@ def evaluate_retrieval(
 def evaluate_all(
     checkpoint_path: Path,
     batch_size: int = 128,
+    dataset_name: str | None = None,
 ) -> dict[str, dict | None]:
     device = get_device()
     model = load_model(checkpoint_path, device)
 
     try:
-        retrieval = evaluate_retrieval(model, device, batch_size)
+        retrieval = evaluate_retrieval(model, device, batch_size, dataset_name=dataset_name)
     except Exception as e:
         logger.warning(f"Retrieval: eval skipped ({type(e).__name__}: {e})")
         retrieval = None
@@ -952,6 +964,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate a COCO checkpoint on compositional benchmarks.")
     parser.add_argument("checkpoint", type=Path, help="Path to best_model.pt checkpoint")
     parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument(
+        "--dataset",
+        default=None,
+        help="Override the retrieval test-set dataset name (e.g. coco_single_caption_nlc). "
+        "Required if training used ML_DATASET_NAME to override the per-mode default — the "
+        "checkpoint doesn't record which dataset it was trained on, so the built-in "
+        "linear/non-linear heuristic can silently grab the wrong test set.",
+    )
     args = parser.parse_args()
 
-    evaluate_all(args.checkpoint, batch_size=args.batch_size)
+    evaluate_all(args.checkpoint, batch_size=args.batch_size, dataset_name=args.dataset)
