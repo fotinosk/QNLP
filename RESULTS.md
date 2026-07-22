@@ -151,9 +151,9 @@ COCO-trained models, which sit at ARO chance.
 
 Plan: `HARD_NEG_PI_SWEEP_PLAN.md`. 4 cells × 5 π ∈ {0, 0.1, 0.25, 0.5, 1.0} = 20 runs,
 SGE arrays (task 1→π=0 ... task 5→π=1.0). Checked live via `ssh beaker`, updated
-2026-07-22 ~17:50. 18/20 done (17 in-process + 1 via standalone re-eval, retrieval
-missing for that one — see † below), 2 actively training (bobcat-linear π=0.5,
-tree-linear π=0.1 — both confirmed active, not stuck).
+2026-07-22 ~19:28. 19/20 done (18 in-process + 1 via standalone re-eval, retrieval
+missing for that one — see † below), 1 still training (bobcat-linear π=0.5,
+epoch 25/50, confirmed active via qstat despite ~60-80min/epoch cadence).
 
 ⚠️ Bug found while pulling these: `submit_pi_sweep_bobcat_linear.sh` (and presumably the
 other 3) print "finished successfully" regardless of exit code — task 3 below crashed
@@ -177,7 +177,7 @@ stage submit script; worth adding `|| exit 1` guards, not yet done.
 | 0 | 2 | 0.0002/0.0028 | 0.0004/0.0028 | .272/.237/.133 | 0.4993 | 0.4957 | 0.4982 | 0.4930 |
 | 0.1 | 10 | 0.0000/0.0022 | 0.0006/0.0026 | .201/.154/.090 | 0.5012* | 0.4960* | 0.6195 | 0.5627 |
 | 0.25 | 6§ | n/c† | n/c† | .022/.229/.004 | 0.4983* | 0.5088* | 0.5324 | 0.5196 |
-| 0.5 | — RUNNING, epoch 24/50 (job 7091908.4, last log 15:55, ~60min/epoch — confirmed active via qstat, not stalled) — | | | | | | | |
+| 0.5 | — RUNNING, epoch 25/50 (job 7091908.4, last log 17:59, ~60-80min/epoch — confirmed active via qstat, not stalled) — | | | | | | | |
 | 1.0 | 2 | 0.0000/0.0018 | 0.0002/0.0022 | .075/.186/.043 | 0.4982 | 0.4953 | 0.5183 | 0.5081 |
 
 \* π=0.1 and π=0.25 ARO rows: true_cos/false_cos ≈0.83 and ≈0.977 respectively (vs.
@@ -207,25 +207,27 @@ every other row (training epochs reached), flagged for clarity, not a data error
 | 0.5 | 34 | 0.0004/0.0024 | 0.0002/0.0016 | .185/.031/.014 | 0.4983 | 0.5005 | 0.4836 | 0.4911 |
 | 1.0 | 25 | 0.0004/0.0026 | 0.0000/0.0018 | .180/.051/.031 | 0.4951 | 0.4950 | 0.4940 | 0.4972 |
 
-### C4. Tree, non-frozen / TTN (job 7091909) — 4/5 done, 1 running
+### C4. Tree, non-frozen / TTN (job 7091909) — all 5 done
 
 | π | ep | i2t R@1/R10 | t2i R@1/R10 | Wino t/i/g | ARO attr | ARO rel | SC full | SC++ |
 |---|---|---|---|---|---|---|---|---|
 | 0 | 6 | 0.0002/0.0018 | 0.0002/0.0018 | .168/.094/.034 | 0.5010 | 0.4978 | 0.4759 | 0.4916 |
-| 0.1 | — RUNNING, epoch 21/50 (job 7091909.2, last log 17:40) — | | | | | | | |
+| 0.1 | 22 | 0.0002/0.0020 | 0.0002/0.0018 | .197/.066/.020 | 0.5021 | 0.4875 | 0.4821 | 0.4912 |
 | 0.25 | 10 | 0.0004/0.0024 | 0.0002/0.0026 | .205/.063/.054 | 0.4957 | 0.5018 | 0.4969 | 0.4935 |
 | 0.5 | 3 | 0.0000/0.0022 | 0.0004/0.0026 | .254/.048/.003 | 0.5055 | 0.4874 | 0.4914 | 0.4902 |
 | 1.0 | 3 | 0.0004/0.0024 | 0.0004/0.0016 | .197/.100/.009 | 0.4989 | 0.4899 | 0.4938 | 0.4962 |
 
-**Early read (2/20 cells still pending, both non-frozen — C2 π=0.5, C4 π=0.1):**
-bobcat frozen remains the standout, now with all 5 π values in: SC full/++
-(0.55-0.63) and Wino group scores (0.04-0.09) both clear of chance across every
-π, consistent with the pre-sweep best run (job 7076697, SC full 0.540). No π
+**Early read (1/20 cells still pending — C2 π=0.5 only; C4 now complete):**
+bobcat frozen remains the standout, all 5 π values in: SC full/++ (0.55-0.63)
+and Wino group scores (0.04-0.09) both clear of chance across every π,
+consistent with the pre-sweep best run (job 7076697, SC full 0.540). No π
 value in that cell is a clear winner over π=0 — hardness doesn't appear to move
-this cell much either way. Tree-frozen (also complete, all 5 done) sits close to
-chance throughout but with a consistent small positive nudge on SC full/++
-(0.51-0.53) regardless of π, still far short of bobcat-frozen's margin. Both
-non-frozen (TTN) cells remain flat at chance across every completed π, echoing
-the family A1 takeaway — non-frozen COCO training doesn't appear to learn
+this cell much either way. Tree-frozen (also complete) sits close to chance
+throughout but with a consistent small positive nudge on SC full/++ (0.51-0.53)
+regardless of π, still far short of bobcat-frozen's margin. Both non-frozen
+(TTN) cells (C4 all 5 done, C2 4/5 done) remain flat at chance across every
+completed π — 9 of 9 scored non-frozen rows sit at chance on ARO and SC, none
+clear of it. This is now a settled pattern, not a preliminary one, echoing the
+family A1 takeaway — non-frozen COCO training doesn't appear to learn
 anything transferable to these benchmarks regardless of hard-negative pressure.
 Revisit once the final 2 land.
