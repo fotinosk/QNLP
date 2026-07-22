@@ -144,3 +144,67 @@ Failed dedicated frozen evals: 7006008 (CUDA ECC error — node fault), 7009929 
 overall remarkably consistent at **0.70–0.72** across dataset variants (best verified:
 0.716, rtl, job 7002030); frozen tops out around 0.67. This contrasts sharply with
 COCO-trained models, which sit at ARO chance.
+
+---
+
+## C. Hard-negative π-sweep (2026-07-22)
+
+Plan: `HARD_NEG_PI_SWEEP_PLAN.md`. 4 cells × 5 π ∈ {0, 0.1, 0.25, 0.5, 1.0} = 20 runs,
+SGE arrays (task 1→π=0 ... task 5→π=1.0). Checked live via `ssh beaker`, 2026-07-22 10:55.
+12/20 done, 7 actively training (fresh log lines within the last 10 min, not stuck),
+1 crashed at final eval (training itself succeeded — see fix note below).
+
+⚠️ Bug found while pulling these: `submit_pi_sweep_bobcat_linear.sh` (and presumably the
+other 3) print "finished successfully" regardless of exit code — task 3 below crashed
+with an unhandled OOM and still printed success. Same class of bug as the earlier score-
+stage submit script; worth adding `|| exit 1` guards, not yet done.
+
+### C1. Bobcat, frozen (job 7091906) — all 5 done
+
+| π | ep | i2t R@1/R10 | t2i R@1/R10 | Wino t/i/g | ARO overall | SC full | SC++ |
+|---|---|---|---|---|---|---|---|
+| 0 | 12 | 0.0090/0.0536 | 0.0028/0.0234 | .129/.190/.061 | 0.4987 | 0.6336 | 0.5635 |
+| 0.1 | 12 | 0.0110/0.0500 | 0.0022/0.0230 | .133/.165/.068 | 0.4991 | 0.6287 | 0.5617 |
+| 0.25 | 12 | 0.0098/0.0516 | 0.0018/0.0218 | .172/.183/.090 | 0.4964 | 0.6254 | 0.5518 |
+| 0.5 | 12 | 0.0100/0.0552 | 0.0030/0.0278 | .118/.154/.061 | 0.4987 | 0.6209 | 0.5499 |
+| 1.0 | 12 | 0.0090/0.0528 | 0.0034/0.0186 | .111/.176/.039 | 0.5031 | 0.6181 | 0.5416 |
+
+### C2. Bobcat, non-frozen / TTN (job 7091908)
+
+| π | ep | i2t R@1/R10 | t2i R@1/R10 | Wino t/i/g | ARO overall | SC full | SC++ |
+|---|---|---|---|---|---|---|---|
+| 0 | 2 | 0.0002/0.0028 | 0.0004/0.0028 | .272/.237/.133 | 0.4977 | 0.4982 | 0.4930 |
+| 0.1 | 10 | 0.0000/0.0022 | 0.0006/0.0026 | .201/.154/.090 | 0.4988* | 0.6195 | 0.5627 |
+| 0.25 | 16 (early-stopped) | — CRASHED (CUDA OOM at final eval, best ckpt ep 6 saved) — | | | | | |
+| 0.5 | — RUNNING, epoch 18/50 (job 7091908.4, last log 10:48) — | | | | | | |
+| 1.0 | 2 | 0.0000/0.0018 | 0.0002/0.0022 | .075/.186/.043 | 0.4969 | 0.5183 | 0.5081 |
+
+\* π=0.1 ARO row: true_cos/false_cos both ≈0.83 (vs. the other rows' ≈0.03-0.05) —
+embedding collapse, not a transcription error; flagged for a closer look, not yet
+investigated.
+
+### C3. Tree, frozen (job 7091907) — 1/5 done, 4 running
+
+| π | ep | i2t R@1/R10 | t2i R@1/R10 | Wino t/i/g | ARO overall | SC full | SC++ |
+|---|---|---|---|---|---|---|---|
+| 0 | — RUNNING, epoch 48/50 (job 7091907.1, last log 10:45) — | | | | | | |
+| 0.1 | — RUNNING, epoch 24/50 (job 7091907.2, last log 10:53) — | | | | | | |
+| 0.25 | — RUNNING, epoch 22/50 (job 7091907.3, last log 10:34) — | | | | | | |
+| 0.5 | — RUNNING, epoch 32/50 (job 7091907.4, last log 10:48) — | | | | | | |
+| 1.0 | 25 | 0.0004/0.0026 | 0.0000/0.0018 | .180/.051/.031 | 0.4950 | 0.4940 | 0.4972 |
+
+### C4. Tree, non-frozen / TTN (job 7091909) — 3/5 done, 2 running
+
+| π | ep | i2t R@1/R10 | t2i R@1/R10 | Wino t/i/g | ARO overall | SC full | SC++ |
+|---|---|---|---|---|---|---|---|
+| 0 | 6 | 0.0002/0.0018 | 0.0002/0.0018 | .168/.094/.034 | 0.4995 | 0.4759 | 0.4916 |
+| 0.1 | — RUNNING, epoch 14/50 (job 7091909.2, last log 10:47) — | | | | | | |
+| 0.25 | 10 | 0.0004/0.0024 | 0.0002/0.0026 | .205/.063/.054 | 0.4985 | 0.4969 | 0.4935 |
+| 0.5 | 3 | 0.0000/0.0022 | 0.0004/0.0026 | .254/.048/.003 | 0.4973 | 0.4914 | 0.4902 |
+| 1.0 | — RUNNING, epoch 9/50 (job 7091909.5, last log 10:53) — | | | | | | |
+
+**Early read (9/20 cells still pending):** bobcat frozen is the standout so far — SC
+full/++ (0.55-0.63) and Wino group scores (0.04-0.09) both clear of chance, consistent
+with the pre-sweep best run (job 7076697, SC full 0.540). No π value in that cell is
+yet a clear winner over π=0. Both non-frozen (TTN) cells and tree-frozen sit at chance
+across the board, echoing the family A1 takeaway. Revisit once the remaining 9 land.
