@@ -150,9 +150,10 @@ COCO-trained models, which sit at ARO chance.
 ## C. Hard-negative π-sweep (2026-07-22)
 
 Plan: `HARD_NEG_PI_SWEEP_PLAN.md`. 4 cells × 5 π ∈ {0, 0.1, 0.25, 0.5, 1.0} = 20 runs,
-SGE arrays (task 1→π=0 ... task 5→π=1.0). Checked live via `ssh beaker`, 2026-07-22 10:55.
-12/20 done, 7 actively training (fresh log lines within the last 10 min, not stuck),
-1 crashed at final eval (training itself succeeded — see fix note below).
+SGE arrays (task 1→π=0 ... task 5→π=1.0). Checked live via `ssh beaker`, updated
+2026-07-22 ~11:50. 13/20 done (12 in-process + 1 via standalone re-eval, retrieval
+missing for that one — see † below), 7 actively training (fresh log lines within
+the last 10 min, not stuck).
 
 ⚠️ Bug found while pulling these: `submit_pi_sweep_bobcat_linear.sh` (and presumably the
 other 3) print "finished successfully" regardless of exit code — task 3 below crashed
@@ -175,13 +176,26 @@ stage submit script; worth adding `|| exit 1` guards, not yet done.
 |---|---|---|---|---|---|---|---|
 | 0 | 2 | 0.0002/0.0028 | 0.0004/0.0028 | .272/.237/.133 | 0.4977 | 0.4982 | 0.4930 |
 | 0.1 | 10 | 0.0000/0.0022 | 0.0006/0.0026 | .201/.154/.090 | 0.4988* | 0.6195 | 0.5627 |
-| 0.25 | 16 (early-stopped) | — CRASHED (CUDA OOM at final eval, best ckpt ep 6 saved) — | | | | | |
+| 0.25 | 6§ | n/c† | n/c† | .022/.229/.004 | 0.5031* | 0.5324 | 0.5196 |
 | 0.5 | — RUNNING, epoch 18/50 (job 7091908.4, last log 10:48) — | | | | | | |
 | 1.0 | 2 | 0.0000/0.0018 | 0.0002/0.0022 | .075/.186/.043 | 0.4969 | 0.5183 | 0.5081 |
 
-\* π=0.1 ARO row: true_cos/false_cos both ≈0.83 (vs. the other rows' ≈0.03-0.05) —
-embedding collapse, not a transcription error; flagged for a closer look, not yet
-investigated.
+\* π=0.1 and π=0.25 ARO rows: true_cos/false_cos ≈0.83 and ≈0.977 respectively (vs.
+the other rows' ≈0.03-0.05, and nearly identical to each other within each row) —
+embedding collapse, not a transcription error. Both are early/low-epoch checkpoints
+(ep 10, ep 6) in a cell that sits at chance overall, so likely genuine undertraining
+rather than a second bug — not confirmed.
+† π=0.25 retrieval not computed: rerun via the standalone `evaluate.py` eval script
+(job 7100405, after the original in-process eval crashed on OOM — training itself
+succeeded, checkpoint from epoch 6). That script's dataset-selection heuristic picks
+`coco_single_caption` for linear models by heuristic, not from the actual training
+config, so it grabbed the WRONG test set (this sweep deliberately trained bobcat on
+`coco_single_caption_nlc`) and hit `KeyError` on a symbol this checkpoint never saw.
+Real bug in `evaluate.py`'s standalone path specifically (the other 11 completed rows
+used `run.py`'s in-process eval, unaffected) — not yet fixed.
+§ epoch of the loaded checkpoint (best-epoch, saved before early stopping at epoch 16),
+not the final training epoch reached — inconsistent with the "ep" column's meaning in
+every other row (training epochs reached), flagged for clarity, not a data error.
 
 ### C3. Tree, frozen (job 7091907) — 1/5 done, 4 running
 
