@@ -151,7 +151,7 @@ COCO-trained models, which sit at ARO chance.
 
 Plan: `HARD_NEG_PI_SWEEP_PLAN.md`. 4 cells × 5 π ∈ {0, 0.1, 0.25, 0.5, 1.0} = 20 runs,
 SGE arrays (task 1→π=0 ... task 5→π=1.0). Checked live via `ssh beaker`, updated
-2026-07-22 ~14:50. 16/20 done (15 in-process + 1 via standalone re-eval, retrieval
+2026-07-22 ~17:42. 17/20 done (16 in-process + 1 via standalone re-eval, retrieval
 missing for that one — see † below), 5 actively training (fresh log lines within
 the last 15 min, not stuck).
 
@@ -177,7 +177,7 @@ stage submit script; worth adding `|| exit 1` guards, not yet done.
 | 0 | 2 | 0.0002/0.0028 | 0.0004/0.0028 | .272/.237/.133 | 0.4993 | 0.4957 | 0.4982 | 0.4930 |
 | 0.1 | 10 | 0.0000/0.0022 | 0.0006/0.0026 | .201/.154/.090 | 0.5012* | 0.4960* | 0.6195 | 0.5627 |
 | 0.25 | 6§ | n/c† | n/c† | .022/.229/.004 | 0.4983* | 0.5088* | 0.5324 | 0.5196 |
-| 0.5 | — RUNNING, epoch 23/50 (job 7091908.4, last log 14:01) — | | | | | | | |
+| 0.5 | — RUNNING, epoch 24/50 (job 7091908.4, last log 15:55, ~60min/epoch — confirmed active via qstat, not stalled) — | | | | | | | |
 | 1.0 | 2 | 0.0000/0.0018 | 0.0002/0.0022 | .075/.186/.043 | 0.4982 | 0.4953 | 0.5183 | 0.5081 |
 
 \* π=0.1 and π=0.25 ARO rows: true_cos/false_cos ≈0.83 and ≈0.977 respectively (vs.
@@ -202,20 +202,20 @@ every other row (training epochs reached), flagged for clarity, not a data error
 | π | ep | i2t R@1/R10 | t2i R@1/R10 | Wino t/i/g | ARO attr | ARO rel | SC full | SC++ |
 |---|---|---|---|---|---|---|---|---|
 | 0 | 50 (max, no early stop) | 0.0004/0.0046 | 0.0002/0.0024 | .120/.057/.017 | 0.5185 | 0.5073 | 0.5232 | 0.5237 |
-| 0.1 | — RUNNING, epoch 39/50 (job 7091907.2, last log 14:45) — | | | | | | | |
+| 0.1 | — RUNNING, epoch 50/50 (max, job 7091907.2, last log 17:40 — final eval likely in progress) — | | | | | | | |
 | 0.25 | 26 | 0.0000/0.0020 | 0.0004/0.0030 | .151/.029/.011 | 0.5133 | 0.4925 | 0.5083 | 0.5338 |
 | 0.5 | 34 | 0.0004/0.0024 | 0.0002/0.0016 | .185/.031/.014 | 0.4983 | 0.5005 | 0.4836 | 0.4911 |
 | 1.0 | 25 | 0.0004/0.0026 | 0.0000/0.0018 | .180/.051/.031 | 0.4951 | 0.4950 | 0.4940 | 0.4972 |
 
-### C4. Tree, non-frozen / TTN (job 7091909) — 3/5 done, 2 running
+### C4. Tree, non-frozen / TTN (job 7091909) — 4/5 done, 1 running
 
 | π | ep | i2t R@1/R10 | t2i R@1/R10 | Wino t/i/g | ARO attr | ARO rel | SC full | SC++ |
 |---|---|---|---|---|---|---|---|---|
 | 0 | 6 | 0.0002/0.0018 | 0.0002/0.0018 | .168/.094/.034 | 0.5010 | 0.4978 | 0.4759 | 0.4916 |
-| 0.1 | — RUNNING, epoch 19/50 (job 7091909.2, last log 14:29) — | | | | | | | |
+| 0.1 | — RUNNING, epoch 21/50 (job 7091909.2, last log 17:40) — | | | | | | | |
 | 0.25 | 10 | 0.0004/0.0024 | 0.0002/0.0026 | .205/.063/.054 | 0.4957 | 0.5018 | 0.4969 | 0.4935 |
 | 0.5 | 3 | 0.0000/0.0022 | 0.0004/0.0026 | .254/.048/.003 | 0.5055 | 0.4874 | 0.4914 | 0.4902 |
-| 1.0 | — RUNNING, epoch 12/50 (job 7091909.5, last log 14:00) — | | | | | | | |
+| 1.0 | 3 | 0.0004/0.0024 | 0.0004/0.0016 | .197/.100/.009 | 0.4989 | 0.4899 | 0.4938 | 0.4962 |
 
 **Early read (5/20 cells still pending):** bobcat frozen remains the standout — SC
 full/++ (0.55-0.63) and Wino group scores (0.04-0.09) both clear of chance, consistent
