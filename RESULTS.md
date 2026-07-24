@@ -253,3 +253,72 @@ to reach a meaningfully later epoch, so this could be a real hardness effect or
 could just be "this cell needed to train longer to leave chance" — the no-early-
 stopping rerun should disambiguate directly since it removes epoch count as a
 confound. Worth flagging as the one standout result to watch for in that rerun.
+
+---
+
+## D. Hard-negative π-sweep rerun — no early stopping (2026-07-23)
+
+Same 20-run grid (jobs 7104874-7104877), relaunched with `ML_PATIENCE=1000` so every
+cell trains the full `max_epochs=50` instead of stopping ~10 epochs past its best
+val epoch — removes epoch count as a confound between π values (see §C takeaway).
+Also picks up the `trainer.py`/`run_frozen.py` checkpoint-load-OOM fix and the
+submit-script silent-failure fix from the same commit. Checked live via `ssh beaker`,
+updated 2026-07-24 ~09:00. 19/20 done, 1 outstanding: bobcat-frozen π=0.25 (job
+7104875 task 3) trained the full 50 epochs cleanly but then OOM'd on the
+post-training checkpoint reload itself — not the OOM already fixed in the prior
+commit (that one was `torch.load`'s CUDA unpickling), but a second, deeper OOM
+inside `EinsumModel.load_state_dict`, which reallocates its weight ParameterList
+directly on the model's current (still-GPU) device, briefly holding old + new
+weights at once on an already-full ~12GB card. Fixed in a follow-up commit
+(move model to CPU before `load_state_dict`, then transfer back) — not yet
+rerun. tree-frozen π=0.25 (job 7104877 task 3) completed cleanly. The 2 tasks
+that earlier OOM'd on small cards (π=0.5, π=1.0 in bobcat-frozen) were
+retriggered same day as jobs 7105312/7105313 with those hosts excluded and both
+completed successfully.
+
+| Cell | π | best ep | i2t R@1/R10 | t2i R@1/R10 | Wino t/i/g | ARO attr | ARO rel | SC full | SC++ |
+|---|---|---|---|---|---|---|---|---|---|
+| Bobcat frozen (7104875) | 0 | 2/50 | 0.0126/0.0556 | 0.0040/0.0270 | .143/.212/.100 | 0.4993 | 0.5019 | 0.6362 | 0.5705 |
+| Bobcat frozen (7104875) | 0.1 | 2/50 | 0.0088/0.0548 | 0.0024/0.0232 | .154/.183/.079 | 0.5024 | 0.4966 | 0.6260 | 0.5625 |
+| Bobcat frozen (7104875) | 0.25 | — trained to epoch 50 (best ep 2), then **FAILED** on post-training checkpoint reload (`EinsumModel.load_state_dict` OOM, see note below) — needs rerun with the follow-up fix — | | | | | | | |
+| Bobcat frozen (7105312, retrigger) | 0.5 | 2/50 | 0.0108/0.0480 | 0.0040/0.0238 | .129/.197/.061 | 0.5004 | 0.5052 | 0.6295 | 0.5604 |
+| Bobcat frozen (7105313, retrigger) | 1.0 | 2/50 | 0.0096/0.0564 | 0.0020/0.0238 | .151/.165/.072 | 0.4988 | 0.5034 | 0.6185 | 0.5470 |
+| Bobcat non-frozen/TTN (7104874) | 0 | 46/50 | 0.0002/0.0022 | 0.0002/0.0016 | .183/.229/.118 | 0.5022 | 0.5006 | 0.7186 | 0.5906 |
+| Bobcat non-frozen/TTN (7104874) | 0.1 | 30/50 | 0.0002/0.0028 | 0.0004/0.0032 | .215/.222/.143 | 0.4997 | 0.4920 | 0.7160 | 0.5974 |
+| Bobcat non-frozen/TTN (7104874) | 0.25 | 35/50 | 0.0002/0.0026 | 0.0000/0.0022 | .165/.190/.086 | 0.5163 | 0.5323 | 0.7286 | 0.5955 |
+| Bobcat non-frozen/TTN (7104874) | 0.5 | 13/50 | 0.0000/0.0020 | 0.0004/0.0020 | .161/.186/.093 | 0.4981 | 0.5210 | 0.7077 | 0.5930 |
+| Bobcat non-frozen/TTN (7104874) | 1.0 | 39/50 | 0.0002/0.0022 | 0.0000/0.0008 | .000/.215/.000 | 0.4940 | 0.5052 | 0.7178 | 0.6059 |
+| Tree non-frozen/TTN (7104876) | 0 | 29/50 | 0.0000/0.0016 | 0.0002/0.0018 | .208/.125/.063 | 0.4978 | 0.4967 | 0.5088 | 0.5127 |
+| Tree non-frozen/TTN (7104876) | 0.1 | 13/50 | 0.0002/0.0022 | 0.0006/0.0014 | .188/.080/.031 | 0.5040 | 0.4915 | 0.4754 | 0.4916 |
+| Tree non-frozen/TTN (7104876) | 0.25 | 3/50 | 0.0000/0.0016 | 0.0002/0.0028 | .097/.054/.006 | 0.4963 | 0.4919 | 0.5077 | 0.4967 |
+| Tree non-frozen/TTN (7104876) | 0.5 | 33/50 | 0.0004/0.0024 | 0.0002/0.0018 | .014/.051/.011 | 0.4968 | 0.5279 | 0.4996 | 0.5114 |
+| Tree non-frozen/TTN (7104876) | 1.0 | 10/50 | 0.0004/0.0024 | 0.0002/0.0022 | .239/.143/.077 | 0.4940 | 0.4960 | 0.4961 | 0.4939 |
+| Tree frozen (7104877) | 0 | 49/50 | 0.0004/0.0044 | 0.0002/0.0022 | .105/.057/.011 | 0.5019 | 0.5006 | 0.5180 | 0.5088 |
+| Tree frozen (7104877) | 0.1 | 47/50 | 0.0008/0.0050 | 0.0002/0.0028 | .123/.046/.017 | 0.5068 | 0.4898 | 0.5218 | 0.5299 |
+| Tree frozen (7104877) | 0.25 | 48/50 | 0.0002/0.0044 | 0.0004/0.0022 | .114/.074/.026 | 0.5016 | 0.5228 | 0.5412 | 0.5126 |
+| Tree frozen (7104877) | 0.5 | 47/50 | 0.0002/0.0024 | 0.0006/0.0032 | .162/.066/.029 | 0.5008 | 0.5182 | 0.5244 | 0.4978 |
+| Tree frozen (7104877) | 1.0 | 38/50 | 0.0010/0.0050 | 0.0004/0.0024 | .125/.074/.026 | 0.5079 | 0.5389 | 0.5333 | 0.5040 |
+
+Notes:
+- "best ep" is the epoch whose checkpoint was actually reloaded for test/benchmark
+  eval (val-loss-best), out of the full 50 now always run — directly comparable
+  across rows for the first time in this campaign, unlike §C's early-stopped epochs.
+- All 5 bobcat-frozen π values converge to their best checkpoint by **epoch 2** and
+  then run 48 more epochs with no further improvement — confirms this cell isn't
+  epoch-starved; its §C early-stopped numbers (ep 12) were already using the right
+  checkpoint. π=0.5/1.0's original attempts (job 7104875 tasks 4/5) OOM'd mid-training
+  on small (~11GB) cards — a cluster hardware issue, not a training bug, same class
+  already flagged in the submit script's own comment — retriggered same day
+  (jobs 7105312/7105313) with those hosts excluded and both completed cleanly.
+- Bobcat non-frozen/TTN π=0.5's §C standout (SC full 0.71, SC++ 0.57, clear of
+  chance while every sibling π sits at chance) does **not** replicate here — with
+  early stopping removed, all 5 π in this cell now land in the same 0.71-0.73 SC
+  full / 0.59-0.61 SC++ band, well above the ~0.50 chance seen in every other
+  non-frozen cell (both bobcat and tree) at every π. So the earlier "standout" was
+  this whole cell being systematically enough-above-chance, not a π=0.5-specific
+  effect — the real story is bobcat non-frozen/TTN as a cell scores unexpectedly
+  well on SugarCREPE (though still at chance on ARO and retrieval), regardless of
+  hard-negative pressure. Worth a closer look at what's different about this cell
+  vs. tree non-frozen (which stays flat at chance across all 5 π, matching §C).
+- Tree frozen and tree non-frozen both still track their §C chance-level pattern
+  with the extra training, no new signal from removing early stopping there.
