@@ -198,6 +198,13 @@ class Trainer:
         # allocates each tensor's storage on the GPU as it's read, which is the
         # step that OOMs when the allocator is still fragmented post-training.
         checkpoint = torch.load(self.checkpoint_path, map_location="cpu")
+        # EinsumModel.load_state_dict (reached via ContrastiveVLM's custom
+        # load_state_dict) rebuilds its ParameterList wholesale, allocating the
+        # new weights on whatever device the model is currently on. With the
+        # model still on GPU post-training, that means old and new weights are
+        # briefly resident at once — OOMs even with the CPU-deserialize above.
+        # Move to CPU first so the rebuild is cheap, then transfer back in one shot.
+        self.model.to("cpu")
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.model.to(self.device)
         logger.info(f"Loaded checkpoint from epoch {checkpoint['epoch']}.")

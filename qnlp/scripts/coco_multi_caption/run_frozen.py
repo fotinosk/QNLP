@@ -457,6 +457,13 @@ def run() -> None:
         if device.type == "cuda":
             torch.cuda.empty_cache()
         best = torch.load(checkpoint_path, map_location="cpu")
+        # EinsumModel.load_state_dict rebuilds self.weights wholesale, allocating
+        # the new ParameterList on whatever device the model is currently on
+        # (see einsum_model.py) — with the model still on GPU that means both the
+        # old and new weight sets are briefly resident at once, which OOM'd here
+        # even after the empty_cache() above. Move to CPU first so the rebuild is
+        # cheap, then transfer the freshly-loaded model back in one shot.
+        text_model.to("cpu")
         text_model.load_state_dict(best["text_model_state_dict"])
         text_head.load_state_dict(best["text_head_state_dict"])
         text_model.to(device)
