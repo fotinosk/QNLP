@@ -263,24 +263,26 @@ cell trains the full `max_epochs=50` instead of stopping ~10 epochs past its bes
 val epoch — removes epoch count as a confound between π values (see §C takeaway).
 Also picks up the `trainer.py`/`run_frozen.py` checkpoint-load-OOM fix and the
 submit-script silent-failure fix from the same commit. Checked live via `ssh beaker`,
-updated 2026-07-24 ~09:00. 19/20 done, 1 outstanding: bobcat-frozen π=0.25 (job
-7104875 task 3) trained the full 50 epochs cleanly but then OOM'd on the
-post-training checkpoint reload itself — not the OOM already fixed in the prior
-commit (that one was `torch.load`'s CUDA unpickling), but a second, deeper OOM
-inside `EinsumModel.load_state_dict`, which reallocates its weight ParameterList
-directly on the model's current (still-GPU) device, briefly holding old + new
-weights at once on an already-full ~12GB card. Fixed in a follow-up commit
-(move model to CPU before `load_state_dict`, then transfer back) — not yet
-rerun. tree-frozen π=0.25 (job 7104877 task 3) completed cleanly. The 2 tasks
-that earlier OOM'd on small cards (π=0.5, π=1.0 in bobcat-frozen) were
-retriggered same day as jobs 7105312/7105313 with those hosts excluded and both
-completed successfully.
+updated 2026-07-24 ~09:18. **20/20 done — full rerun complete.** bobcat-frozen
+π=0.25 (job 7104875 task 3) trained the full 50 epochs cleanly but then OOM'd on
+the post-training checkpoint reload itself — not the OOM already fixed in the
+prior commit (that one was `torch.load`'s CUDA unpickling), but a second, deeper
+OOM inside `EinsumModel.load_state_dict`, which reallocates its weight
+ParameterList directly on the model's current (still-GPU) device, briefly
+holding old + new weights at once on an already-full ~12GB card. Rather than
+re-run the full 50-epoch training a second time, wrote a standalone frozen-
+checkpoint evaluator (`evaluate_frozen.py` / `submit_evaluate_checkpoint_frozen.sh`,
+commit 402a055) that reloads the already-saved checkpoint on a clean process and
+reruns just the eval — took ~10 min instead of ~21h. tree-frozen π=0.25 (job
+7104877 task 3) completed cleanly in-process. The 2 tasks that earlier OOM'd on
+small cards (π=0.5, π=1.0 in bobcat-frozen) were retriggered same day as jobs
+7105312/7105313 with those hosts excluded and both completed successfully.
 
 | Cell | π | best ep | i2t R@1/R10 | t2i R@1/R10 | Wino t/i/g | ARO attr | ARO rel | SC full | SC++ |
 |---|---|---|---|---|---|---|---|---|---|
 | Bobcat frozen (7104875) | 0 | 2/50 | 0.0126/0.0556 | 0.0040/0.0270 | .143/.212/.100 | 0.4993 | 0.5019 | 0.6362 | 0.5705 |
 | Bobcat frozen (7104875) | 0.1 | 2/50 | 0.0088/0.0548 | 0.0024/0.0232 | .154/.183/.079 | 0.5024 | 0.4966 | 0.6260 | 0.5625 |
-| Bobcat frozen (7104875) | 0.25 | — trained to epoch 50 (best ep 2), then **FAILED** on post-training checkpoint reload (`EinsumModel.load_state_dict` OOM, see note below) — needs rerun with the follow-up fix — | | | | | | | |
+| Bobcat frozen (7104875) | 0.25† | 2/50 | 0.0098/0.0520 | 0.0036/0.0230 | .129/.176/.068 | 0.4985 | 0.4933 | 0.6262 | 0.5533 |
 | Bobcat frozen (7105312, retrigger) | 0.5 | 2/50 | 0.0108/0.0480 | 0.0040/0.0238 | .129/.197/.061 | 0.5004 | 0.5052 | 0.6295 | 0.5604 |
 | Bobcat frozen (7105313, retrigger) | 1.0 | 2/50 | 0.0096/0.0564 | 0.0020/0.0238 | .151/.165/.072 | 0.4988 | 0.5034 | 0.6185 | 0.5470 |
 | Bobcat non-frozen/TTN (7104874) | 0 | 46/50 | 0.0002/0.0022 | 0.0002/0.0016 | .183/.229/.118 | 0.5022 | 0.5006 | 0.7186 | 0.5906 |
@@ -298,6 +300,12 @@ completed successfully.
 | Tree frozen (7104877) | 0.25 | 48/50 | 0.0002/0.0044 | 0.0004/0.0022 | .114/.074/.026 | 0.5016 | 0.5228 | 0.5412 | 0.5126 |
 | Tree frozen (7104877) | 0.5 | 47/50 | 0.0002/0.0024 | 0.0006/0.0032 | .162/.066/.029 | 0.5008 | 0.5182 | 0.5244 | 0.4978 |
 | Tree frozen (7104877) | 1.0 | 38/50 | 0.0010/0.0050 | 0.0004/0.0024 | .125/.074/.026 | 0.5079 | 0.5389 | 0.5333 | 0.5040 |
+
+† Retrieval + benchmarks recovered via the standalone `evaluate_frozen.py` re-eval
+(job on 2026-07-24, checkpoint `coco_multi_caption_frozen/2026-07-22_20-38-00/
+best_model.pt`) after the in-process eval OOM'd — see status note above. Numbers
+land in the same range as this cell's other 4 π values (best ep 2, SC full/++
+~0.55-0.64), so no anomaly, just another instance of this cell converging early.
 
 Notes:
 - "best ep" is the epoch whose checkpoint was actually reloaded for test/benchmark
