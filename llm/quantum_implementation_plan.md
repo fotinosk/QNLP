@@ -2,18 +2,21 @@
 
 ### Architecture Summary (What We're Building)
 
+> **⚠️ Diagram below predates the quantum investigation (2026-07-17 to 2026-07-27) and is now superseded in two ways — see corrected bullet list beneath it.**
+
 ```
 ═══════════════════════════════════════════════════
 TEXT TOWER                              IMAGE TOWER
 ═══════════════════════════════════════════════════
-Tokens                              Image (64×64)
+Tokens                              Image (64×64) [see image-size note]
   │                                      │
   ▼                                      ▼
 lambeq parse → DisCoCat diagram     Bilinear patch embedding
   │           (variable topology)   4×4 patches → 256 patches
-  ▼                                 + gated positional encoding
-EinsumModel contraction                  │
-(cotengra-optimised einsum)              ▼
+  ▼                                 [NO positional encoding --
+EinsumModel contraction              rejected, see below]
+(cotengra-optimised einsum)              │
+  │                                      ▼
   │                                 TTN Level 0: CP-rank-32
   │                                      │
   │                                 TTN Level 1: CP-rank-32
@@ -42,9 +45,10 @@ Key design decisions:
 
 - **Different alignment heads** for each tower (text-specific and image-specific)
 - **No shared projection weights** between towers
-- **CP-rank-32** at every TTN level in the image tower
+- **CP-rank-32** at every TTN level in the image tower (this describes the classical CP-decomposition analogue; the quantum ansatz uses a 3-CNOT "all children to parent" entangling pattern per node instead — see `research_log.md` 2026-07-17 CNOT-to-entropy diagnostic)
 - **Bilinear patch embedding** separates color and spatial structure (Hadamard product)
-- **Gated positional encoding** with learnable scale initialised near 0 (≈0.05)
+- ~~**Gated positional encoding** with learnable scale initialised near 0 (≈0.05)~~ — **REJECTED 2026-07-26** (Question C, spatial ancilla ablation): explicit positional encoding is not beneficial (mildly worse: `52.8% ± 5.7` vs. `55.0% ± 3.5` without it) and safely removable. Do not implement positional encoding for the quantum image tower. See `quantum_investigation_roadmap.md` Question C.
+- **Image size**: 16×16 is the only size with end-to-end validated *training* (every quantum experiment to date used this size). 64×64 (and 32×32) have validated *forward-pass* simulation only, via `default.tensor(method='tn')` — training at these sizes is currently blocked on gradient cost (parameter-shift is exact but ~57s/gradient-step at 32×32; SPSA is the proposed fix, not yet implemented — see `quantum_investigation_roadmap.md` Task 1.5). **Start CLEVR implementation at 16×16** unless Task 1.5 is completed first.
 - **Triplet loss dominates** (weight 40000); hard negatives are curated ARO syntactic perturbations
 - **Three forward passes per sample:** image × 1, true caption × 1, false caption × 1
 - **DisCoCat text tower** (EinsumModel): sentence structure determines diagram topology, not sequence length
@@ -52,6 +56,10 @@ Key design decisions:
 > **NOTE — Non-Linear Contractions:** We will **never** use non-linear contractions (NLC) in this quantum implementation. All tensor network contractions are strictly linear. Do not add GELU activations, learnable gates, or any non-linearity between contraction steps. The EinsumModel's `non_linear_contractions` flag must always be `False`.
 
 > **NOTE — NaN / Infeasibility Handling:** This quantum implementation does **not** require NaN/infeasibility handling. Unlike the classical EinsumModel which can encounter OOM-infeasible contractions and returns NaN as a sentinel, quantum circuits have fixed topology and bounded resource usage. There is no need for NaN guards, `drop_nonfinite_rows`, or the `_safe_text_embed` pattern — omit all of this machinery.
+
+> **NOTE — Classical Hybrid Shortcuts:** This project's direction is a purely quantum implementation. Do **not** insert classical components inside the core quantum pipeline to substitute for quantum circuit capacity — e.g. a classical compression layer before a variational circuit to reduce the qubit width it would otherwise need (`qnlp/image_tower/classification/quantum/hybrid_trainer.py`'s `Linear(16,4)` before a 4-qubit VQC is the rejected example; that file is deprecated as an architecture direction, 2026-07-26). Qubit-budget problems should be solved by genuinely quantum means (active qubit recycling, tensor-network simulators), not by offloading work to classical layers. The only classical components that belong in these models are the unavoidable I/O boundary: encoding raw pixel/token data into rotation angles at the start, and projecting measured expectation values into class logits or an embedding space at the end — both are necessary interfaces, not research targets, and should stay as minimal as possible (a single `Linear` layer, no additional capacity). Do not propose experiments that tune, grow, or characterize these boundary layers as though they were part of the quantum architecture question; close such proposals on principle rather than running them. See `llm/quantum_investigation_roadmap.md` Section 6 (backlog items 5 and 7, both closed 2026-07-26) for the specific questions this ruled out.
+
+> **NOTE — Residual Connections:** Do **not** add residual/skip connections to any quantum tree node, in this image tower or in any future quantum model in this project. Five quantum-native mechanisms were tested and rejected (2026-07-26, see `llm/research_log.md` and `llm/quantum_investigation_roadmap.md` Section 5): data re-uploading (higher noiseless peak accuracy but collapses under depolarizing noise — worse than no residual at $p \ge 0.10$), near-identity ansatz init (no measurable effect), mixed-unitary channel (small noiseless edge but a confirmed ~10% training-failure rate and no noise-robustness benefit once tested on 10 seeds — an earlier single-seed result claiming a benefit did not replicate), and LCU/LCU-lite (inherits the same instability, adds real shot overhead, and could only be tested noiseless due to a `default.mixed` postselection limitation). Unlike classical CP-tensor layers (which do use an explicit residual, see `qnlp/discoviz/models/cp_node.py`), quantum tree nodes here should use a plain ansatz with no skip-connection mechanism. This is a closed investigation, not an open question — do not re-propose residual connections without a genuinely new hypothesis distinct from the five already ruled out.
 
 ---
 
