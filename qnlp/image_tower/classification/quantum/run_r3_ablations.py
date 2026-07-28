@@ -69,7 +69,26 @@ def noise_sweep(model, seed, levels=NOISE_LEVELS, test_samples=64, batch_size=32
     return accs
 
 
-def run_arm(name, kwargs, seeds, n_noise_seeds=20):
+def _checkpoint(name, out_prefix, curves, noise_curves, seeds_done):
+    """Write partial results after every seed.
+
+    The first R3 run produced a single JSON only at exit, so a crash at seed 57
+    of arm 4 would have discarded hours of compute. It also buffered all output
+    (a `conda run` artifact), leaving no way to see progress. Both fixed here.
+    """
+    pc.save(
+        {
+            "arm": name,
+            "seeds_done": seeds_done,
+            "partial": True,
+            "val_acc_curves_per_seed": curves,
+            "noise_curves": noise_curves,
+        },
+        f"{out_prefix}_{name}_partial.json",
+    )
+
+
+def run_arm(name, kwargs, seeds, n_noise_seeds=20, out_prefix="r3"):
     """Trains every seed; noise-sweeps the first `n_noise_seeds` of them.
 
     The accuracy comparison is what needs 58 seeds (R1b power analysis), and the
@@ -92,6 +111,7 @@ def run_arm(name, kwargs, seeds, n_noise_seeds=20):
             + ("  FAILED" if score < FAILURE_THRESHOLD else ""),
             flush=True,
         )
+        _checkpoint(name, out_prefix, curves, noise_curves, s + 1)
 
     arm = pc.summarise(
         name,
@@ -124,17 +144,22 @@ def main():
     ap.add_argument(
         "--seeds-per-arm",
         type=int,
-        default=58,
-        help="58 resolves ~3-pt effects at the measured std (R1b power analysis).",
+        default=30,
+        help="30 resolves ~2.6-pt effects at the architecture of record's measured "
+        "std of 4.94 (R2). The earlier default of 58 came from R1b's std of 8.2, "
+        "which was measured on a different config and over-provisions this one. "
+        "Each arm reports the resolution it actually achieved; top up if an arm's "
+        "variance turns out higher (checkpoints make resuming cheap).",
     )
     ap.add_argument("--arms", nargs="+", default=list(ARMS), choices=list(ARMS))
     ap.add_argument(
         "--noise-seeds", type=int, default=20, help="How many of the trained seeds also get a noise sweep (0 = none)."
     )
+    ap.add_argument("--out", default="r3", help="Output filename prefix (one per parallel worker).")
     args = ap.parse_args()
     seeds = list(range(args.seeds_per_arm))
 
-    arms = {name: run_arm(name, ARMS[name], seeds, args.noise_seeds) for name in args.arms}
+    arms = {name: run_arm(name, ARMS[name], seeds, args.noise_seeds, args.out) for name in args.arms}
 
     base = arms.get("baseline")
     comparisons, decisions = [], {}
@@ -201,7 +226,7 @@ def main():
             "comparisons": comparisons,
             "decisions": decisions,
         },
-        "r3_ablation_results.json",
+        f"{args.out}_ablation_results.json",
     )
 
 
