@@ -436,3 +436,182 @@ class HierarchicalQTTNClassifier(nn.Module):
         n2 = self.level2(x2, p_noise=p_noise)  # [B, 1, READOUT_DIM[readout]]
 
         return self.head(n2.squeeze(1))
+
+
+# =====================================================================
+# Coherent QTTN (Task R7) -- the architecture as designed
+# =====================================================================
+# `HierarchicalQTTNClassifier` above is NOT a coherent quantum tree: each
+# QuantumNode owns its own 4-qubit device, level-1 nodes return a single <Z>,
+# and those *classical scalars* are re-encoded as rotation angles into a
+# separate root circuit. That gives zero entanglement across tree levels and an
+# inter-level bond of one real number -- narrower than the chi=2 qubit the
+# design specifies. See research_log.md 2026-07-28 "Code Audit #2".
+#
+# The class below is the real architecture: ONE device holding every patch
+# qubit, level-1 block unitaries, then the level-2 unitary applied directly to
+# the surviving qubits, which stay quantum until a single measurement at the
+# end. Reference implementation: train_synthetic_shapes.py:50-70 (2026-07-17),
+# which this restores.
+#
+# Cost: ~17.5 min per 30-epoch run on lightning.qubit with adjoint
+# differentiation, vs ~15s for the hybrid, because the hybrid only ever
+# simulated 4 qubits at a time. lightning+adjoint is ~4x faster than
+# default.qubit+backprop here and is what makes this affordable at all.
+#
+# Noiseless only, per the 2026-07-28 scope decision: a 16-qubit density-matrix
+# simulation needs ~68GB. Noise work is Task R8, at single-node scale.
+
+PATCH_WIRE_IS_PATCH_INDEX = True  # wire w always carries patch w; keeps indexing trivial
+
+
+def _encode_on(encoding, inputs, wires):
+    """Encode patch `w` onto wire `w` for every w in `wires`.
+
+    inputs: [B, n_patches, enc_dim]. Unlike `_encode`, which indexes by position
+    within a node, this indexes by absolute patch/wire number -- needed because
+    the coherent circuit holds all patches on one device simultaneously.
+    """
+    for w in wires:
+        if encoding == "scalar_ry":
+            qml.RY(inputs[:, w, 0], wires=w)
+        elif encoding == "multi_axis":
+            qml.RX(inputs[:, w, 0], wires=w)
+            qml.RY(inputs[:, w, 1], wires=w)
+            qml.RZ(inputs[:, w, 2], wires=w)
+        else:
+            raise ValueError(f"Unknown encoding: {encoding}")
+
+
+class CoherentQTTNClassifier(nn.Module):
+    """16 patches -> 4 level-1 blocks -> 1 root, as a single coherent circuit.
+
+    Wire w carries patch w. Level-1 unitaries act on [0-3], [4-7], [8-11],
+    [12-15] with weights SHARED across the four blocks (matching the hybrid, so
+    parameter counts stay comparable). The level-2 unitary then acts directly on
+    the survivors [0, 4, 8, 12] -- these are still entangled with their
+    subtrees, which is the property the hybrid destroyed.
+
+    Supported modes:
+      baseline -- encode, ansatz per node.
+      reupload -- each node's ansatz is split in half and that node's patch
+                  inputs are re-encoded in between. At level 2 the node's
+                  "inputs" are the patches sitting on the survivor wires
+                  (0, 4, 8, 12), so the same rule applies uniformly at both
+                  levels rather than being special-cased.
+
+    `mixed_channel` and `use_ancilla` are deliberately NOT ported: R3 rejected
+    both decisively at node level (-10.9 and -19.5 pts), and each ancilla
+    doubles the state vector (20-21 wires => 16-32x cost). Re-confirming a
+    rejection at that price is not worth it. Their node-level verdicts stand as
+    node-level results.
+    """
+
+    def __init__(
+        self,
+        readout="root_multi_pauli",
+        encoding="multi_axis",
+        ansatz="iqp",
+        img_size=16,
+        patch_size=4,
+        n_classes=4,
+        mode="baseline",
+        device_name="lightning.qubit",
+        diff_method="adjoint",
+    ):
+        super().__init__()
+        assert readout in READOUTS
+        assert encoding in ENCODINGS
+        assert ansatz in ANSATZE
+        if mode not in ("baseline", "reupload"):
+            raise NotImplementedError(
+                f"mode={mode!r} is not ported to the coherent tree. R3 rejected mixed_channel "
+                f"(-10.9 pts) and the spatial ancilla (-19.5 pts) decisively, and each ancilla "
+                f"doubles the statevector. See the class docstring."
+            )
+        self.grid_dim = img_size // patch_size
+        self.n_patches = self.grid_dim**2
+        assert self.n_patches == 16, "coherent tree currently assumes a 4x4 patch grid (16 patches)"
+        self.n_wires = self.n_patches
+        self.encoding, self.ansatz, self.readout, self.mode = encoding, ansatz, readout, mode
+
+        enc_dim = 3 if encoding == "multi_axis" else 1
+        self.patch_embed = nn.Linear(patch_size * patch_size * 3, enc_dim)
+        # Level-1 weights are shared across the four blocks; level 2 has its own.
+        self.weights_l1 = nn.Parameter(torch.randn(NUM_LAYERS, NUM_QUBITS, 3) * 0.1)
+        self.weights_l2 = nn.Parameter(torch.randn(NUM_LAYERS, NUM_QUBITS, 3) * 0.1)
+        self.head = nn.Linear(READOUT_DIM[readout], n_classes)
+
+        self.l1_blocks = [[4 * b + i for i in range(NUM_QUBITS)] for b in range(4)]
+        self.l2_wires = [4 * b for b in range(4)]
+        blocks, l2w = self.l1_blocks, self.l2_wires
+        enc_, ans_, ro_, mode_ = encoding, ansatz, readout, mode
+        half = NUM_LAYERS // 2
+
+        def _node(wires, weights, inputs):
+            if mode_ == "reupload":
+                _apply_ansatz(ans_, wires, weights[:half])
+                _encode_on(enc_, inputs, wires)
+                _apply_ansatz(ans_, wires, weights[half:])
+            else:
+                _apply_ansatz(ans_, wires, weights)
+
+        def _body(inputs, w1, w2):
+            _encode_on(enc_, inputs, range(self.n_wires))
+            for blk in blocks:
+                _node(blk, w1, inputs)
+            _node(l2w, w2, inputs)
+            if ro_ == "scalar":
+                return [qml.expval(qml.PauliZ(0))]
+            if ro_ == "root_multi_pauli":
+                return [qml.expval(qml.PauliX(0)), qml.expval(qml.PauliY(0)), qml.expval(qml.PauliZ(0))]
+            if ro_ == "level1_survivors":
+                return [qml.expval(qml.PauliZ(w)) for w in l2w]
+            raise ValueError(f"Unknown readout: {ro_}")
+
+        dev = qml.device(device_name, wires=self.n_wires)
+        self._circuit = qml.QNode(_body, dev, interface="torch", diff_method=diff_method)
+
+        # Coherence diagnostic. A single qubit is mixed -- i.e. entangled with
+        # the rest of the register -- exactly when its Bloch vector is shorter
+        # than 1, since purity = (1 + |r|^2) / 2. Measuring three expectation
+        # values is far cheaper than a reduced density matrix (vn_entropy at 16
+        # qubits OOMs) and is equally decisive: in the hybrid the level-2 input
+        # wires are freshly encoded from classical scalars, hence pure, hence
+        # |r| = 1 exactly.
+        def _bloch_body(inputs, w1, w2, wire):
+            _encode_on(enc_, inputs, range(self.n_wires))
+            for blk in blocks:
+                _node(blk, w1, inputs)
+            return [qml.expval(qml.PauliX(wire)), qml.expval(qml.PauliY(wire)), qml.expval(qml.PauliZ(wire))]
+
+        self._bloch = qml.QNode(_bloch_body, dev, interface="torch", diff_method=None)
+
+    def _patches(self, x):
+        b = x.shape[0]
+        ps = x.shape[-1] // self.grid_dim
+        x = x.unfold(2, ps, ps).unfold(3, ps, ps)
+        x = x.permute(0, 2, 3, 1, 4, 5).contiguous().view(b, self.n_patches, -1)
+        return torch.tanh(self.patch_embed(x)) * np.pi  # [B, 16, enc_dim]
+
+    def forward(self, x, p_noise=0.0):
+        if p_noise > 0:
+            raise NotImplementedError(
+                "The coherent tree is noiseless-only (2026-07-28 scope decision): a 16-qubit "
+                "density-matrix simulation needs ~68GB. Noise work is Task R8, at single-node scale."
+            )
+        angles = self._patches(x)
+        out = self._circuit(angles, self.weights_l1, self.weights_l2)
+        out = torch.stack([torch.as_tensor(o) for o in out], dim=-1).float()
+        return self.head(out)
+
+    def survivor_bloch_length(self, x, wire=0):
+        """Bloch-vector length of a survivor qubit after level 1, averaged over
+        the batch. Strictly below 1 iff that qubit is entangled with the rest of
+        the tree, which is the property the measure-and-re-encode hybrid lacks
+        (there it is exactly 1). Used by the coherence regression test.
+        """
+        with torch.no_grad():
+            r = self._bloch(self._patches(x), self.weights_l1, self.weights_l2, wire)
+            r = torch.stack([torch.as_tensor(v) for v in r], dim=-1)
+            return float(r.norm(dim=-1).mean())

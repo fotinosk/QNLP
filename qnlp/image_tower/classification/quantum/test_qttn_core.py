@@ -44,6 +44,7 @@ from qnlp.image_tower.classification.quantum.qttn_core import (
     MODES,
     READOUT_DIM,
     READOUTS,
+    CoherentQTTNClassifier,
     HierarchicalQTTNClassifier,
     QuantumNode,
 )
@@ -170,3 +171,71 @@ def test_architecture_of_record_is_pinned():
     drifts from the logged decision, results stop being comparable."""
     assert pc.ARCH == {"readout": "root_multi_pauli", "encoding": "multi_axis", "ansatz": "iqp"}
     assert pc.PROTOCOL["train_samples"] == 1024 and pc.PROTOCOL["epochs"] == 30
+
+
+# ---------------------------------------------------------------------
+# Coherent tree (Task R7). These guard the second regression of the same
+# class as the scalar readout: a coherent design silently replaced by a
+# cheaper approximation. See research_log.md 2026-07-28 "Code Audit #2".
+# ---------------------------------------------------------------------
+
+
+def test_coherent_tree_is_actually_coherent():
+    """The defining property: a survivor qubit must be entangled with the rest
+    of the tree when it reaches level 2.
+
+    A single qubit is mixed exactly when its Bloch vector is shorter than 1
+    (purity = (1 + |r|^2) / 2). In the measure-and-re-encode hybrid the level-2
+    inputs are freshly encoded from classical scalars, so they are pure product
+    states with |r| = 1 exactly and carry no entanglement upward.
+    """
+    torch.manual_seed(0)
+    model = CoherentQTTNClassifier()
+    x = torch.rand(8, 3, 16, 16)
+    r = model.survivor_bloch_length(x)
+    assert r < 1.0 - 1e-3, (
+        f"survivor Bloch length {r:.6f} is indistinguishable from 1, so the qubit reaching "
+        f"level 2 is pure and carries no entanglement. The tree is not coherent."
+    )
+
+
+def test_coherent_tree_uses_one_device_for_the_whole_tower():
+    """One circuit over all patch wires, not a circuit per node."""
+    model = CoherentQTTNClassifier()
+    assert model.n_wires == model.n_patches == 16
+    assert hasattr(model, "_circuit"), "expected a single QNode spanning the tower"
+    assert not hasattr(model, "level1"), "per-node sub-circuits indicate the hybrid, not the coherent tree"
+
+
+def test_coherent_tree_matches_hybrid_parameter_count():
+    """Parameter counts must match so coherent-vs-hybrid comparisons are not
+    confounded by model size."""
+    coherent = sum(p.numel() for p in CoherentQTTNClassifier(**pc.ARCH).parameters())
+    hybrid = sum(p.numel() for p in HierarchicalQTTNClassifier(**pc.ARCH).parameters())
+    assert coherent == hybrid, f"coherent {coherent} vs hybrid {hybrid} params"
+
+
+@pytest.mark.parametrize("mode", ["baseline", "reupload"])
+def test_coherent_gradients_reach_every_parameter(mode):
+    torch.manual_seed(0)
+    model = CoherentQTTNClassifier(mode=mode)
+    model(torch.rand(4, 3, 16, 16)).sum().backward()
+    dead = [n for n, p in model.named_parameters() if p.grad is None or p.grad.abs().sum() == 0]
+    assert not dead, f"mode={mode}: no gradient reaches {dead}"
+
+
+@pytest.mark.parametrize("mode", ["mixed_channel", "with_ancilla_placeholder"])
+def test_rejected_variants_are_not_silently_available(mode):
+    """R3 rejected mixed_channel (-10.9 pts) and the spatial ancilla (-19.5 pts)
+    decisively, and each ancilla doubles the statevector. They are deliberately
+    not ported; the class must say so rather than appear to support them."""
+    with pytest.raises((NotImplementedError, AssertionError, TypeError)):
+        CoherentQTTNClassifier(mode=mode)
+
+
+def test_coherent_tree_refuses_noise():
+    """Noiseless-only per the 2026-07-28 scope decision; 16 qubits on a
+    density-matrix simulator needs ~68GB."""
+    model = CoherentQTTNClassifier()
+    with pytest.raises(NotImplementedError, match="noiseless-only"):
+        model(torch.rand(2, 3, 16, 16), p_noise=0.05)
