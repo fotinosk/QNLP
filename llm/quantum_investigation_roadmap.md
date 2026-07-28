@@ -78,7 +78,11 @@ These core research questions form the scientific contribution of your thesis. E
   3. ~~**Classical Compression Calibration (Hybrid Setup)**~~ — **CLOSED 2026-07-26, rejected on principle (no experiment run).** [hybrid_trainer.py](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/hybrid_trainer.py)'s classical `Linear(16, 4)` compression before the 4-qubit VQC substitutes classical capacity for quantum circuit width — this is a hybrid-architecture shortcut, not a purely-quantum solution to the qubit wall. The project's stated direction is a purely quantum implementation; qubit-budget problems should be solved via genuinely quantum means (active qubit recycling — sub-question 2, done — or tensor-network simulators — sub-question 1) rather than classical compression. `hybrid_trainer.py` is deprecated as an architecture direction; see `llm/quantum_implementation_plan.md`'s NOTE — Classical Hybrid Shortcuts.
 
 ### Question C: Spatial Positional Encoding — Explicit vs. Implicit — PROVISIONAL for sub-questions 1 & 3 (was CLOSED 2026-07-26; downgraded 2026-07-27)
-> **⚠️ 2026-07-27**: the verdict below rests on `52.8% ± 5.7` vs. `55.0% ± 3.5` at n=5 — well inside seed noise in either direction — measured through a scalar-readout bottleneck (see Section 7). It supports "no evidence of benefit," not "confirmed unnecessary." Task **R3a** re-tests at restored capacity with 10 seeds. Sub-question 2 (relational sensitivity) was already deferred to CLEVR and should be re-opened there.
+> **✅ RE-TESTED 2026-07-28 (Task R3), verdict UPHELD and now resolved.** At the architecture of record, 30 seeds: `with_ancilla` `59.9 ± 6.9` vs baseline `79.4 ± 8.0` — **`−19.5` pts against a `3.8`-pt resolution limit.** The July verdict (`52.8 ± 5.7` vs `55.0 ± 3.5` at n=5, inside noise) reached the same conclusion without evidence; this one has it.
+>
+> **⚠️ SCOPE — this must travel with the result and is enforced in `combine_r3.py`.** Do **not** write this up as "positional encoding is harmful". Two limits: (a) the task is translation-invariant single-object classification, where position barely affects the label, so an explicit position mechanism has nothing to contribute and a negative result is close to structurally guaranteed; (b) it tests the **per-quadrant** ancilla (4 positions), not the original **per-patch** design (16). What it licenses: do not use it for this class of task.
+>
+> **Sub-question 2 (relational sensitivity) is now REQUIRED in CLEVR, not optional.** CLEVR's left/right/front/behind task is the only place where position *is* the label and the question can actually be settled. Run it with and without the ancilla.
 
 * **Context**: The HEA model allocates a 5th "Ancilla" qubit to each patch to encode 2D spatial coordinates ($x, y$ mapped via learned $R_x, R_y$ rotations). However, a TTN has a fixed hierarchical topology (e.g., Patch 1 only interacts with Patches 2, 3, and 4 in Layer 1). This topology implicitly encodes spatial geometry.
 * **Verdict (sub-questions 1 & 3)**: Ablation tested on 5 seeds ([investigate_spatial_ancilla.py](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/investigate_spatial_ancilla.py), full writeup in `research_log.md` 2026-07-26). The explicit ancilla is **not better, and mildly worse**: noiseless final val acc `52.8% ± 5.7` vs. `55.0% ± 3.5` without it, higher variance, one seed failed to converge, and it costs more (119 vs. 105 params, +1 qubit per level-1 node). Noise-swept (averaged across all 5 seeds) the two variants are statistically indistinguishable, with the ancilla trending slightly worse. **Recommendation: do not use the explicit spatial ancilla for CLEVR** — the fixed tree topology already provides sufficient implicit positional signal via slot ordering.
@@ -185,8 +189,14 @@ We observed that test accuracy on under-trained models improved under depolarizi
 * **This does NOT resolve the underlying question of *why* it happens** — see Question F below, which remains open and is promoted out of this informal note into the main Open Questions list.
 * **Superseded candidate list** (kept for reference, not scheduled): classical head dropout, noise-as-dropout training schedule, qubit/patch dropout, gate/parameter dropout, entangling-layer dropout, finite-shot dropout, data re-uploading + re-upload dropout.
 
-### PROVISIONAL (was CLOSED 2026-07-26): Quantum-Native Residual Connections — Conclusion: Do Not Use
-> **⚠️ Downgraded to PROVISIONAL 2026-07-27.** All five mechanisms were tested on a model with a `nn.Linear(1, 4)` readout — the entire image compressed to one scalar, with results pinned in the `50–57%` band against a `50.0%` single-attribute shortcut ceiling. A null result there cannot distinguish "the mechanism doesn't help" from "the bottleneck dominates." The rejections may well survive re-testing, but the binding rule is not currently defensible. Task **R3b** (Section 7) re-tests `reupload` and `mixed_channel` at restored capacity, 10 seeds. `near_identity`, `lcu`, and `lcu-lite` stay rejected without re-test — see R3b for why.
+### CLOSED — CONFIRMED 2026-07-28: Quantum-Native Residual Connections — Conclusion: Do Not Use
+> **✅ RE-TESTED 2026-07-28 (Task R3) at restored capacity, 30 seeds. Rejection UPHELD — and for the first time on positive evidence.** `mixed_channel` `68.5 ± 10.1` vs baseline `79.4 ± 8.0` = **`−10.9` pts against a `4.7`-pt limit**. `reupload` `80.9 ± 6.6` = `+1.5`, inside a `3.8`-pt limit: **a true null**.
+>
+> **Two July narratives in the table below did not survive and should not be repeated:**
+> * *"mixed-channel has a ~10% dead-gradient training-failure rate"* — **0/30 failures** at restored capacity. It is not unstable; it is consistently worse. This also closes backlog item 13 (stabilise mixed_channel) outright: there is nothing left to stabilise.
+> * *"re-uploading trades expressivity for noise fragility, collapsing to 28.1% at p≥0.10"* — does not reproduce. It degrades comparably to baseline (`69.2` vs `77.5` at p=0.10). The collapse was an artifact of the bottlenecked model, not a property of re-uploading.
+>
+> The correct statement for `reupload` is **"no demonstrated benefit at effects ≥ 3.8 pts"** — not that it is harmful.
 
 **Verdict**: Five quantum-native residual mechanisms were tested against a no-residual baseline. None show a robustly-confirmed benefit. **Quantum tree nodes in this project should not use residual/skip connections going forward** — this is now a binding design rule, recorded in `llm/quantum_implementation_plan.md`'s NOTE block. This investigation is closed; do not re-open it without a genuinely new hypothesis distinct from the five below.
 
@@ -240,7 +250,7 @@ Cross-checking this roadmap and `quantum_implementation_plan.md` against `resear
 |---|---|---|---|---|
 | 1 | **Phase 3 checkbox discrepancy**: ZNE, readout error mitigation (Mitiq), SPSA vs. parameter-shift vs. backprop comparison | Roadmap Phase 3 (marked `[x]` but unlogged) | Not actually done — checkboxes need real experiments or to be unchecked | 2–3 days (new Mitiq dependency + calibration) |
 | 2 | ~~Question A.2: Entanglement entropy vs. classical TTN area-law~~ | Question A | **Done 2026-07-26** — bound match is architecturally guaranteed (single-qubit bottleneck); real finding is entropy saturating the bound more with depth (72.7%→89.7%, depth 1→2). See results above. | — |
-| 3 | **Question A.3**: Does the unitary constraint limit expressibility vs. unconstrained classical CP factors? | Question A | Not started | 1–2 days (needs classical CP-decomposition baseline for comparison) |
+| 3 | **Question A.3**: Does the unitary constraint limit expressibility vs. unconstrained classical CP factors? | Question A | **ATTEMPTED 2026-07-28 (R4), NOT ANSWERED.** The classical CP baseline scored `33.9%` against an MLP's `96.0%` — the CP node is broken, so the quantum-vs-CP gap is an artifact and must not be cited. Needs a classical TTN competitive with the MLP reference before the question can be posed. | 1–2 days (fix or replace the CP baseline first) |
 | 4 | ~~Question B.1 / Task 1.4: Tensor-network simulator device benchmark~~ | Question B / Task 1.1b, 1.4 | **Done 2026-07-26** — forward pass works at 32×32 (0.13s) and 64×64 (1.2s) via `default.tensor(method='tn')`; gradients correct but slow (56.7s/step at depth-3). Training-cost fix is item 14 (SPSA, Task 1.5). | — |
 | 5 | ~~Question B.3: Classical compression head ablation~~ | Question B | **CLOSED 2026-07-26, rejected on principle** — project direction is a purely quantum implementation; classical compression substituting for quantum circuit width is out of scope. `hybrid_trainer.py` deprecated as an architecture direction. | — |
 | 6 | ~~Question C.1/C.3: Spatial ancilla ablation~~ | Question C | **Done 2026-07-26** — ancilla is not better (and mildly worse); confirmed safe to drop, reducing 80→64 qubits. Sub-question 2 (relational sensitivity) remains open, deferred to CLEVR. See results above. | — |
@@ -250,10 +260,15 @@ Cross-checking this roadmap and `quantum_implementation_plan.md` against `resear
 | 10 | ~~Quantum-native residuals, Methods 1–2 (data re-uploading, near-identity init)~~ | Section 5 | **Done 2026-07-26** — near-identity: no effect; re-uploading: higher peak accuracy but worse noise robustness (collapses to 28.1% at p≥0.10 vs. baseline's 50.0% floor). See results above. | — |
 | 11 | ~~Quantum-native residuals, Methods 3–5 (mixed-unitary channel, LCU, LCU overhead diagnostic)~~ | Section 5 | **Done 2026-07-26**, corrected same day after 10-seed re-test — mixed-channel's noise-robustness claim retracted (didn't replicate); only a modest noiseless accuracy edge survives, with a 10% training-failure rate. LCU inherits the instability, noiseless-only, pays ~2x shot overhead at the root node. See results above. | — |
 | 12 | ~~Question F: Depolarizing noise as implicit regularization (scheduling)~~ | Question F (new) | **Done 2026-07-27** — negative result: training under noise does not improve clean accuracy (mildly worse, 5 seeds). Mechanism sub-question (F.1) deprioritized given this. See results above. | — |
-| 13 | ~~Stabilize `mixed_channel` training~~ | Section 5 (follow-up) | **Deprioritized 2026-07-26** — originally motivated by the noise-robustness benefit, which was retracted after the 10-seed re-test. Remaining motivation (modest noiseless edge, 10% failure rate) doesn't justify prioritizing a training fix over other backlog items unless a future experiment finds a different genuine advantage. | — |
+| 13 | ~~Stabilize `mixed_channel` training~~ | Section 5 (follow-up) | **CLOSED 2026-07-28 (R3)** — there is nothing to stabilise. At restored capacity `mixed_channel` had **0/30** failures (the ~10% dead-gradient rate was a bottleneck artifact) and is simply `−10.9` pts worse than baseline. No remaining motivation. | — |
 | 14 | **Task 1.5: SPSA gradient estimation for depth-3/4 training** | Section 3, Phase 1 (new) | Not started — needed to make 32×32/64×64 *training* practical now that forward passes work (item 4); parameter-shift costs 56.7s/step at depth-3, SPSA should reduce this ~250x | 1 day |
 
 > **⚠️ SUPERSEDED IN PART (2026-07-27)**: the "done/closed" statuses below for items 6, 10, 11 (and the framing of item 12) rest on experiments run through a scalar-readout bottleneck — see `research_log.md` 2026-07-27 "Code Audit" and **Section 7** below. They are downgraded to PROVISIONAL pending task R3.
+
+| 15 | **Question C.2**: does explicit positional encoding help *relational* tasks? | Question C | **PROMOTED to REQUIRED 2026-07-28.** R3's `−19.5` ancilla result comes from a translation-invariant task where position barely affects the label, so it says nothing about relational reasoning. CLEVR's left/right/front/behind task is the only discriminating test. Run with and without the ancilla. | folded into Phase 2 |
+| 16 | **Classical controls for every CLEVR accuracy claim** | R4 (new) | **REQUIRED 2026-07-28.** R4 showed a quantum-vs-classical claim is uninterpretable without a matched-parameter classical reference, and that a broken baseline can manufacture a 57.8-pt fake result. Build controls in from day one. | folded into Phase 2 |
+| 17 | **Position on the purely-quantum scope rule** | §8.5 item 1 (new) | **OPEN.** R2 measured that widening the *classical* encoder bought `+12.6` pts — more than any quantum architectural effect measured in this project — while Question B.3 was closed on principle for being "classical capacity substituting for quantum work". Needs a stated, defended position. | 0.5 day (writing, not experiment) |
+| 18 | **Qiskit Aer cross-check of the noise chapter** | PennyLane bug (new) | **RECOMMENDED, not blocking.** A second independent implementation agreeing on a few small noise sweeps is strong validation after a silent-corruption bug, and it sets up the un-run Task 3.2 (ZNE/Mitiq), which wants Qiskit anyway. | 1 day |
 
 **Total backlog**: roughly 2–5 days of remaining work (items 2, 4, 5, 6, 7, 8, 9, 10, 11, 12 are done or closed; item 13 deprioritized). Remaining open items: item 1 (Phase 3 checkbox discrepancy — ZNE/Mitiq/optimizer comparison, 2-3 days, discretionary), item 3 (Question A.3, expressibility, 1-2 days), and item 14 (SPSA for depth-3/4 training, 1 day — only needed if CLEVR will use images larger than 16×16; otherwise park it as documented-but-not-executed infrastructure and proceed to CLEVR at the validated 16×16 size). **Any future backlog item that proposes adding or tuning a classical component inside the core quantum pipeline (compression heads, hybrid readouts, classical-bypass shortcuts) should be closed on principle without running an experiment** — the project direction is a purely quantum implementation; only the unavoidable classical I/O boundary (pixel-to-angle encoding in, class logits out) is exempt. **None of the five quantum-native residual methods tested show a robustly-confirmed win**, and the spatial ancilla is confirmed unnecessary — if either line is revisited, it should start from a fresh hypothesis rather than re-attempting to rescue a mechanism whose apparent benefit didn't survive a larger sample.
 
@@ -349,7 +364,12 @@ All of the gate-clearing movement came from the training protocol. Both architec
 
 ---
 
-### Task R2: Reconcile the ansatz-of-record with the code
+### ✅ Task R2 — DONE 2026-07-28: Reconcile the ansatz-of-record with the code
+
+> **RESULT: CONFIRM_DOCUMENTED.** `multi_axis+iqp` is the best arm at `80.9 ± 4.9` (21 seeds). The documented choice survives.
+>
+> **The decomposition is the finding**: the *encoding* is resolved and large (`+12.6` pts vs a `3.6`-pt limit); the *ansatz* is **not** resolved (`+1.6` vs `4.8`). **The July code's consequential error was `scalar_ry`, not `strongly_entangling`.** IQP is adopted for its lower seed variance (`4.9` vs `9.7`), which buys resolution downstream — not because it is measurably more accurate. Architecture of record pinned in `phase15_common.ARCH`. Full writeup: `research_log.md` 2026-07-28.
+
 
 **Problem.** `research_log.md` Current Status and the 2026-07-17 encoding/ansatz benchmark both state the selected architecture is **Multi-Axis Encoding + IQP ansatz**. The July-26/27 scripts actually use `qml.RY(inputs[:, i], wires=i)` + `qml.StronglyEntanglingLayers` (`investigate_quantum_residuals.py:77-96`) — neither multi-axis nor IQP. So every recent architecture decision was made on a different circuit than the project's stated selection.
 
@@ -361,7 +381,21 @@ All of the gate-clearing movement came from the training protocol. Both architec
 
 ---
 
-### Task R3: Re-run the decisive ablations at restored capacity (10 seeds)
+### ✅ Task R3 — DONE 2026-07-28: Re-run the decisive ablations at restored capacity
+
+> **RESULT: all rejections upheld, now on positive evidence rather than absence of it.** 30 seeds/arm, 0/30 failures in every arm.
+>
+> | arm | score | vs. baseline | limit | verdict |
+> |---|---|---|---|---|
+> | `reupload` | `80.9 ± 6.6` | `+1.5` | 3.8 | unresolved |
+> | `baseline` | `79.4 ± 8.0` | — | — | — |
+> | `mixed_channel` | `68.5 ± 10.1` | `−10.9` | 4.7 | **worse, resolved** |
+> | `with_ancilla` | `59.9 ± 6.9` | `−19.5` | 3.8 | **worse, resolved** |
+>
+> Two things genuinely changed. `mixed_channel`'s dead-gradient failures are **gone** (0/30 vs 1/10 in July) — it is not unstable, just worse, which closes backlog item 13 outright. And `reupload` is a **true null**, not a trade-off: its July noise-collapse (`28.1%` at p≥0.10) does not reproduce; it degrades similarly to baseline. That narrative was an artifact of the bottlenecked model.
+>
+> **Ancilla scope caveat — do not write this up as "positional encoding is harmful".** See Question C above and §8.5. Full writeup and noise sweeps: `research_log.md` 2026-07-28.
+
 
 > **⚠️ PRECONDITION — statistical power (added 2026-07-27, REVISED 2026-07-28 after R1b measured it).**
 >
@@ -401,7 +435,24 @@ Only two mechanisms are worth re-testing. Do **not** re-run all five residual me
 
 ---
 
-### Task R4: Classical CP-TTN control baseline (also closes Question A.3)
+### ✅ Task R4 — DONE 2026-07-28: Classical control (does NOT close Question A.3)
+
+> **RESULT: the first quantum-vs-classical measurement in the project's history — and A.3 is still open.**
+>
+> | arm | score | params |
+> |---|---|---|
+> | MLP reference | `96.0 ± 1.5` | 999 |
+> | **quantum** | **`79.0 ± 8.7`** | **211** |
+> | MLP, parameter-matched | `70.5 ± 18.1` | 257 |
+> | classical CP + residual + dropout | `59.3 ± 2.9` | 332 |
+> | classical CP, bare | `33.9 ± 12.4` | 308 |
+>
+> At **matched parameter count** the quantum tower is statistically tied with a classical MLP (`+8.5` vs an `8.9`-pt limit); it loses by `17.0` pts only when the MLP gets ~5x the parameters. **The defensible thesis claim is parameter efficiency, not raw accuracy.**
+>
+> **Question A.3 is NOT answerable from this run and the script refuses to emit a verdict**: `CPQuadRankLayer` scores `33.9%` where a comparable MLP reaches `96.0%`, so the CP node — not classical computation — is what underperforms. The quantum-vs-CP gap is a **baseline artifact and must not be cited as quantum advantage**. A.3 needs a classical TTN competitive with the MLP reference first.
+>
+> Also measured: the repo's classical node depends heavily on residual+dropout (`+25.4` pts, limit `5.6`) — load-bearing classically, while the quantum tower's rules against them were upheld by R3. That contrast belongs in the thesis.
+
 
 **Problem.** There is no classical control anywhere in this investigation — not one run of a matched classical tensor-network model on the same data at the same sizes. Every result to date is quantum-vs-quantum, which cannot support a claim about quantum models *relative to their classical analogue*. This is the largest structural gap for the thesis, and it is cheap to close because the classical CP-tree implementation already exists in this repo (`qnlp/discoviz/models/cp_node.py`, and the classical TTN image tower under `qnlp/image_tower/`).
 
@@ -443,11 +494,11 @@ Unchanged in substance from Section 3, Task 1.5, but **its priority is now estab
 Proceed to Phase 2 when **all** of the following hold:
 
 1. ✅ **R1 acceptance criterion met (2026-07-27)** — 78.75 ± 7.2% mean val accuracy over 5 seeds at 16×16 (`readout=root_multi_pauli`, `encoding=multi_axis`, 1024 train / 30 epochs), i.e. the model demonstrably binds both attributes rather than sitting near the 50% shortcut ceiling. Note: this required the capacity-fallback protocol, not the original 256/15 one — carry 1024/30 forward into R2/R3. ✅ **R1b completed 2026-07-28 — gate item 1 fully closed.** The control (`scalar`/`scalar_ry` at 1024/30) reached only `62.5 ± 6.9`, confirming the readout was genuinely binding; architecture of record unchanged.
-2. **R2 done** — the architecture of record and the code agree, in writing.
-3. **R3a and R3b done at 10 seeds** — every verdict carried into CLEVR is either re-validated or explicitly flipped, with the seed variance reported alongside.
-4. **R4 done** — a classical control exists on at least the synthetic-shapes benchmark, so CLEVR numbers will be interpretable when they arrive.
-5. **R5 done** — no known internal contradictions left in the log.
-6. **R6 resolved one way or the other** — either 32×32 training is practical, or the CLEVR task is explicitly re-scoped (e.g. drop `material`, keep `color`/`shape`/`size`, and state in the thesis that resolution, not architecture, is the limiting factor). **Do not silently run CLEVR at 16×16 against an >80%-on-4-heads pass criterion that resolution cannot support.**
+2. ✅ **R2 done (2026-07-28)** — architecture of record pinned in `phase15_common.ARCH`, code and documentation agree, and a regression test fails if it drifts.
+3. ✅ **R3 done (2026-07-28) at 30 seeds** — every verdict re-validated on positive evidence, with the resolution limit reported alongside each. Nothing flipped; two narratives (mixed-channel instability, reupload noise-collapse) were shown to be bottleneck artifacts.
+4. ✅ **R4 done (2026-07-28)** — classical control exists. Outcome: quantum is parameter-competitive, not accuracy-dominant. **Question A.3 remains open** (CP baseline broken). CLEVR must carry matched-parameter classical controls from day one.
+5. **R5 — STILL OPEN.** No known internal contradictions left in the log.
+6. **R6 — STILL OPEN.** Resolved one way or the other — either 32×32 training is practical, or the CLEVR task is explicitly re-scoped (e.g. drop `material`, keep `color`/`shape`/`size`, and state in the thesis that resolution, not architecture, is the limiting factor). **Do not silently run CLEVR at 16×16 against an >80%-on-4-heads pass criterion that resolution cannot support.**
 
 **Guidance for CLEVR execution once the gate is passed** (recorded here so it is not re-litigated):
 - **Noiseless simulation is the primary experiment** — this is where the architectural claim lives. `default.tensor(method='tn')` + SPSA at 32×32.
