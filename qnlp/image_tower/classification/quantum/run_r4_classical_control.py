@@ -41,7 +41,10 @@ import torch.nn as nn
 
 from qnlp.discoviz.models.cp_node import CPQuadRankLayer
 from qnlp.image_tower.classification.quantum import phase15_common as pc
-from qnlp.image_tower.classification.quantum.qttn_core import HierarchicalQTTNClassifier
+from qnlp.image_tower.classification.quantum.qttn_core import (
+    CoherentQTTNClassifier,
+    HierarchicalQTTNClassifier,
+)
 
 
 class ClassicalTTNClassifier(nn.Module):
@@ -114,45 +117,87 @@ class MLPReference(nn.Module):
 
 
 def tune_classical(
-    use_residual, dropout_p, q_params, seeds=(0, 1, 2), lrs=(0.003, 0.01, 0.03, 0.1), bond_dims=(2, 4, 8)
+    use_residual,
+    dropout_p,
+    q_params,
+    seeds=(0, 1, 2),
+    lrs=(0.003, 0.01, 0.03, 0.1),
+    bond_dims=(2, 4, 8),
+    ranks=(1, 2, 4, 8, 16),
+    max_param_ratio=1.5,
 ):
     """Give the classical arm a fair hyperparameter search before comparing.
 
     Necessary for the comparison to mean anything. The first R4 attempt used the
-    quantum model's lr (0.03) and the structurally-faithful bond_dim=2 for the
-    classical arm and got 25.8% -- random chance for 4 classes. A dead baseline
-    would have produced a spectacular and entirely fake "quantum beats classical
-    by 57.8 points" headline.
+    quantum model's lr and the structurally-faithful bond_dim=2 and got 25.8% --
+    random chance for 4 classes -- which would have produced a spectacular and
+    entirely fake "quantum beats classical by 57.8 points" headline.
+
+    CORRECTED 2026-07-28. The previous version swept lr and bond_dim but
+    *derived* CP rank from the parameter budget via match_rank_to(). Matching the
+    hybrid's 211 parameters forced rank=1 at every bond dimension, and a rank-1
+    CP decomposition is a single outer product -- degenerate. That produced
+    classical_bare = 33.9% and the conclusion "the CP node is broken, so Question
+    A.3 is unanswerable". The conclusion was an artifact of the matching
+    procedure, not a property of CP nodes: sweeping rank freely finds
+    lr=0.03/bond_dim=4/rank=2 reaching 88.4% with residual+dropout.
+
+    Rank is now a free axis. Parameter matching is enforced as an upper *bound*
+    (max_param_ratio x the quantum model) so the classical arm cannot simply buy
+    capacity, but is never allowed to force a degenerate rank.
 
     Note on fairness: the quantum arm's settings were themselves tuned across
-    R1/R2 (readout, encoding, protocol, lr), so sweeping the classical arm is
-    equal treatment, not a handicap. bond_dim is included because it is the
-    classical analogue of the quantum readout width -- the exact axis that
-    turned out to be binding for the quantum model in R1/R1b, so it would be
-    inconsistent to fix it at its narrowest value here.
+    R1/R2/R7 (readout, encoding, protocol, lr), so sweeping the classical arm is
+    equal treatment, not a handicap.
     """
-    best = None
+    budget = q_params * max_param_ratio
+    best, considered, skipped_degenerate = None, 0, 0
     for lr in lrs:
         for bd in bond_dims:
-            rank = match_rank_to(q_params, bond_dim=bd, use_residual=use_residual, dropout_p=dropout_p)
-            scores = []
-            for s in seeds:
-                c, _ = pc.train_run(
-                    lambda: ClassicalTTNClassifier(
+            for rank in ranks:
+                n_params = sum(
+                    p.numel()
+                    for p in ClassicalTTNClassifier(
                         rank=rank, bond_dim=bd, use_residual=use_residual, dropout_p=dropout_p
-                    ),
-                    seed=s,
-                    lr=lr,
+                    ).parameters()
                 )
-                scores.append(sum(c[-pc.SCORE_LAST_K :]) / pc.SCORE_LAST_K)
-            mean = float(np.mean(scores))
-            print(f"    lr={lr:<6} bond_dim={bd:<2} rank={rank:<3} -> {mean:.1f}%", flush=True)
-            if best is None or mean > best["score"]:
-                best = {"lr": lr, "bond_dim": bd, "rank": rank, "score": mean}
+                if n_params > budget:
+                    continue
+                considered += 1
+                if rank == 1:
+                    skipped_degenerate += 1
+                scores = []
+                for s in seeds:
+                    c, _ = pc.train_run(
+                        lambda: ClassicalTTNClassifier(
+                            rank=rank, bond_dim=bd, use_residual=use_residual, dropout_p=dropout_p
+                        ),
+                        seed=s,
+                        lr=lr,
+                    )
+                    scores.append(sum(c[-pc.SCORE_LAST_K :]) / pc.SCORE_LAST_K)
+                mean = float(np.mean(scores))
+                if best is None or mean > best["score"]:
+                    best = {"lr": lr, "bond_dim": bd, "rank": rank, "params": n_params, "score": mean}
+    if best is None:
+        raise RuntimeError(
+            f"No classical config fits within {budget:.0f} parameters "
+            f"({max_param_ratio}x the quantum model's {q_params}). Widen ranks/bond_dims."
+        )
     print(
-        f"  best: lr={best['lr']} bond_dim={best['bond_dim']} rank={best['rank']} " f"({best['score']:.1f}%)",
+        f"  best: lr={best['lr']} bond_dim={best['bond_dim']} rank={best['rank']} "
+        f"params={best['params']} ({best['score']:.1f}%)   "
+        f"[{considered} configs within budget {budget:.0f}]",
         flush=True,
     )
+    if best["rank"] == 1:
+        print(
+            "  WARNING: the winning config has CP rank 1 (a single outer product). "
+            "That is a degenerate tensor decomposition and suggests the parameter budget is "
+            "too tight for a fair comparison -- do not treat this arm as a representative "
+            "classical baseline.",
+            flush=True,
+        )
     return best
 
 
@@ -171,6 +216,18 @@ def match_rank_to(target_params, **kw):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument(
+        "--coherent",
+        action="store_true",
+        help="Compare against the COHERENT tree (phase15_common.COHERENT_ARCH) rather than the "
+        "measure-and-re-encode hybrid. The coherent quantum arm costs ~17.5 min/seed on "
+        "lightning.qubit; the classical arms are seconds.",
+    )
+    ap.add_argument(
+        "--skip-quantum",
+        action="store_true",
+        help="Run only the classical/MLP arms. Use when the expensive quantum arm is run " "separately, then combine.",
+    )
+    ap.add_argument(
         "--seeds-per-arm",
         type=int,
         default=21,
@@ -180,8 +237,16 @@ def main():
     args = ap.parse_args()
     seeds = list(range(args.seeds_per_arm))
 
-    q_params = sum(p.numel() for p in HierarchicalQTTNClassifier(**pc.ARCH).parameters())
-    print(f"Quantum model: {q_params} params (lr={pc.PROTOCOL['lr']}, tuned across R1/R2).")
+    if args.coherent:
+        arch = pc.COHERENT_ARCH
+        q_factory = lambda: CoherentQTTNClassifier(**arch, share_level1_weights=False)
+        q_label = "quantum_coherent"
+    else:
+        arch = pc.ARCH
+        q_factory = lambda: HierarchicalQTTNClassifier(**arch)
+        q_label = "quantum_hybrid"
+    q_params = sum(p.numel() for p in q_factory().parameters())
+    print(f"{q_label}: {q_params} params, arch={arch} (lr={pc.PROTOCOL['lr']}).")
 
     print("\nTuning classical_bare (fair-shot hyperparameter search):", flush=True)
     tuned_bare = tune_classical(False, 0.0, q_params)
@@ -189,7 +254,7 @@ def main():
     tuned_full = tune_classical(True, 0.1, q_params)
 
     specs = {
-        "quantum": (lambda: HierarchicalQTTNClassifier(**pc.ARCH), pc.PROTOCOL["lr"], None),
+        q_label: (q_factory, pc.PROTOCOL["lr"], None),
         "classical_bare": (
             lambda: ClassicalTTNClassifier(
                 rank=tuned_bare["rank"], bond_dim=tuned_bare["bond_dim"], use_residual=False, dropout_p=0.0
@@ -212,6 +277,10 @@ def main():
         "mlp_param_matched": (lambda: MLPReference(hidden=2), 0.01, None),
     }
 
+    if args.skip_quantum:
+        specs.pop(q_label, None)
+        print(f"\nSKIPPING the {q_label} arm (--skip-quantum). Run it separately and combine.")
+
     arms = []
     for name, (factory, lr, tuned) in specs.items():
         print(f"\n--- {name} ({args.seeds_per_arm} seeds, lr={lr}) ---", flush=True)
@@ -225,9 +294,27 @@ def main():
         )
 
     by = {a["config"]: a for a in arms}
+    if q_label not in by:
+        # Classical arms only: emit them for later combination with a separately
+        # run quantum arm, and skip every cross-arm verdict, which would be
+        # meaningless without it.
+        pc.print_arms(f"R4 classical arms only ({args.seeds_per_arm} seeds)", arms)
+        pc.save(
+            {
+                "architecture": arch,
+                "protocol": pc.PROTOCOL,
+                "quantum_arm": "NOT RUN",
+                "tuned_classical_bare": tuned_bare,
+                "tuned_classical_full": tuned_full,
+                "seeds_per_arm": args.seeds_per_arm,
+                "arms": arms,
+            },
+            f"r4_classical_only{'_coherent' if args.coherent else ''}.json",
+        )
+        return
     cmps = [
-        pc.compare(by["quantum"], by["classical_bare"]),
-        pc.compare(by["quantum"], by["classical_full"]),
+        pc.compare(by[q_label], by["classical_bare"]),
+        pc.compare(by[q_label], by["classical_full"]),
         pc.compare(by["classical_bare"], by["classical_full"]),
     ]
 
@@ -244,8 +331,8 @@ def main():
     # Interpretability gate: is the CP node the problem, or classical computation?
     mlp = by["mlp_reference"]
     cp_vs_mlp = pc.compare(by["classical_bare"], mlp)
-    q_vs_mlp = pc.compare(by["quantum"], mlp)
-    q_vs_mlp_matched = pc.compare(by["quantum"], by["mlp_param_matched"])
+    q_vs_mlp = pc.compare(by[q_label], mlp)
+    q_vs_mlp_matched = pc.compare(by[q_label], by["mlp_param_matched"])
     interpretable = not (cp_vs_mlp["resolved"] and cp_vs_mlp["difference"] > 0)
 
     a3 = cmps[0]

@@ -40,7 +40,13 @@ import torch.nn as nn
 NUM_QUBITS = 4
 NUM_LAYERS = 2
 
-READOUTS = ("scalar", "root_multi_pauli", "level1_survivors")
+# "level1_survivors" is a misleading name kept for backwards compatibility with
+# R1's logged sweep: in the coherent tree it measures the four wires that ENTER
+# the top node, read AFTER that node has acted -- i.e. the root plus the three
+# qubits the tree nominally discards at the top. "top_layer_qubits" is the
+# accurate name and the one to use going forward.
+READOUTS = ("scalar", "root_multi_pauli", "level1_survivors", "top_layer_qubits")
+READOUT_ALIASES = {"top_layer_qubits": "level1_survivors"}
 ENCODINGS = ("scalar_ry", "multi_axis")
 ANSATZE = ("strongly_entangling", "iqp")
 
@@ -52,7 +58,12 @@ ANSATZE = ("strongly_entangling", "iqp")
 # Section 7 R3b for why those are not re-run.
 MODES = ("baseline", "reupload", "mixed_channel")
 
-READOUT_DIM = {"scalar": 1, "root_multi_pauli": 3, "level1_survivors": NUM_QUBITS}
+READOUT_DIM = {
+    "scalar": 1,  # <Z> on the root qubit only
+    "root_multi_pauli": 3,  # full Bloch vector of the root qubit -- still ONE qubit's marginal
+    "level1_survivors": NUM_QUBITS,  # deprecated alias of top_layer_qubits
+    "top_layer_qubits": NUM_QUBITS,  # <Z> on all four wires entering the top node
+}
 
 
 def _iqp_block(wires, weights):
@@ -193,6 +204,7 @@ class QuantumNode(nn.Module):
         assert encoding in ENCODINGS
         assert ansatz in ANSATZE
         assert readout in READOUTS
+        readout = READOUT_ALIASES.get(readout, readout)
         assert mode in MODES, f"mode must be one of {MODES}, got {mode!r}"
         if mode == "reupload" and NUM_LAYERS < 2:
             raise ValueError("reupload splits the ansatz into two halves; needs NUM_LAYERS >= 2")
@@ -516,11 +528,13 @@ class CoherentQTTNClassifier(nn.Module):
         patch_size=4,
         n_classes=4,
         mode="baseline",
+        share_level1_weights=True,
         device_name="lightning.qubit",
         diff_method="adjoint",
     ):
         super().__init__()
         assert readout in READOUTS
+        readout = READOUT_ALIASES.get(readout, readout)
         assert encoding in ENCODINGS
         assert ansatz in ANSATZE
         if mode not in ("baseline", "reupload"):
@@ -537,8 +551,13 @@ class CoherentQTTNClassifier(nn.Module):
 
         enc_dim = 3 if encoding == "multi_axis" else 1
         self.patch_embed = nn.Linear(patch_size * patch_size * 3, enc_dim)
-        # Level-1 weights are shared across the four blocks; level 2 has its own.
-        self.weights_l1 = nn.Parameter(torch.randn(NUM_LAYERS, NUM_QUBITS, 3) * 0.1)
+        # Level-1 weights either shared across the four blocks (parameter parity
+        # with the hybrid) or per-block. train_synthetic_shapes.py (2026-07-17),
+        # which reached 75%, used PER-BLOCK weights, so this is an axis worth
+        # controlling rather than inheriting.
+        self.share_level1_weights = share_level1_weights
+        l1_shape = (NUM_LAYERS, NUM_QUBITS, 3) if share_level1_weights else (4, NUM_LAYERS, NUM_QUBITS, 3)
+        self.weights_l1 = nn.Parameter(torch.randn(*l1_shape) * 0.1)
         self.weights_l2 = nn.Parameter(torch.randn(NUM_LAYERS, NUM_QUBITS, 3) * 0.1)
         self.head = nn.Linear(READOUT_DIM[readout], n_classes)
 
@@ -558,8 +577,8 @@ class CoherentQTTNClassifier(nn.Module):
 
         def _body(inputs, w1, w2):
             _encode_on(enc_, inputs, range(self.n_wires))
-            for blk in blocks:
-                _node(blk, w1, inputs)
+            for bi, blk in enumerate(blocks):
+                _node(blk, w1 if share_level1_weights else w1[bi], inputs)
             _node(l2w, w2, inputs)
             if ro_ == "scalar":
                 return [qml.expval(qml.PauliZ(0))]
@@ -581,8 +600,8 @@ class CoherentQTTNClassifier(nn.Module):
         # |r| = 1 exactly.
         def _bloch_body(inputs, w1, w2, wire):
             _encode_on(enc_, inputs, range(self.n_wires))
-            for blk in blocks:
-                _node(blk, w1, inputs)
+            for bi, blk in enumerate(blocks):
+                _node(blk, w1 if share_level1_weights else w1[bi], inputs)
             return [qml.expval(qml.PauliX(wire)), qml.expval(qml.PauliY(wire)), qml.expval(qml.PauliZ(wire))]
 
         self._bloch = qml.QNode(_bloch_body, dev, interface="torch", diff_method=None)

@@ -43,6 +43,17 @@ RESULTS_DIR = "qnlp/image_tower/classification/quantum/results"
 # not because it is measurably more accurate.
 ARCH = {"readout": "root_multi_pauli", "encoding": "multi_axis", "ansatz": "iqp"}
 
+# The correct readout is TOPOLOGY-DEPENDENT, which the single ARCH above hid.
+# In the hybrid, information reaches the root through classical scalar bonds, so
+# reading the root qubit's Bloch vector is adequate. In the coherent tree the
+# root is a single qubit's marginal of a 16-qubit state -- a severe bottleneck.
+# Measured on the coherent tree, one seed, 15 epochs (2026-07-28):
+#     root_multi_pauli (root qubit only) : 35.6%
+#     top_layer_qubits (4 wires)         : 78.4%   <-- +43 points
+# The gap is not "more numbers" (3 vs 4); it is that one qubit's marginal cannot
+# carry 16 patches. See research_log.md 2026-07-28 "R7".
+COHERENT_ARCH = {"readout": "top_layer_qubits", "encoding": "multi_axis", "ansatz": "iqp"}
+
 PROTOCOL = {"train_samples": 1024, "test_samples": 64, "epochs": 30, "batch_size": 32, "lr": 0.03}
 SCORE_LAST_K = 5
 

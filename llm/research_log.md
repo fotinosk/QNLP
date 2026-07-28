@@ -22,10 +22,12 @@ This log tracks the theoretical derivations, simulation results, noisy emulation
 * **Active Branch**: `thesis/quantum-image-tower`
 * **Current Focus (as of 2026-07-28)**: **Phase 1.6 — purge & regenerate** ([roadmap](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/llm/quantum_investigation_roadmap.md) Section 8). Phase 1.5 tasks **R1, R1b, R2, R3, R4 are complete**; **R5 (docs) and R6 (SPSA) remain**. R3 was the gate for Phase 1.6 and has landed, so figure regeneration and code consolidation are unblocked. **Still do not start Phase 2 (CLEVR)** — the decision gate needs R5 and R6, and R6 determines whether CLEVR can run at a resolution that supports its own pass criterion.
 * **Background**: the 2026-07-27 code audit (entry below) found that every experiment behind the July-26/27 decisions compressed the whole image to a **single scalar** before a `nn.Linear(1, 4)` head — which is why those results sat in a `50–57%` band against the `50.0%` single-attribute shortcut ceiling. The architecture of record now reaches `79–81%` on the same task.
-* **ARCHITECTURE OF RECORD** (pinned in `phase15_common.ARCH`; a regression test fails if it drifts):
-  * `readout=root_multi_pauli`, `encoding=multi_axis`, `ansatz=iqp`.
+* **ARCHITECTURE OF RECORD — per topology** (pinned in `phase15_common`; regression-tested):
+  * **Coherent tree (model of record going forward)** — `COHERENT_ARCH`: `readout=top_layer_qubits`, `encoding=multi_axis`, `ansatz=iqp`.
+  * **Hybrid (superseded, retained for reproducing R1–R4)** — `ARCH`: `readout=root_multi_pauli`, same encoding/ansatz.
+  * **The readout is topology-dependent**, which a single `ARCH` had hidden: on the coherent tree `root_multi_pauli` scores `35.6%` and `top_layer_qubits` `78.4%` — a 43-point gap, because the root is one qubit's marginal of a 16-qubit state.
   * Protocol: **1024 train / 64 test / 30 epochs**, scored by the mean of the last 5 epochs, comparisons **unpaired**.
-  * Established by R1/R1b (readout) and R2 (encoding, ansatz). R2 resolved the *encoding* (`+12.6` pts vs a `3.6`-pt limit) but **not** the ansatz (`+1.6` vs `4.8`) — IQP is adopted for its lower seed variance, not for measured accuracy.
+  * R2 resolved the *encoding* (`+12.6` pts vs a `3.6`-pt limit) but **not** the ansatz (`+1.6` vs `4.8`) — IQP is adopted for lower seed variance, not measured accuracy.
 * **Architecture decisions — status after R3/R4** (30 seeds/arm, resolution limits stated):
   * **No residual/skip connections — CONFIRMED, now on positive evidence.** `mixed_channel` is `−10.9` pts vs baseline (limit `4.7`); `reupload` is `+1.5` (limit `3.8`, unresolved). Both at 0/30 failures. The July dead-gradient instability and noise-collapse narratives were artifacts of the bottlenecked model.
   * **No spatial ancilla — CONFIRMED for this task class, with a scope caveat that must travel with it.** `−19.5` pts (limit `3.8`). But this task is translation-invariant single-object classification where position barely affects the label, and it tests the per-quadrant ancilla (4 positions), not the original per-patch design (16). **Question C.2 (relational) is now a required part of CLEVR**, not optional — it is the only place the question can be settled.
@@ -656,19 +658,84 @@ Full triage with dispositions in `quantum_investigation_roadmap.md` Section 8, P
   * **The PennyLane `default.mixed` broadcasting bug** — downgraded from a live hazard to a documented curiosity. The workaround and its regression test stay in place, but nothing on the forward path depends on that device any more.
 * **Standing limitation to state in the thesis, not to fix**: noisy simulation was capped at 4–5 qubits throughout by the $O(4^N)$ density-matrix cost, so all noise results characterise a **single quantum node**, not the full tree. Whether noise tolerance measured at one node extends to a deep tree is untested and, under this scope decision, will remain so.
 
-### [2026-07-28] Next Steps (revised after Code Audit #2 and the noise scope decision)
-Phase 1.5 tasks R1–R4 are complete but were all run on the measure-and-re-encode hybrid, so the sequence is re-ordered: **port to the coherent tree first, re-baseline, close out noise, then regenerate figures.** Regenerating figures from a model about to be replaced would be wasted work.
+### [2026-07-28] Task R7 (partial): Coherent Tree Implemented — and the Readout Is Topology-Dependent, Worth 43 Points
+* **Objective**: Roadmap Task R7. Replace the measure-and-re-encode hybrid with the coherent quantum tree and re-baseline.
+* **Built**: `CoherentQTTNClassifier` in `qttn_core.py` — one device holding all 16 patch qubits, level-1 block unitaries on `[0-3] [4-7] [8-11] [12-15]`, then the level-2 unitary applied **directly to the survivors** `[0, 4, 8, 12]`, which stay quantum until a single measurement at the end. 211 params with shared level-1 weights, identical to the hybrid, so comparisons are not size-confounded. Runs on `lightning.qubit` with adjoint differentiation.
+* **Cost, measured**: ~17.5 min per 30-epoch run (lightning + adjoint) vs ~72 min (`default.qubit` + backprop) vs ~15 s for the hybrid. The hybrid was cheap only because it never simulated more than 4 qubits at once. `default.tensor` is unusable for training here — its parameter-shift backward took 242 s for one batch.
+* **Coherence is now mechanically enforced.** A single qubit is mixed exactly when its Bloch vector is shorter than 1 (purity $=(1+|r|^2)/2$), so `survivor_bloch_length() < 1` proves the qubit reaching level 2 is entangled with its subtree; in the hybrid it is exactly 1 by construction. `vn_entropy` would be the direct measure but OOMs at 16 qubits, while three expectation values are cheap and equally decisive. Six regression tests cover this and the refusal of un-ported variants.
+* **First pilot failed, and the cause is instructive.** 3 seeds, 30 epochs: `34.1% / 38.1% / 38.8%` — below the 50% single-attribute ceiling, against the hybrid's `79.4%`. Entanglement was clearly working (|r| fell from `0.98` at init to `0.53–0.91` after training), so the tree was coherent; something else was wrong.
+* **Diagnostic — the readout is topology-dependent** (1 seed, 15 epochs, per-block level-1 weights):
 
-1. **Task R7 — port to the coherent quantum tree (BLOCKING).** Implement the real architecture in `qttn_core`: one device, all patches encoded together, level-2 unitary applied directly to the surviving qubits, measured only at the end. `train_synthetic_shapes.py:50-70` is the working reference. Then re-baseline on the protocol of record, and re-run **R3** (4 arms x 30 seeds, ~25 min with the parallel workers) and **R4** (classical control, 21 seeds) on the coherent model. R2's encoding/ansatz choice is expected to carry over but is cheap to confirm.
-2. **Task R8 — noise close-out.** One depolarizing sweep on the coherent base model at the largest coherently-simulable size, covering the "does a little noise help" question. State the single-node limitation explicitly, then close the noise track. No new machinery: no trajectories, no Qiskit, no ZNE.
-3. **Phase 1.6 (roadmap Section 8) — purge and regenerate**, now sourced from the coherent results. Figure triage is unchanged; the numbers behind the regenerated figures come from R7, not R3-on-the-hybrid.
-4. **R5 — documentation fixes**: the $p_{crit}$ contradiction, the barren-plateau rescoping, and a quantitative boundary for the purely-quantum rule. Question F's re-examination is dropped into the noise close-out rather than run separately.
-5. **R6 (SPSA)** — still the gate on CLEVR resolution. 16x16 cannot support Step 2's ">80% on all 4 attribute heads" criterion, since a CLEVR object is a handful of pixels at that size and `material`/`size` are close to unlearnable. Either SPSA lands and CLEVR runs at 32x32, or the CLEVR task is explicitly re-scoped.
-6. **CLEVR (Phase 2)**, with three requirements now established:
-   * **Classical controls from day one.** Every accuracy claim needs a matched-parameter classical reference alongside it (R4).
-   * **Question C.2 is required, not optional.** Run the relational task with and without the spatial ancilla; R3's `-19.5` result says nothing about relational reasoning.
-   * **Noiseless only**, per the scope decision above.
-7. **Open tension to resolve in writing, not experiment** (roadmap §8.5 item 1): R2 measured that widening the *classical* patch encoder bought `+12.6` pts, more than any quantum architectural change measured anywhere in this investigation, while Question B.3 was closed on principle for being "classical capacity substituting for quantum work". Needs a stated, defended position — and Code Audit #2 sharpens it, since the hybrid tree was a larger violation of the same rule.
+  | readout | measures | values | score | peak | \|r\| |
+  |---|---|---|---|---|---|
+  | `root_multi_pauli` | $\langle X\rangle,\langle Y\rangle,\langle Z\rangle$ on wire 0 | 3 | `35.6%` | 43.8% | 0.667 |
+  | `top_layer_qubits` | $\langle Z\rangle$ on wires 0, 4, 8, 12 | 4 | **`78.4%`** | 89.1% | 0.306 |
+
+  * **A 43-point swing, and it is not "more numbers"** (3 vs 4). The root's Bloch vector is the **reduced state of one qubit** after tracing out the other fifteen — three real parameters, no matter how much structure feeds in. Reading four wires gives four marginals from different parts of the register, which jointly carry far more about the 16-qubit state.
+  * `78.4%` at **15** epochs is level with the hybrid's `79.4%` at **30**. **The coherent tree is not worse — the readout choice was.**
+  * The successful config is also *more* entangled (|r| `0.306` vs `0.667`), i.e. it uses coherence harder.
+* **This is the same failure mode the whole remediation exists to fix, reintroduced by me.** `root_multi_pauli` was carried over from the hybrid without re-deriving it. In the hybrid it is not a bottleneck, because bonds are already classical scalars and information reaches the root by another route; in the coherent tree it funnels all 16 patches through one qubit. The 2026-07-17 reference had this right and measured all four survivors. **The regression tests did not catch it**: `test_readout_width_matches_config` verifies the head matches the configured readout, but cannot tell that a validly-configured readout is a bottleneck for a given topology.
+* **Naming**: `level1_survivors` is a misleading name — it measures the four wires *entering* the top node, read *after* that node has acted, i.e. the root plus the three qubits the tree nominally discards at the top. Renamed to **`top_layer_qubits`**, with the old name kept as an alias so R1's logged sweep stays reproducible.
+* **Decisions**:
+  * Added `phase15_common.COHERENT_ARCH` = `{readout: top_layer_qubits, encoding: multi_axis, ansatz: iqp}`. **The architecture of record is now per-topology**, which the single `ARCH` had hidden.
+  * The tower outputs the four top-layer qubits rather than a single root. This must be stated in the thesis, not glossed: it means the tree does not contract to a single root, and it is a **documented workaround for a simulation limit**, not a design preference (see the scaling entry below).
+* **Still outstanding**: shared vs per-block level-1 weights (both diagnostic runs crashed on a syntax error in a scratch script), and the full multi-seed coherent baseline. `share_level1_weights` is now a constructor flag.
+
+### [2026-07-28] Correction: R4's "The CP Baseline Is Broken" Was an Artifact of My Rank-Matching Procedure
+* **What was reported** (R4, first run): `classical_bare` `33.9%`, `classical_full` `59.3%`, against an MLP reference at `96.0%` — concluding that the CP quad-node, not classical computation, was underperforming, and therefore that **Question A.3 was unanswerable**.
+* **That conclusion was wrong, and the cause was mine.** `tune_classical` swept learning rate and bond dimension but **derived CP rank from the parameter budget** via `match_rank_to()`. Matching the hybrid's 211 parameters forced **rank = 1 at every bond dimension** — and a rank-1 CP decomposition is a single outer product, i.e. degenerate. The baseline was hobbled by the matching procedure and then diagnosed as broken.
+* **Re-run with the coherent model's 287-parameter budget** (which happens to admit rank 2), same tuner, 21 seeds:
+
+  | arm | old (rank forced to 1) | new (rank 2) | params |
+  |---|---|---|---|
+  | `classical_bare` (no residual/dropout) | `33.9 ± 12.4` | **`56.7 ± 6.9`** | 340 |
+  | `classical_full` (+ residual + dropout) | `59.3 ± 2.9` | **`88.4 ± 5.5`** | 352 |
+
+  Tuned configs: bare `lr=0.003, bond_dim=4, rank=2`; full `lr=0.03, bond_dim=4, rank=2`.
+* **What now follows**:
+  * **The CP node was never broken.** Question A.3 is approachable again, and the earlier "not answerable" verdict is withdrawn.
+  * Under **matched constraints** — no residual, no dropout, as the quantum tower requires — the classical CP node reaches `56.7%`, against the coherent quantum tree's provisional `~78%`. That is the like-for-like comparison A.3 asks for, and it currently favours the quantum node.
+  * Allowed **residual + dropout**, the classical node reaches `88.4%` and **overtakes** the quantum tower. The residual/dropout contribution is `+31.7` pts — far larger than previously measured, and it sharpens the divergence: these mechanisms are load-bearing classically while R3 confirmed they do not help the quantum tower.
+* **Fix applied**: rank is now a **free axis** in `tune_classical` (swept over 1, 2, 4, 8, 16), with parameter matching enforced as an upper *bound* (1.5x the quantum model) so the classical arm cannot simply buy capacity but is never forced into a degenerate rank. A warning fires if a rank-1 config still wins, since that indicates the budget is too tight for a fair comparison.
+* **Methodological lesson, third of its kind in this investigation**: a derived quantity silently constrained to a degenerate value (rank 1), exactly as the readout was silently constrained to one scalar. Both produced confident conclusions that reversed once the constraint was lifted. **Any quantity derived rather than swept should be checked for degeneracy at its chosen value.**
+* **Still not run**: the coherent quantum arm (~17.5 min/seed x 21 seeds ~ 6 h, or ~40 min across 10 workers). The classical arms are in `results/r4_classical_only_coherent.json`.
+
+### [2026-07-28] Scaling Analysis: Depth, Recycling, and Bond Dimension
+Prompted by whether the wide readout survives deeper trees. Analysis, not experiment.
+* **Depth**: readout width stays at the branching factor (4) at any depth, since the layer entering the final node is always 4 qubits. What worsens is the **compression ratio**: depth 2 is 16 leaves into 4 output qubits, depth 3 is 64 into 4, depth 4 is 256 into 4. The wide readout buys a fixed amount of headroom while demand grows geometrically — **a patch, not a solution**, and it degrades exactly as the model scales. Reading a *lower* layer recovers width but truncates the tree and pushes aggregation into the classical head.
+* **Active qubit recycling**: unaffected, and well suited. The four top-layer qubits are the last alive; measuring all four is free, and nothing we want to read gets reset. Physical width grows with *depth*, not leaf count — ~7 qubits at depth 2 (measured 2026-07-17), ~12 at depth 3 if each group of 16 leaves is collapsed before the next begins. The one thing that would break it is reading a *lower* layer: holding 16 level-1 survivors at depth 3 pushes width to ~20 and forfeits most of the benefit. (Hardware statement only — recycling remains confirmed not to help classical simulation past depth 2.)
+* **Bond dimension is the principled fix.** Passing $k$ qubits per bond gives $\chi = 2^k$, and a $k$-qubit reduced state carries $4^k - 1$ real parameters:
+
+  | $k$ | $\chi$ | params at the root | node width | leaf qubits (16 patches) |
+  |---|---|---|---|---|
+  | 1 | 2 | 3 | 4 | 16 |
+  | 2 | 4 | 15 | 8 | 32 |
+  | 3 | 8 | 63 | 12 | 48 |
+
+  The wide readout recovers information by reading qubits the tree *meant to discard*; increasing $\chi$ makes the tree genuinely carry more upward, restoring the single root as a meaningful object. It also matches the A.2 entropy result — root entropy at 89.7% of its $\ln 2$ ceiling — which we now know was a **binding** constraint rather than a curiosity.
+* **Where each is affordable**: hardware with recycling — yes ($k=2$ is ~8-qubit nodes, ~14 physical qubits at depth 2). Tensor-network simulation — yes ($\chi=4$ is a small bond). **Statevector training — no**: $k=2$ at 16 patches is 32 qubits, past the ~29-qubit wall on 18 GB. This is the same wall as depth-3, reached from a different direction.
+* **Framing for the thesis**: $\chi = 1$ qubit is a **simulation-driven constraint, not a design preference**. The capacity limit is measured (entropy saturates its ceiling; relieving it at the readout is worth 43 points), the principled fix is identified, and its cost is quantified. That is a considerably stronger position than presenting the wide readout as an architectural choice.
+
+### [2026-07-28] Next Steps (revised: theory phase closing, scaling questions move to CLEVR)
+The theoretical exploration is being closed. Remaining work is finishing the coherent baseline, writing up, and regenerating figures. **The three "what do we do when 16 statevector qubits isn't enough" questions — bigger patches vs SPSA vs bond dimension — are all deferred into the CLEVR scope**, since they are the same question and CLEVR is where the answer actually matters.
+
+**To finish the theory phase (compute, to be run):**
+1. **R7 baseline** on the coherent tree with `COHERENT_ARCH`, ~10 seeds. Settles shared vs per-block level-1 weights at the same time. ~40 min across 10 parallel workers.
+2. **R4 coherent quantum arm**, so the classical control (already run: bare `56.7 ± 6.9`, full `88.4 ± 5.5`, MLP `96.0 ± 1.5`) has something to compare against. ~40 min parallel.
+3. Optionally `reupload` on the coherent tree — same wire count, so nearly free, and R3 left it a genuine null rather than a rejection.
+
+**Write-up and figures (no compute):**
+4. **R5 doc fixes**: the $p_{crit}$ contradiction, barren-plateau rescoping, and a stated position on the classical-encoder tension.
+5. **Regenerate figures** per the Section 8 triage (5 keep, 4 keep-with-caveat, 10 regenerate, 1 retire). Note figures 9-16 can only come from the **hybrid** R3 data, since mixed_channel and the ancilla were deliberately not ported to the coherent tree — they must be labelled as **node-level** results.
+6. **Noise write-up** — no experiments. Tolerance characterised at single-node scale, training-under-noise shown not to help, full-tree emulation infeasible at $O(4^N)$. State the single-node limitation.
+
+**Deferred into CLEVR (Phase 2) — one decision, three options:**
+7. 16x16 cannot support CLEVR's ">80% on all 4 attribute heads" criterion. The options are **bigger patches** (32x32 at 8x8 patches keeps 16 qubits; works today, but it is classical preprocessing, not quantum scaling), **SPSA** (genuinely deeper trees, ~1 day, uncertain), or **higher bond dimension** (the principled fix, needs tensor-network training). Decide inside CLEVR against real data rather than in the abstract.
+
+**Carried into CLEVR as requirements** (established by this work):
+* **Classical controls from day one** — matched-parameter reference alongside every accuracy claim, with rank swept freely (see the R4 correction above).
+* **Question C.2 is required** — run the relational task with and without the spatial ancilla. R3's `-19.5` came from a translation-invariant task and says nothing about relational reasoning.
+* **Noiseless only.**
 
 ---
 
@@ -757,7 +824,11 @@ Phase 1.5 tasks R1–R4 are complete but were all run on the measure-and-re-enco
 | 2026-07-28 | R4: MLP reference | 16x16 Overlapping (1024/30) | Score, last-5 mean (21 seeds) | 96.0% ± 1.5 | 999 params. Beats quantum by 17.0 pts (resolved) — but ~5x the parameters. |
 | 2026-07-28 | R4: MLP, parameter-matched | 16x16 Overlapping (1024/30) | Score, last-5 mean (21 seeds) | 70.5% ± 18.1 | 257 params. Quantum +8.5 vs 8.9 limit → **statistically tied**. Claim = parameter efficiency. |
 | 2026-07-28 | R4: classical CP tree, bare | 16x16 Overlapping (1024/30) | Score, last-5 mean (21 seeds) | 33.9% ± 12.4 | 308 params, hyperparameter-tuned. **CP node is broken → Question A.3 NOT answerable.** |
-| 2026-07-28 | R4: classical CP tree + residual + dropout | 16x16 Overlapping (1024/30) | Score, last-5 mean (21 seeds) | 59.3% ± 2.9 | +25.4 vs bare (limit 5.6): residual/dropout are load-bearing classically. |
+| 2026-07-28 | R4: classical CP tree + residual + dropout | 16x16 Overlapping (1024/30) | Score, last-5 mean (21 seeds) | 59.3% ± 2.9 | ⚠️ SUPERSEDED — rank forced to 1 by parameter matching. See corrected row below. |
+| 2026-07-28 | R7: coherent tree, readout=root_multi_pauli | 16x16 Overlapping (1024/15, 1 seed) | Score, last-5 mean | 35.6% | Root qubit's marginal only — a severe bottleneck. |
+| 2026-07-28 | **R7: coherent tree, readout=top_layer_qubits** | 16x16 Overlapping (1024/15, 1 seed) | Score, last-5 mean | **78.4%** (peak 89.1%) | **+43 pts from readout alone.** Level with the hybrid's 79.4% in half the epochs. |
+| 2026-07-28 | R4 corrected: classical CP bare (rank swept freely) | 16x16 Overlapping (1024/30) | Score, last-5 mean (21 seeds) | 56.7% ± 6.9 | 340 params, lr=0.003/bond_dim=4/rank=2. Matched-constraint arm for Question A.3. |
+| 2026-07-28 | R4 corrected: classical CP + residual + dropout | 16x16 Overlapping (1024/30) | Score, last-5 mean (21 seeds) | 88.4% ± 5.5 | 352 params. +31.7 vs bare — residual/dropout strongly load-bearing classically. |
 
 
 
