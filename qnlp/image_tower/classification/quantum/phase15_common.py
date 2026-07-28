@@ -93,6 +93,25 @@ def seeds_needed(pooled_std, target_effect):
     return n
 
 
+def is_chance_level(score, n_classes=4, margin=2.5):
+    """Is this score indistinguishable from random guessing?
+
+    A run at chance is a broken run, not a result. R4's first classical baseline
+    scored 25.8% on a 4-class task and would have produced a spectacular fake
+    "quantum beats classical by 57.8 points" headline had it been taken at face
+    value. Any arm landing here needs debugging before it is compared to anything.
+    """
+    return score <= (100.0 / n_classes) + margin
+
+
+def assert_not_chance_level(name, score, n_classes=4, margin=2.5):
+    assert not is_chance_level(score, n_classes, margin), (
+        f"arm {name!r} scored {score:.1f}%, at chance level for {n_classes} classes "
+        f"({100.0 / n_classes:.1f}%). This is a broken run, not a result -- debug it "
+        f"before using it in any comparison."
+    )
+
+
 def train_run(model_factory, seed, p_noise=0.0, **protocol):
     """One training run. `model_factory` is a zero-arg callable returning a
     fresh nn.Module, so this harness stays agnostic to quantum vs classical.
