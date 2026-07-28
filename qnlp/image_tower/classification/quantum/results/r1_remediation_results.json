@@ -1,0 +1,188 @@
+{
+  "sweep1_readout": {
+    "readout=scalar,encoding=scalar_ry": {
+      "readout": "scalar",
+      "encoding": "scalar_ry",
+      "val_acc_mean_curve": [
+        35.3125,
+        50.9375,
+        51.875,
+        54.0625,
+        55.0,
+        53.4375,
+        52.8125,
+        55.3125,
+        53.4375,
+        54.375,
+        54.0625,
+        53.125,
+        54.0625,
+        53.75,
+        55.0
+      ],
+      "final_val_acc_per_seed": [
+        54.6875,
+        54.6875,
+        60.9375,
+        54.6875,
+        50.0
+      ],
+      "final_val_acc_mean": 55.0,
+      "final_val_acc_std": 3.4798527267687636,
+      "peak_val_acc_mean": 56.875,
+      "num_params": 105
+    },
+    "readout=root_multi_pauli,encoding=scalar_ry": {
+      "readout": "root_multi_pauli",
+      "encoding": "scalar_ry",
+      "val_acc_mean_curve": [
+        48.4375,
+        50.9375,
+        51.25,
+        53.75,
+        53.4375,
+        52.5,
+        54.0625,
+        56.875,
+        53.4375,
+        57.5,
+        56.875,
+        55.3125,
+        57.8125,
+        57.1875,
+        57.5
+      ],
+      "final_val_acc_per_seed": [
+        56.25,
+        57.8125,
+        60.9375,
+        67.1875,
+        45.3125
+      ],
+      "final_val_acc_mean": 57.5,
+      "final_val_acc_std": 7.153451963912248,
+      "peak_val_acc_mean": 62.1875,
+      "num_params": 113
+    },
+    "readout=level1_survivors,encoding=scalar_ry": {
+      "readout": "level1_survivors",
+      "encoding": "scalar_ry",
+      "val_acc_mean_curve": [
+        42.1875,
+        50.0,
+        50.0,
+        50.9375,
+        49.6875,
+        55.625,
+        51.5625,
+        55.9375,
+        56.25,
+        54.0625,
+        55.0,
+        55.0,
+        54.0625,
+        59.6875,
+        57.5
+      ],
+      "final_val_acc_per_seed": [
+        57.8125,
+        57.8125,
+        67.1875,
+        54.6875,
+        50.0
+      ],
+      "final_val_acc_mean": 57.5,
+      "final_val_acc_std": 5.625,
+      "peak_val_acc_mean": 61.25,
+      "num_params": 117
+    }
+  },
+  "sweep2_encoding": {
+    "readout=root_multi_pauli,encoding=scalar_ry": {
+      "readout": "root_multi_pauli",
+      "encoding": "scalar_ry",
+      "val_acc_mean_curve": [
+        48.4375,
+        50.9375,
+        51.25,
+        53.75,
+        53.4375,
+        52.5,
+        54.0625,
+        56.875,
+        53.4375,
+        57.5,
+        56.875,
+        55.3125,
+        57.8125,
+        57.1875,
+        57.5
+      ],
+      "final_val_acc_per_seed": [
+        56.25,
+        57.8125,
+        60.9375,
+        67.1875,
+        45.3125
+      ],
+      "final_val_acc_mean": 57.5,
+      "final_val_acc_std": 7.153451963912248,
+      "peak_val_acc_mean": 62.1875,
+      "num_params": 113
+    },
+    "readout=root_multi_pauli,encoding=multi_axis": {
+      "readout": "root_multi_pauli",
+      "encoding": "multi_axis",
+      "val_acc_mean_curve": [
+        34.6875,
+        49.0625,
+        53.75,
+        51.5625,
+        53.4375,
+        54.375,
+        56.5625,
+        55.625,
+        56.25,
+        55.0,
+        58.75,
+        58.75,
+        60.3125,
+        60.625,
+        59.0625
+      ],
+      "final_val_acc_per_seed": [
+        56.25,
+        60.9375,
+        67.1875,
+        62.5,
+        48.4375
+      ],
+      "final_val_acc_mean": 59.0625,
+      "final_val_acc_std": 6.358434359179939,
+      "peak_val_acc_mean": 64.375,
+      "num_params": 211
+    }
+  },
+  "gate": {
+    "threshold": 70.0,
+    "best_config": "readout=root_multi_pauli,encoding=multi_axis",
+    "best_final_val_acc_mean": 59.0625,
+    "passed": false
+  },
+  "capacity_fallback": {
+    "readout": "root_multi_pauli",
+    "encoding": "multi_axis",
+    "train_samples": 1024,
+    "epochs": 30,
+    "final_val_acc_per_seed": [
+      70.3125,
+      76.5625,
+      73.4375,
+      90.625,
+      82.8125
+    ],
+    "final_val_acc_mean": 78.75,
+    "final_val_acc_std": 7.2348980642438905,
+    "passed": true
+  }
+}

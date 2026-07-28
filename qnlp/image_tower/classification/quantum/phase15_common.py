@@ -1,0 +1,213 @@
+"""Shared training / statistics harness for Phase 1.5 tasks R2-R4.
+
+Exists so R2, R3 and R4 do not each re-fork the training loop -- that drift is
+what let the scalar-readout regression go unnoticed across four scripts (see
+research_log.md 2026-07-27 "Code Audit").
+
+Protocol and statistics defaults encode what R1/R1b measured (research_log.md
+2026-07-27 / 2026-07-28):
+  - PROTOCOL: 1024 train / 64 test / 30 epochs. The old 256/15 protocol is
+    underpowered for this task regardless of architecture.
+  - Runs are scored by the mean of the last 5 epochs, not the single final
+    epoch (MDE 8.0 -> 7.2 pts, and it equalises arm variances).
+  - Comparisons are UNPAIRED. R1b measured cross-variant seed correlation at
+    -0.22, so pairing has nothing to cancel and measurably hurt (MDE 10.2
+    paired vs 7.6 unpaired). Do not reintroduce pairing without re-measuring
+    that correlation.
+  - Seed counts come from R1b's power analysis (pooled std ~8.2): resolving a
+    3-pt effect needs ~58 seeds/arm, 5-pt needs ~21, 8-pt needs ~9.
+"""
+
+import json
+import os
+
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+
+from qnlp.utils.data.synthetic_shapes import get_synthetic_shapes_loaders
+
+RESULTS_DIR = "qnlp/image_tower/classification/quantum/results"
+
+# Architecture of record, established by R1/R1b (readout) and R2 (encoding, ansatz).
+# Kept here rather than as qttn_core constructor defaults so that R1/R1b remain
+# reproducible exactly as logged -- those runs predate R2 and used the module's
+# original `strongly_entangling` default. R3 onward should use ARCH.
+#
+# R2 caveat worth carrying: the *encoding* is what is actually resolved
+# (multi_axis beats scalar_ry by +12.6 pts vs a 3.6-pt limit). The *ansatz*
+# choice is NOT resolved on accuracy (iqp vs strongly_entangling: +1.6 pts vs a
+# 4.8-pt limit); iqp is adopted because it matched the documented choice and had
+# visibly lower seed variance (4.9 vs 9.7), which buys resolution downstream --
+# not because it is measurably more accurate.
+ARCH = {"readout": "root_multi_pauli", "encoding": "multi_axis", "ansatz": "iqp"}
+
+PROTOCOL = {"train_samples": 1024, "test_samples": 64, "epochs": 30, "batch_size": 32, "lr": 0.03}
+SCORE_LAST_K = 5
+
+_T_CRIT_95 = {
+    1: 12.706,
+    2: 4.303,
+    3: 3.182,
+    4: 2.776,
+    5: 2.571,
+    6: 2.447,
+    7: 2.365,
+    8: 2.306,
+    9: 2.262,
+    10: 2.228,
+    15: 2.131,
+    20: 2.086,
+    30: 2.042,
+    40: 2.021,
+    60: 2.000,
+    120: 1.980,
+}
+
+
+def t_crit(df):
+    if df in _T_CRIT_95:
+        return _T_CRIT_95[df]
+    keys = sorted(_T_CRIT_95)
+    for k in keys:
+        if df < k:
+            return _T_CRIT_95[k]
+    return 1.96
+
+
+def mde_unpaired(std_a, std_b, n):
+    """95% CI half-width on a difference of means: the smallest effect this
+    design could distinguish from zero."""
+    pooled = np.sqrt((std_a**2 + std_b**2) / 2.0)
+    return float(t_crit(2 * n - 2) * pooled * np.sqrt(2.0 / n))
+
+
+def seeds_needed(pooled_std, target_effect):
+    n = 4
+    for _ in range(100):
+        n_new = int(np.ceil(2.0 * (t_crit(2 * n - 2) * pooled_std / target_effect) ** 2))
+        if n_new == n:
+            break
+        n = n_new
+    return n
+
+
+def train_run(model_factory, seed, p_noise=0.0, **protocol):
+    """One training run. `model_factory` is a zero-arg callable returning a
+    fresh nn.Module, so this harness stays agnostic to quantum vs classical.
+    Returns the per-epoch val-accuracy curve.
+    """
+    cfg = {**PROTOCOL, **protocol}
+    train_loader, test_loader = get_synthetic_shapes_loaders(
+        batch_size=cfg["batch_size"],
+        train_samples=cfg["train_samples"],
+        test_samples=cfg["test_samples"],
+        img_size=cfg.get("img_size", 16),
+        seed=seed,
+    )
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    model = model_factory()
+    optimizer = optim.AdamW(model.parameters(), lr=cfg["lr"], weight_decay=1e-4)
+    criterion = nn.CrossEntropyLoss()
+
+    def _fwd(imgs):
+        return model(imgs, p_noise=p_noise) if p_noise > 0 else model(imgs)
+
+    val_accs = []
+    for _ in range(cfg["epochs"]):
+        model.train()
+        for imgs, labels in train_loader:
+            optimizer.zero_grad()
+            loss = criterion(_fwd(imgs), labels)
+            loss.backward()
+            optimizer.step()
+        model.eval()
+        correct = total = 0
+        with torch.no_grad():
+            for imgs, labels in test_loader:
+                correct += _fwd(imgs).argmax(dim=1).eq(labels).sum().item()
+                total += labels.size(0)
+        val_accs.append(100.0 * correct / total)
+    return val_accs, model
+
+
+def summarise(name, curves, **extra):
+    """Score an arm. `score` (mean of last SCORE_LAST_K epochs) is the headline
+    metric; `final` is kept for comparability with pre-R1b log entries."""
+    curves = np.array(curves)
+    final = curves[:, -1]
+    score = curves[:, -SCORE_LAST_K:].mean(axis=1)
+    out = {
+        "config": name,
+        "n_seeds": int(curves.shape[0]),
+        "score_per_seed": score.tolist(),
+        "score_mean": float(score.mean()),
+        "score_std": float(score.std(ddof=1)) if curves.shape[0] > 1 else 0.0,
+        "final_val_acc_per_seed": final.tolist(),
+        "final_val_acc_mean": float(final.mean()),
+        "final_val_acc_std": float(final.std(ddof=1)) if curves.shape[0] > 1 else 0.0,
+        "peak_val_acc_mean": float(curves.max(axis=1).mean()),
+        "val_acc_curves_per_seed": curves.tolist(),
+    }
+    out.update(extra)
+    return out
+
+
+def compare(arm_a, arm_b):
+    """Unpaired comparison of two summarised arms, reporting the resolution
+    limit alongside the difference -- a null is meaningless without it."""
+    n = min(arm_a["n_seeds"], arm_b["n_seeds"])
+    diff = arm_b["score_mean"] - arm_a["score_mean"]
+    m = mde_unpaired(arm_a["score_std"], arm_b["score_std"], n)
+    pooled = float(np.sqrt((arm_a["score_std"] ** 2 + arm_b["score_std"] ** 2) / 2.0))
+    # Degenerate guard: zero observed variance (e.g. n=1, or every seed landing
+    # identically) would otherwise report any difference as "resolved".
+    if pooled == 0.0 or n < 2:
+        m = float("inf")
+    return {
+        "baseline": arm_a["config"],
+        "variant": arm_b["config"],
+        "difference": float(diff),
+        "min_detectable_effect": m,
+        "resolved": bool(abs(diff) > m),
+        "verdict": (
+            "variant better"
+            if diff > m
+            else "variant worse"
+            if -diff > m
+            else f"unresolved (|{diff:+.1f}| <= {m:.1f} pts)"
+        ),
+        "n_seeds": n,
+        "pooled_std": pooled,
+        "seeds_needed_for_observed_diff": seeds_needed(pooled, max(abs(diff), 0.5)),
+    }
+
+
+def print_arms(title, arms):
+    print(f"\n{'='*78}\n{title}\n{'='*78}")
+    print(f"{'config':<44}{'score (last5)':>18}{'final':>16}")
+    for a in arms:
+        print(
+            f"{a['config']:<44}{a['score_mean']:>11.1f} +/-{a['score_std']:>4.1f}"
+            f"{a['final_val_acc_mean']:>10.1f} +/-{a['final_val_acc_std']:>4.1f}"
+        )
+
+
+def print_comparisons(cmps):
+    print(f"\n{'comparison':<52}{'diff':>9}{'resolves':>10}  verdict")
+    for c in cmps:
+        print(
+            f"{c['baseline']+' -> '+c['variant']:<52}{c['difference']:>+9.1f}"
+            f"{c['min_detectable_effect']:>10.1f}  {c['verdict']}"
+        )
+
+
+def save(results, filename):
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+    path = os.path.join(RESULTS_DIR, filename)
+    with open(path, "w") as f:
+        json.dump(results, f, indent=2)
+    print(f"\nSaved: {path}")
+    return path

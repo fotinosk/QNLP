@@ -20,14 +20,14 @@ This log tracks the theoretical derivations, simulation results, noisy emulation
 
 ## Current Status & Roadmap
 * **Active Branch**: `thesis/quantum-image-tower`
-* **Current Focus (as of 2026-07-27)**: Phase 1 investigation is substantially closed; preparing to move to Phase 2 (CLEVR). Remaining open backlog items (see [quantum_investigation_roadmap.md](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/llm/quantum_investigation_roadmap.md) Section 6) are: item 1 (Phase 3 ZNE/Mitiq/optimizer checkbox discrepancy, discretionary), item 3 (Question A.3, expressibility, discretionary), item 14 (SPSA for depth-3/4 training, only needed if CLEVR targets >16×16 images).
-* **Architecture decisions locked in for CLEVR** (all validated 2026-07-26/27, see entries below):
+* **Current Focus (as of 2026-07-27, revised)**: **Phase 1.5 — Remediation.** A code audit on 2026-07-27 (see the "Code Audit: Scalar-Readout Bottleneck" entry below) found that every experiment behind the July-26/27 architecture decisions compresses the whole image to a **single scalar** before a `nn.Linear(1, 4)` head, which explains why all those results sit in a `50–57%` band against a `50.0%` single-attribute shortcut ceiling. **Do not start Phase 2 (CLEVR).** Execute [quantum_investigation_roadmap.md](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/llm/quantum_investigation_roadmap.md) **Section 7 (tasks R1–R6)** and pass its decision gate first. **R1 is done** (see entry below): gate passed at `readout=root_multi_pauli`, `encoding=multi_axis`, **1024 train / 30 epochs** (the original 256/15 protocol was insufficient for any config — this is now the protocol of record for R2 onward). Proceed to R2.
+* **Architecture decisions previously "locked in for CLEVR" — now PROVISIONAL** (the ones derived from the scalar-readout experiments; re-tested by tasks R3a/R3b):
   * **No spatial ancilla** — Question C found it unnecessary and mildly harmful.
   * **No residual/skip connections** — five quantum-native mechanisms tested and rejected.
   * **No classical capacity inside the pipeline** — only minimal I/O-boundary `Linear` layers permitted (patch embedding in, classification head out); binding rule in `quantum_implementation_plan.md`.
   * **Noise is not a trainable regularizer** — training under noise does not improve clean accuracy (Question F).
   * **Image size**: 16×16 is the only size with end-to-end validated training. 32×32/64×64 have validated forward-pass simulation only (`default.tensor`); training at these sizes needs Task 1.5 (SPSA), not yet implemented.
-  * **Ansatz**: Multi-Axis Encoding + IQP, 3-CNOT "all children to parent" entangling pattern (from the original 2026-07-17 benchmark), is the baseline architecture choice.
+  * **Ansatz**: Multi-Axis Encoding + IQP, 3-CNOT "all children to parent" entangling pattern (from the original 2026-07-17 benchmark), is the *stated* baseline architecture choice — **but the July-26/27 code does not implement it** (it uses `RY` + `StronglyEntanglingLayers`, `investigate_quantum_residuals.py:77-96`). Documentation and code disagree; task R2 resolves which one wins at 16×16 and updates the loser.
 
 ---
 
@@ -435,6 +435,92 @@ This log tracks the theoretical derivations, simulation results, noisy emulation
     *Figure 19: Clean test accuracy over training, for models trained at three different noise rates (5 seeds each, shaded std). Training under noise does not improve — and mildly hurts — final clean accuracy.*
   * Raw JSON: `qnlp/image_tower/classification/quantum/results/noise_regularization_results.json`
 
+### [2026-07-27] Code Audit: Scalar-Readout Bottleneck Invalidates the July-26/27 Decision Layer — Remediation Required Before CLEVR
+* **Objective**: Before committing the "architecture decisions locked in for CLEVR" (see Current Status above) to the thesis, read the actual experiment code behind each decision and check that the measured quantity supports the claim being made.
+* **Motivation**: Every 2026-07-26/27 result clusters in a narrow `50–57%` band on a 4-class task, with repeated "flat 50.0% noise floors". `50.0%` is exactly the single-attribute ceiling of the `overlapping` dataset mode (color alone or shape alone partitions the 4 classes into 2 pairs — see the 2026-07-17 feature-binding proof entry, which uses this same fact as its proof device). A cluster of results pinned at the shortcut ceiling is a symptom, not a finding.
+* **Finding 1 — the readout is a single scalar (blocking)**: All three investigation scripts driving the July-26/27 conclusions compress the entire image to **one real number** before classification:
+  * `investigate_quantum_residuals.py:134` — `self.patch_embed = nn.Linear(patch_size*patch_size*3, 1)` (48 → 1 per patch)
+  * `investigate_quantum_residuals.py:137` — `self.head = nn.Linear(1, 4)`; `:162` — `return self.head(root)` where `root` is `[B, 1]`
+  * `investigate_spatial_ancilla.py:199,202` — identical `Linear(48,1)` / `Linear(1,4)` pair
+  * `investigate_ancilla_residuals.py:194,197` — identical
+  * `compare_topologies.py:119,143` — `Linear(48,3)` in, but still `Linear(1,4)` out
+  4-class classification is therefore `argmax` over four affine functions of a scalar $r \in [-1,1]$: the model must lay all 4 classes out as ordered intervals on a line. This is a 1-dimensional representation of the whole image.
+* **Finding 2 — this is a regression, not the original design**: `train_synthetic_shapes.py:85,91` (the 2026-07-17 run that reached **75.0%** val acc at 16×16) uses `Linear(48,1)` in but `head = nn.Linear(4, 4)` out — a 4-dimensional quantum readout. The scalar readout appeared between 2026-07-17 and 2026-07-26. Every architecture decision currently marked "locked in for CLEVR" was made *after* the regression, in the degraded regime. The accuracy history is consistent with this: 8×8 benchmark `95.3–96.9%` → 16×16 with 4-dim readout `75.0%` → 16×16 with scalar readout `52–57%`.
+* **Consequences (what this invalidates)**:
+  * **The five residual rejections are underpowered, not refuted.** Asking whether a skip-connection improves representation quality in a model whose representation is one number cannot distinguish "the mechanism doesn't help" from "the bottleneck dominates and nothing would show up." The binding `NOTE — Residual Connections` rule in `quantum_implementation_plan.md` — which currently extends to *any future quantum model in this project* — is more load-bearing than its evidence.
+  * **The spatial-ancilla verdict is a non-result.** `52.8% ± 5.7` vs. `55.0% ± 3.5` on n=5 is well inside noise; it supports "no evidence of benefit," not the "confirmed unnecessary, safe to drop 80→64 qubits" framing now carried in the roadmap.
+  * **Question F's founding premise is likely an artifact.** The observation that started it (topology benchmark, `42.2% → 53.9%` under noise) came from a `Linear(1,4)` model. Depolarizing noise contracts the scalar toward 0, which slides samples across the boundaries of a 1-D interval partition — a readout-calibration effect, not regularization. This is consistent with F.2 (training under noise) coming back negative: the negative result stands, but the phenomenon it was chasing may not be real.
+  * **The topology benchmark (QTTN vs. MPS vs. MERA)** was also run at scalar readout (`compare_topologies.py:143`), with QTTN at `42.2%` noiseless — below the 50% single-attribute ceiling, i.e. the QTTN arm had not learned even one attribute reliably. The "MERA has higher expressibility than QTTN" conclusion rests on a `51.6%` vs. `42.2%` gap measured in that regime.
+* **Finding 3 — the ansatz of record does not match the code**: Current Status (above) and the 2026-07-17 encoding benchmark both state the selected architecture is **Multi-Axis Encoding + IQP**. The July-26/27 scripts use `qml.RY(inputs[:, i], wires=i)` + `qml.StronglyEntanglingLayers` (`investigate_quantum_residuals.py:77-96`) — neither multi-axis encoding nor an IQP ansatz. Every recent decision was made on a different circuit than the one the project says it selected.
+* **Finding 4 — unresolved contradiction in the noise numbers**: The 2026-07-17 noise sweep establishes $p_{crit} \approx 0.05$ for a 4-qubit QTTN on 8×8 shapes; the same-day encoding/ansatz benchmark reports $p_{crit} > 0.200$ for essentially every configuration, including same-family ones. Both sit in the Experiment & Metrics Record. The two runs are almost certainly using different definitions of $p_{crit}$ (accuracy-drops-to-chance vs. some other threshold), but as written they contradict each other.
+* **Finding 5 — the barren-plateau claim is over-stated for its evidence**: 4 system sizes ($N \le 20$), non-monotonic variance (`1.51e-1, 6.08e-2, 8.61e-2, 5.94e-2`), compared against an asymptotic $2^{-N}$ strawman and reported as an "Empirical BP Immunity Proof." Hierarchical/TTN barren-plateau resistance under local observables is an established *theoretical* result; the data should be presented as consistent with that theory, not as an independent proof.
+* **Finding 6 — no classical control exists anywhere in the investigation**: There is not one run of a matched classical CP-TTN on the same data at the same sizes. Question A.3 (unitary constraint vs. unconstrained classical CP factors) is exactly this comparison and is still un-run. Without it, no quantum-vs-quantum ablation in this log can support a claim about quantum models relative to their classical analogue — which is the thesis's actual claim territory.
+* **Finding 7 — internal inconsistency with the project's own purity rule**: Question B.3 was closed *on principle* because `hybrid_trainer.py` put a classical `Linear(16, 4)` before a 4-qubit VQC ("classical capacity substituting for quantum circuit width"). But `Linear(48, 1)` per patch, applied in every current experiment, is a strictly more aggressive classical compression. Either the rule needs a stated quantitative boundary (what encoder width counts as "minimal I/O"), or B.3's closure needs revisiting.
+* **Decisions**:
+  * **Do not start CLEVR (Phase 2) yet.** Added **Phase 1.5 — Remediation Plan** (Section 7 of `quantum_investigation_roadmap.md`) with self-contained tasks R1–R6 and an explicit decision gate.
+  * All verdicts derived from the scalar-readout experiments are downgraded to **PROVISIONAL** in the roadmap and in `quantum_implementation_plan.md` until R3 completes. Specifically: the no-residuals rule, the no-spatial-ancilla rule, the MERA-vs-QTTN expressibility ranking, and Question F's premise.
+  * Findings 4 and 5 are documentation/framing fixes (task R5), not re-runs.
+  * Findings 6 and 7 are genuine open scientific gaps (tasks R4 and R5 respectively).
+* **What is NOT invalidated** (these do not route through the scalar readout, and stand as-is):
+  * Recycling equivalence and the depth-3 recycling wall (2026-07-17 / 2026-07-26) — exact numerical/feasibility results.
+  * `default.tensor` forward-pass tractability at 32×32 and 64×64, and the parameter-shift gradient-cost measurement (2026-07-26).
+  * The CNOT-count-to-entropy diagnostic and the entropy-vs-tree-depth saturation trend (`72.7% → 89.7%`) — diagnostic measurements on random weights, no classifier head involved.
+  * The LCU postselection-overhead diagnostic (`P(ancilla=0)`: L1 `0.986`, L2 `0.515`) — a property of the circuit, not of accuracy.
+  * The methodological lesson about multi-seed averaging (~10 seeds) for any noise-robustness claim.
+
+---
+
+### [2026-07-27] Completed Task R1: Remove the Scalar-Readout Bottleneck — Gate Passed via Capacity Fallback
+* **Objective**: Roadmap Section 7, Task R1. Build a shared, configurable `HierarchicalQTTNClassifier` (`qttn_core.py`) replacing the drifted per-script copies, and find a `readout × encoding` configuration that reaches the demonstrated ≥70% mean val-acc gate over 5 seeds on 16×16 `overlapping` synthetic shapes — the threshold below which ablations (residuals, spatial ancilla) cannot be trusted, per the Code Audit entry above.
+* **Motivation**: Every recent architecture decision was made on a model that compresses the whole image to one scalar (`Linear(1,4)` head), pinning results at the 50–57% shortcut ceiling. This task is blocking for R2–R6.
+* **Method**: `qnlp/image_tower/classification/quantum/qttn_core.py` (new shared module) + `run_r1_remediation.py`. Level-1 (4 patches → 1 node, weight-shared across 4 blocks) always emits a scalar message, unchanged; only the **root (level-2) readout width** and the **level-1 patch encoding width** are ablated, isolating the two variables the audit flagged. Sweep 1 fixed `encoding=scalar_ry`, varied `readout ∈ {scalar, root_multi_pauli, level1_survivors}`; Sweep 2 fixed the Sweep-1 winner's readout, varied `encoding ∈ {scalar_ry, multi_axis}`. Both: 5 seeds × 15 epochs, 256 train / 64 test, 16×16 `overlapping` shapes (original protocol, for comparability with prior log entries).
+* **Results — Sweep 1 (256/15, encoding=scalar_ry)**:
+  | readout | final val acc (mean ± std, 5 seeds) | peak | params |
+  |---|---|---|---|
+  | scalar (old/regressed) | 55.0 ± 3.5% | 56.9% | 105 |
+  | root_multi_pauli | 57.5 ± 7.2% | 62.2% | 113 |
+  | level1_survivors | 57.5 ± 5.6% | 61.2% | 117 |
+* **Results — Sweep 2 (256/15, readout=root_multi_pauli)**:
+  | encoding | final val acc | peak | params |
+  |---|---|---|---|
+  | scalar_ry | 57.5 ± 7.2% | 62.2% | 113 |
+  | multi_axis | 59.1 ± 6.4% | 64.4% | 211 |
+  Best at the original protocol: `root_multi_pauli` + `multi_axis`, **59.1 ± 6.4%** — an improvement over the 55.0% scalar baseline, but **short of the 70% gate**.
+* **Capacity fallback triggered** (per the roadmap's escalation order, option (b) first): re-ran the best config (`root_multi_pauli` + `multi_axis`) at **1024 train samples / 30 epochs**. Result: **78.75 ± 7.2%** over 5 seeds (`[70.3, 76.6, 73.4, 90.6, 82.8]`). **Gate passed.**
+* **Interpretation**: widening the readout alone (scalar → 3-dim Pauli triple) was not sufficient at the original 256-sample/15-epoch protocol — it moved the mean from 55% to 59%, still inside noise of the baseline given the stds involved. The dominant factor was training-set size/epochs, not readout width in isolation; but the *combination* of wider readout + multi-axis encoding + more data is what cleared the gate, and readout width matters as of Sweep 1 (58 vs 55, direction is consistent, if noisy). This is consistent with the 2026-07-17 75% run, which also used more capacity in its readout (`Linear(4,4)`) — the mechanism generalizes, but the original 256/15 protocol turns out to be underpowered for *any* config at this task's difficulty, not just the scalar-readout one.
+* **Decision**: **Architecture of record for R2 onward: `readout=root_multi_pauli`, `encoding=multi_axis`, training protocol = 1024 train / 64 test / 30 epochs** (supersedes the 256/15 protocol for all subsequent Phase 1.5 tasks — R2/R3 should use 1024/30, not 256/15, since 256/15 does not clear the gate for any tested config and is no longer representative). `qttn_core.py`'s `readout` and `encoding` flags are now the shared interface; `level1_survivors` was statistically indistinguishable from `root_multi_pauli` in Sweep 1 (57.5% both) and was not re-tested in Sweep 2 — worth a follow-up if R2/R3 numbers are borderline.
+* **Reproduce**: `conda run -n qnlp python -m qnlp.image_tower.classification.quantum.run_r1_remediation`. Model: `qnlp/image_tower/classification/quantum/qttn_core.py`. Results: `qnlp/image_tower/classification/quantum/results/r1_remediation_results.json`.
+* **Status**: R1 acceptance criterion met (decision-gate item 1). Proceed to R2 (ansatz-of-record reconciliation) using the new protocol.
+
+### [2026-07-28] Completed Task R1b: The Missing Control Arm — Audit Diagnosis CONFIRMED, and a Power Analysis That Rewrites R3's Design
+* **Objective**: Roadmap Section 7, Task R1b. Fill the hole in R1's 2×2 — nobody ran the *original* (`scalar` readout, `scalar_ry` encoding) config at the *new* 1024/30 protocol — and settle whether the Code Audit's diagnosis (the `nn.Linear(1,4)` readout bottleneck invalidated the July-26/27 ablations) is actually supported.
+* **Motivation**: R1 cleared the ≥70% gate, but not via the predicted mechanism. Readout width moved `55.0 ± 3.5 → 57.5 ± 7.2` and encoding width `57.5 ± 7.2 → 59.1 ± 6.4` — both inside seed noise at n=5 — while the protocol change moved `59.1 → 78.75`. With the capacity fallback run only on the winning config, the experiment as executed could not attribute the gain, yet the causal claim was already written into this log as fact.
+* **Design**: [run_r1b_control.py](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/run_r1b_control.py). **Part A** runs the missing cell by importing `run_r1_remediation.train_config` directly rather than reimplementing it, so the new number shares R1's exact code path and is strictly comparable. **Part B** re-runs both corner configs at 1024/30 with the data ordering pinned per seed, to test whether paired comparison would sharpen R3.
+* **Findings — the completed 2×2** (final val acc, 5 seeds, 16×16 `overlapping`):
+
+  | config | 256 train / 15 ep | 1024 train / 30 ep |
+  |---|---|---|
+  | `scalar` / `scalar_ry` (105 params) | `55.0 ± 3.5` | **`62.5 ± 6.9`** ← R1b control |
+  | `root_multi_pauli` / `multi_axis` (211 params) | `59.1 ± 6.4` | `78.8 ± 7.2` |
+
+  * **Verdict: AUDIT_CONFIRMED.** The scalar-readout model does **not** clear the 70% gate even with 4× the data and 2× the epochs (`62.5%`). The architecture gap at the new protocol is **+16.2 points**, comfortably above the 10.3 points this n=5 design can resolve.
+  * **The interaction is the real result.** Protocol alone (on the old config) buys `+7.5` pts; architecture alone (at the old protocol) buys `+4.1` pts; but architecture *at adequate training* buys `+16.2` pts. Neither factor is sufficient alone — **readout width is only expressible once there is enough data to train it**, which is why R1's one-factor-at-a-time sweeps at 256/15 each looked like noise. This is a cleaner and more defensible statement than either the original audit claim or R1's write-up.
+  * **Correction to the R1 entry's attribution**: R1's line *"readout width matters as of Sweep 1 (58 vs 55, direction is consistent, if noisy)"* was over-reading a 2.5-point gap against stds of 3.5 and 7.2. That sweep genuinely could not resolve the effect; R1b resolves it at the protocol where it is expressible. The conclusion R1 reached was right, but not for the reason it gave.
+  * **Architecture of record stands**: `readout=root_multi_pauli`, `encoding=multi_axis`, 1024 train / 64 test / 30 epochs. The 211-vs-105 parameter cost is earned.
+* **Findings — Part B, and a correction to R3's planned design**: paired at n=10, old `63.9 ± 8.1` vs. new `83.9 ± 10.0`, mean delta `+20.0 ± 14.2`, new config won on **9/10** seeds — independently reproducing Part A's conclusion on a larger sample.
+  * **Pairing does not help here, and slightly hurts.** Cross-variant seed correlation is **−0.22**: seed identity is *not* a shared difficulty factor between variants. Min detectable effect is `10.2` pts paired vs. `7.6` pts unpaired. **The pairing precondition added to roadmap R3 on 2026-07-27 was based on an assumption this measurement refutes** — run-to-run variance here is dominated by within-run optimization stochasticity, not by the data draw, so there is nothing for pairing to cancel. R3's precondition is corrected accordingly.
+  * **Scoring runs by the last-5-epoch mean instead of the single final epoch** is a small free improvement: MDE `8.0 → 7.2` pts, and it equalizes the two arms' stds (`8.1/10.0 → 8.2/8.2`). Adopt it for R3.
+  * **Power analysis — the number R3 actually needs.** At pooled std `8.2` and ~18s per run at 1024/30: resolving a **2-pt** effect needs **130 seeds/arm** (~39 min), **3-pt** needs **58** (~17 min), **5-pt** needs **21** (~6 min), **8-pt** needs **9** (~3 min). The planned 10 seeds resolves only ~8-point effects — while the residual/ancilla effects R3 is hunting were 2–3 points. **At 10 seeds R3 would have produced another inconclusive null**, exactly the 2026-07-26 failure mode at higher accuracy. Runs are cheap enough that this is affordable: budget **~60 seeds/arm** for R3 (≈17 min/arm, resolving 3-pt effects) rather than 10.
+* **Decisions**:
+  * Code Audit diagnosis confirmed — no correction needed to its central claim, but its *attribution* is sharpened to the interaction statement above.
+  * Decision-gate item 1 is now fully closed.
+  * Roadmap R3 precondition rewritten: drop pairing, adopt last-5-epoch scoring, raise seeds to ~60/arm, and continue to report the minimum detectable effect alongside every result.
+* **Reproduce**: `conda run -n qnlp python -m qnlp.image_tower.classification.quantum.run_r1b_control`
+  * Conda Environment: `qnlp`. Script: `qnlp/image_tower/classification/quantum/run_r1b_control.py`.
+  * Raw JSON: `qnlp/image_tower/classification/quantum/results/r1b_control_results.json` (includes per-seed val-acc curves, so R3 can compare scoring estimators without re-running anything).
+  * Deterministic: two independent full runs produced identical numbers.
+* **Caveat**: Part B's absolute numbers (`63.9` / `83.9`) sit above Part A's (`62.5` / `78.8`) for the same configs because Part B uses 10 seeds and a different RNG path (loaders built before model init). Part B is internally consistent and Part A is comparable to R1; do not mix the two sets in one table.
+
 ---
 
 ## Experiment & Metrics Record
@@ -500,6 +586,14 @@ This log tracks the theoretical derivations, simulation results, noisy emulation
 | 2026-07-27 | Hierarchical QTTN: trained p=0.0, eval clean | 16x16 Overlapping Shapes (256/64) | Final Clean Val Acc (5 seeds) | 55.0% ± 3.5 | Question F scheduling test. |
 | 2026-07-27 | Hierarchical QTTN: trained p=0.02, eval clean | 16x16 Overlapping Shapes (256/64) | Final Clean Val Acc (5 seeds) | 54.1% ± 5.0 | Training noise does not help; mildly worse. |
 | 2026-07-27 | Hierarchical QTTN: trained p=0.05, eval clean | 16x16 Overlapping Shapes (256/64) | Final Clean Val Acc (5 seeds) | 54.1% ± 5.0 | Same conclusion at higher training noise. |
+| 2026-07-27 | R1: readout=scalar, encoding=scalar_ry (105 params) | 16x16 Overlapping (256 train / 15 ep) | Final Val Acc (5 seeds) | 55.0% ± 3.5 | R1 Sweep 1. The audited/regressed config. |
+| 2026-07-27 | R1: readout=root_multi_pauli, encoding=scalar_ry (113) | 16x16 Overlapping (256 train / 15 ep) | Final Val Acc (5 seeds) | 57.5% ± 7.2 | R1 Sweep 1. Inside noise vs. scalar at this protocol. |
+| 2026-07-27 | R1: readout=level1_survivors, encoding=scalar_ry (117) | 16x16 Overlapping (256 train / 15 ep) | Final Val Acc (5 seeds) | 57.5% ± 5.6 | R1 Sweep 1. Tied with root_multi_pauli; not carried into Sweep 2. |
+| 2026-07-27 | R1: readout=root_multi_pauli, encoding=multi_axis (211) | 16x16 Overlapping (256 train / 15 ep) | Final Val Acc (5 seeds) | 59.1% ± 6.4 | R1 Sweep 2 winner, but below the 70% gate. |
+| 2026-07-27 | R1: readout=root_multi_pauli, encoding=multi_axis (211) | 16x16 Overlapping (**1024 train / 30 ep**) | Final Val Acc (5 seeds) | **78.8% ± 7.2** | R1 capacity fallback. **Gate passed.** Protocol of record from here on. |
+| 2026-07-28 | R1b control: readout=scalar, encoding=scalar_ry (105) | 16x16 Overlapping (**1024 train / 30 ep**) | Final Val Acc (5 seeds) | 62.5% ± 6.9 | **Does not clear the 70% gate** → audit diagnosis CONFIRMED; +16.2 pt architecture gap. |
+| 2026-07-28 | R1b paired: scalar/scalar_ry vs. root_multi_pauli/multi_axis | 16x16 Overlapping (1024/30, paired) | Final Val Acc (10 seeds) | 63.9% ± 8.1 vs. 83.9% ± 10.0 | Delta +20.0 ± 14.2; new config wins 9/10 seeds. |
+| 2026-07-28 | R1b power analysis (pooled std 8.2, last-5-epoch scoring) | 16x16 Overlapping (1024/30) | Seeds needed per arm | 2pt: 130, 3pt: 58, 5pt: 21, 8pt: 9 | Cross-variant seed corr −0.22 → **pairing does not help**. 10 seeds resolves only ~8-pt effects; R3 needs ~60/arm. |
 
 
 

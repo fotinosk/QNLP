@@ -48,6 +48,8 @@ IMAGE TOWER HIERARCHY (updated 2026-07-27, see status notes below)
                 quantum_implementation_plan.md]
 ```
 
+> **⚠️ READ FIRST (2026-07-27)**: the three architecture rules in the status notes below (no spatial ancilla, no residuals, image-size ceiling framing) were decided by experiments that ran through a **scalar-readout bottleneck** — the whole image compressed to one number before a `nn.Linear(1, 4)` head. They are **PROVISIONAL** pending re-test. See `research_log.md` 2026-07-27 "Code Audit" and **Section 7 — Phase 1.5 Remediation Plan** below. Do not start Phase 2 (CLEVR) until Section 7's decision gate is passed.
+
 **Status notes (2026-07-27)**:
 - **Image size**: 16×16 (depth-2 tree, 16 leaf patches) is the only size with validated end-to-end *training* (every experiment in this investigation used this size). 32×32 (depth-3) and 64×64 (depth-4) have validated *forward-pass* simulation only, via `default.tensor(method='tn')` — training at these sizes is blocked on gradient cost (parameter-shift is impractically slow; SPSA, Task 1.5, is the proposed fix, not yet implemented).
 - **No spatial ancilla**: Question C (closed 2026-07-26) found the explicit positional-encoding qubit is not beneficial (mildly worse) and safely removable — the diagram above and any CLEVR implementation should omit it, reducing qubit count per patch from 5 to 4.
@@ -75,7 +77,9 @@ These core research questions form the scientific contribution of your thesis. E
   2. **Active Qubit Recycling (Mid-Circuit Measurements & Resets)**: In a QTTN, once a block unitary is applied to a 4-patch register and 3 qubits are traced out, those 3 qubits are never used again. If we physically measure and reset them to $|0\rangle$, can we reuse them for the next patch block? How does this reduce the total physical qubit budget (e.g., from 80 qubits down to 8–12 active qubits)? What are the latency and gate error overheads of mid-circuit measurements on current NISQ hardware? — **Validated at depth 2 only (2026-07-17); confirmed NOT to extend to depth 3 for classical simulation purposes (2026-07-26). Still valid as a real-hardware qubit-budget technique.**
   3. ~~**Classical Compression Calibration (Hybrid Setup)**~~ — **CLOSED 2026-07-26, rejected on principle (no experiment run).** [hybrid_trainer.py](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/hybrid_trainer.py)'s classical `Linear(16, 4)` compression before the 4-qubit VQC substitutes classical capacity for quantum circuit width — this is a hybrid-architecture shortcut, not a purely-quantum solution to the qubit wall. The project's stated direction is a purely quantum implementation; qubit-budget problems should be solved via genuinely quantum means (active qubit recycling — sub-question 2, done — or tensor-network simulators — sub-question 1) rather than classical compression. `hybrid_trainer.py` is deprecated as an architecture direction; see `llm/quantum_implementation_plan.md`'s NOTE — Classical Hybrid Shortcuts.
 
-### Question C: Spatial Positional Encoding — Explicit vs. Implicit — CLOSED for sub-questions 1 & 3 (2026-07-26)
+### Question C: Spatial Positional Encoding — Explicit vs. Implicit — PROVISIONAL for sub-questions 1 & 3 (was CLOSED 2026-07-26; downgraded 2026-07-27)
+> **⚠️ 2026-07-27**: the verdict below rests on `52.8% ± 5.7` vs. `55.0% ± 3.5` at n=5 — well inside seed noise in either direction — measured through a scalar-readout bottleneck (see Section 7). It supports "no evidence of benefit," not "confirmed unnecessary." Task **R3a** re-tests at restored capacity with 10 seeds. Sub-question 2 (relational sensitivity) was already deferred to CLEVR and should be re-opened there.
+
 * **Context**: The HEA model allocates a 5th "Ancilla" qubit to each patch to encode 2D spatial coordinates ($x, y$ mapped via learned $R_x, R_y$ rotations). However, a TTN has a fixed hierarchical topology (e.g., Patch 1 only interacts with Patches 2, 3, and 4 in Layer 1). This topology implicitly encodes spatial geometry.
 * **Verdict (sub-questions 1 & 3)**: Ablation tested on 5 seeds ([investigate_spatial_ancilla.py](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/investigate_spatial_ancilla.py), full writeup in `research_log.md` 2026-07-26). The explicit ancilla is **not better, and mildly worse**: noiseless final val acc `52.8% ± 5.7` vs. `55.0% ± 3.5` without it, higher variance, one seed failed to converge, and it costs more (119 vs. 105 params, +1 qubit per level-1 node). Noise-swept (averaged across all 5 seeds) the two variants are statistically indistinguishable, with the ancilla trending slightly worse. **Recommendation: do not use the explicit spatial ancilla for CLEVR** — the fixed tree topology already provides sufficient implicit positional signal via slot ordering.
 * **Research Focus**:
@@ -181,7 +185,9 @@ We observed that test accuracy on under-trained models improved under depolarizi
 * **This does NOT resolve the underlying question of *why* it happens** — see Question F below, which remains open and is promoted out of this informal note into the main Open Questions list.
 * **Superseded candidate list** (kept for reference, not scheduled): classical head dropout, noise-as-dropout training schedule, qubit/patch dropout, gate/parameter dropout, entangling-layer dropout, finite-shot dropout, data re-uploading + re-upload dropout.
 
-### CLOSED (2026-07-26): Quantum-Native Residual Connections — Conclusion: Do Not Use
+### PROVISIONAL (was CLOSED 2026-07-26): Quantum-Native Residual Connections — Conclusion: Do Not Use
+> **⚠️ Downgraded to PROVISIONAL 2026-07-27.** All five mechanisms were tested on a model with a `nn.Linear(1, 4)` readout — the entire image compressed to one scalar, with results pinned in the `50–57%` band against a `50.0%` single-attribute shortcut ceiling. A null result there cannot distinguish "the mechanism doesn't help" from "the bottleneck dominates." The rejections may well survive re-testing, but the binding rule is not currently defensible. Task **R3b** (Section 7) re-tests `reupload` and `mixed_channel` at restored capacity, 10 seeds. `near_identity`, `lcu`, and `lcu-lite` stay rejected without re-test — see R3b for why.
+
 **Verdict**: Five quantum-native residual mechanisms were tested against a no-residual baseline. None show a robustly-confirmed benefit. **Quantum tree nodes in this project should not use residual/skip connections going forward** — this is now a binding design rule, recorded in `llm/quantum_implementation_plan.md`'s NOTE block. This investigation is closed; do not re-open it without a genuinely new hypothesis distinct from the five below.
 
 | Method | Noiseless result | Noise-robustness result | Verdict |
@@ -247,4 +253,318 @@ Cross-checking this roadmap and `quantum_implementation_plan.md` against `resear
 | 13 | ~~Stabilize `mixed_channel` training~~ | Section 5 (follow-up) | **Deprioritized 2026-07-26** — originally motivated by the noise-robustness benefit, which was retracted after the 10-seed re-test. Remaining motivation (modest noiseless edge, 10% failure rate) doesn't justify prioritizing a training fix over other backlog items unless a future experiment finds a different genuine advantage. | — |
 | 14 | **Task 1.5: SPSA gradient estimation for depth-3/4 training** | Section 3, Phase 1 (new) | Not started — needed to make 32×32/64×64 *training* practical now that forward passes work (item 4); parameter-shift costs 56.7s/step at depth-3, SPSA should reduce this ~250x | 1 day |
 
+> **⚠️ SUPERSEDED IN PART (2026-07-27)**: the "done/closed" statuses below for items 6, 10, 11 (and the framing of item 12) rest on experiments run through a scalar-readout bottleneck — see `research_log.md` 2026-07-27 "Code Audit" and **Section 7** below. They are downgraded to PROVISIONAL pending task R3.
+
 **Total backlog**: roughly 2–5 days of remaining work (items 2, 4, 5, 6, 7, 8, 9, 10, 11, 12 are done or closed; item 13 deprioritized). Remaining open items: item 1 (Phase 3 checkbox discrepancy — ZNE/Mitiq/optimizer comparison, 2-3 days, discretionary), item 3 (Question A.3, expressibility, 1-2 days), and item 14 (SPSA for depth-3/4 training, 1 day — only needed if CLEVR will use images larger than 16×16; otherwise park it as documented-but-not-executed infrastructure and proceed to CLEVR at the validated 16×16 size). **Any future backlog item that proposes adding or tuning a classical component inside the core quantum pipeline (compression heads, hybrid readouts, classical-bypass shortcuts) should be closed on principle without running an experiment** — the project direction is a purely quantum implementation; only the unavoidable classical I/O boundary (pixel-to-angle encoding in, class logits out) is exempt. **None of the five quantum-native residual methods tested show a robustly-confirmed win**, and the spatial ancilla is confirmed unnecessary — if either line is revisited, it should start from a fresh hypothesis rather than re-attempting to rescue a mechanism whose apparent benefit didn't survive a larger sample.
+
+---
+
+## 7. Phase 1.5 — Remediation Plan (added 2026-07-27): Close the Theory Phase Correctly Before CLEVR
+
+**Why this section exists.** A code audit on 2026-07-27 (full writeup: `research_log.md`, entry "Code Audit: Scalar-Readout Bottleneck Invalidates the July-26/27 Decision Layer") found that every experiment behind the July-26/27 architecture decisions compresses the entire image to a **single scalar** before classification — `self.head = nn.Linear(1, 4)` — so 4-class classification is `argmax` over four affine functions of one number in $[-1, 1]$. This is a 1-dimensional representation of the whole image, and it explains why every result in that period sits in a `50–57%` band with repeated "flat 50.0% noise floors" (`50.0%` is exactly the single-attribute shortcut ceiling of the `overlapping` dataset mode). The earlier 2026-07-17 run that reached `75.0%` at the same image size used a 4-dimensional readout (`train_synthetic_shapes.py:91`, `nn.Linear(4, 4)`); the scalar readout is a regression introduced after it.
+
+**What this means**: null results measured in that regime cannot distinguish "the mechanism doesn't help" from "the bottleneck dominates, so nothing would show up." The affected verdicts are **provisional**, not wrong — they may well survive re-testing, but they cannot currently be defended in a thesis.
+
+**Instructions for whoever executes this section.** Tasks R1–R6 are self-contained and are written to be runnable without prior context on this project. Run them in order; R1 gates everything else. Environment is the `qnlp` conda env — prefix every Python command with `conda run -n qnlp` (the base env lacks torch/pennylane/polars). All scripts live in `qnlp/image_tower/classification/quantum/`; all outputs go to that directory's `results/` subfolder. Per the Log Maintenance Protocol at the top of `research_log.md`: write a log entry with objective/motivation/expected outcome **before** each task, and update it with actual metrics, plots, and exact reproduction commands **after**.
+
+---
+
+### Task R1 (BLOCKING — do first): Remove the scalar-readout bottleneck — DONE 2026-07-27
+
+**Completed.** `qttn_core.py` built as specified below; readout×encoding swept per the method. Full writeup: `research_log.md` 2026-07-27 "Completed Task R1". **Result: the original 256-train/15-epoch protocol did not clear the 70% gate for any configuration** (best: `root_multi_pauli`+`multi_axis`, 59.1 ± 6.4%) — readout width alone moved the mean from 55.0% to 59.1%, a real but insufficient improvement. The capacity-fallback escalation (1024 train / 30 epochs, same best config) reached **78.75 ± 7.2%**, passing the gate. **Architecture and protocol of record for R2 onward: `readout=root_multi_pauli`, `encoding=multi_axis`, 1024 train / 64 test / 30 epochs** — R2/R3 must use this protocol, not the original 256/15 one, since 256/15 is now known to be underpowered independent of readout choice.
+
+<details>
+<summary>Original task specification (for reference)</summary>
+
+**Problem.** Confirmed at these exact locations:
+
+| File | Line | Code |
+|---|---|---|
+| `investigate_quantum_residuals.py` | 134 | `self.patch_embed = nn.Linear(patch_size*patch_size*3, 1)` |
+| `investigate_quantum_residuals.py` | 137 | `self.head = nn.Linear(1, 4)` |
+| `investigate_quantum_residuals.py` | 162 | `return self.head(root)` — `root` is `[B, 1]` |
+| `investigate_spatial_ancilla.py` | 199, 202 | same `Linear(48,1)` / `Linear(1,4)` pair |
+| `investigate_ancilla_residuals.py` | 194, 197 | same |
+| `compare_topologies.py` | 119, 143 | `Linear(48,3)` in, but still `Linear(1,4)` out |
+
+**Deliverable.** A single shared module, `qnlp/image_tower/classification/quantum/qttn_core.py`, containing one configurable `HierarchicalQTTNClassifier` that all subsequent investigations import — rather than each investigation re-declaring its own slightly-divergent copy (the divergence is what let the regression go unnoticed, and is also the cause of the ansatz drift in R2). It must expose, at minimum:
+
+- `readout: {"scalar", "root_multi_pauli", "level1_survivors"}`
+  - `"scalar"` — the current behaviour, kept **only** so R1's A/B comparison is exact.
+  - `"root_multi_pauli"` — measure $\langle X \rangle, \langle Y \rangle, \langle Z \rangle$ on the root qubit → `nn.Linear(3, n_classes)`. Cheapest fix; no extra qubits, no circuit change.
+  - `"level1_survivors"` — return all 4 level-1 survivor expectation values *in addition to* the root → `nn.Linear(4, n_classes)` (or `Linear(5, ...)` including root). This is what the 07-17 `75.0%` run effectively did.
+- `encoding: {"scalar_ry", "multi_axis"}`
+  - `"scalar_ry"` — current: `Linear(48,1)` → `tanh` → `RY`.
+  - `"multi_axis"` — `Linear(48,3)` → `tanh` → consecutive `RX, RY, RZ` on the same qubit. This is the encoding the 2026-07-17 benchmark actually selected (see R2).
+- `ansatz: {"strongly_entangling", "iqp"}` (see R2), `img_size`, `n_classes`, `p_noise`, and a `mode` hook for the residual variants so R3 can reuse it.
+
+**Method — change one thing at a time.** Confounding readout width with encoding width is how you end up unable to attribute the improvement.
+
+1. Fix readout only: `encoding="scalar_ry"`, sweep `readout ∈ {scalar, root_multi_pauli, level1_survivors}`. 5 seeds × 15 epochs, 16×16 `overlapping` shapes, 256 train / 64 test (matching the existing protocol so results are comparable to the log).
+2. Then fix encoding: take the winning readout, sweep `encoding ∈ {scalar_ry, multi_axis}`, 5 seeds.
+
+**Acceptance criterion.** At least one configuration reaches **≥ 70% mean final val accuracy over 5 seeds** on 16×16 `overlapping` shapes. Rationale: `50.0%` is the single-attribute shortcut ceiling, the 07-17 4-dim-readout run reached `75.0%` at this exact size and dataset, and the 8×8 benchmarks reached `95%+` — so ≥70% is a demonstrated, not aspirational, target. Below 70%, the model is still too close to the shortcut ceiling for ablations to be informative, and R3 must not proceed.
+
+**If the criterion is not met**: do not proceed to R3, and do not paper over it. Escalate with the numbers. Likely next things to check, in order: (a) the patch encoder is still `48 → 1` and throwing away nearly everything — try `multi_axis` immediately rather than after the readout sweep; (b) train set of 256 samples / 15 epochs is too small — try 1024 samples / 30 epochs as a capacity check; (c) `lr=0.03` with AdamW may be mistuned for the wider head.
+
+**Est. time**: 0.5–1 day (the module consolidation is most of it; the runs themselves are minutes at 16×16 on `default.qubit`).
+
+</details>
+
+---
+
+### ✅ Task R1b — DONE 2026-07-28: The missing control arm — run the OLD config at the NEW protocol
+
+> **RESULT: AUDIT_CONFIRMED.** The `scalar`/`scalar_ry` control reaches only **`62.5 ± 6.9`** at 1024/30 — it does *not* clear the 70% gate, versus the winner's `78.8 ± 7.2`. The +16.2-pt architecture gap exceeds the 10.3 pts this design resolves. **The Code Audit's diagnosis stands and `root_multi_pauli` + `multi_axis` remains the architecture of record.**
+>
+> **The sharpened claim** (better than either the original audit wording or R1's write-up): protocol alone buys `+7.5` pts, architecture alone buys `+4.1` pts, but architecture *at adequate training* buys `+16.2` — **readout width is only expressible once there is enough data to train it.** That interaction is why R1's one-factor-at-a-time sweeps at 256/15 each looked like noise.
+>
+> Part B additionally refuted this roadmap's own pairing advice and produced the power analysis that rewrote R3's design — see the R3 precondition below and `research_log.md` 2026-07-28. Full details there; the rest of this task description is retained as the specification that was executed.
+
+
+**Why this exists.** R1 passed the gate, but not in the way the Code Audit predicted, and the experiment as run cannot attribute the gain:
+
+| change | effect (5 seeds) | resolvable at n=5? |
+|---|---|---|
+| readout: `scalar` → `root_multi_pauli` | `55.0 ± 3.5` → `57.5 ± 7.2` | no — well inside noise |
+| encoding: `scalar_ry` → `multi_axis` | `57.5 ± 7.2` → `59.1 ± 6.4` | no — well inside noise |
+| protocol: 256/15 → **1024/30** | `59.1` → **`78.75 ± 7.2`** | yes — large |
+
+All of the gate-clearing movement came from the training protocol. Both architecture changes are inside seed noise. **And the capacity fallback was only run on the winning config** — nobody ran the original `scalar` readout at 1024/30.
+
+**The question this decides.** Does `readout=scalar, encoding=scalar_ry` also reach ~78% at 1024/30? If it does, the Code Audit's central diagnosis — that the `nn.Linear(1, 4)` bottleneck is what invalidated the July-26/27 ablations — is **wrong**, and the real cause is simply that 256 samples / 15 epochs is undertrained for this task. That conclusion is currently written into `research_log.md` as established fact and would need correcting before it reaches the thesis.
+
+**Deliverable.** One run: `readout=scalar`, `encoding=scalar_ry`, 1024 train / 64 test / 30 epochs, the same 5 seeds as R1's fallback. Minutes of compute on `default.qubit`. Report the full 2×2 (`{scalar, root_multi_pauli+multi_axis} × {256/15, 1024/30}`) so the attribution is complete.
+
+**Outcome handling — all three branches are fine, they just tell different stories:**
+- **Scalar stays ≪ 78% at 1024/30** → the audit's diagnosis is confirmed, readout width was genuinely the binding constraint (it just needed enough training to express itself). Keep `root_multi_pauli` + `multi_axis` as the architecture of record and strengthen the log entry's attribution.
+- **Scalar reaches ≈ 78% at 1024/30** → the diagnosis was wrong. Correct the Code Audit entry: the July-26/27 ablations were underpowered because of the *training protocol*, not the readout. The ablations still need re-running (R3 stands unchanged — an underpowered protocol invalidates them just as thoroughly), but the stated reason changes, and **the architecture of record should revert to the simpler/cheaper option** (105 params vs. 211 — simpler is also a better story for the CLEVR scaling argument).
+- **Ambiguous / partial gap** → report it as ambiguous and pick the simpler architecture by default; do not manufacture a clean narrative from a noisy result.
+
+**Also fix while here (R1 reporting gaps):**
+1. The R1 results never reached the **Experiment & Metrics Record** table — they exist only inside the log entry, contrary to the Log Maintenance Protocol. Add rows for both sweeps and the capacity fallback.
+2. Soften the R1 entry's line *"readout width matters as of Sweep 1 (58 vs 55, direction is consistent, if noisy)"* — a 2.5-point gap with stds of 3.5 and 7.2 at n=5 is not evidence of a direction. State it as unresolved at this sample size and let R1b settle it.
+
+**Est. time**: 1–2 hours.
+
+---
+
+### Task R2: Reconcile the ansatz-of-record with the code
+
+**Problem.** `research_log.md` Current Status and the 2026-07-17 encoding/ansatz benchmark both state the selected architecture is **Multi-Axis Encoding + IQP ansatz**. The July-26/27 scripts actually use `qml.RY(inputs[:, i], wires=i)` + `qml.StronglyEntanglingLayers` (`investigate_quantum_residuals.py:77-96`) — neither multi-axis nor IQP. So every recent architecture decision was made on a different circuit than the project's stated selection.
+
+**Also note**: the original selection came from a 12-configuration sweep at **8×8** with apparently one seed per configuration, and Multi-Axis+IQP (`95.3%`) was chosen over Multi-Axis+HEA (`96.9%`) on parameter-efficiency grounds. A single-seed selection among 12 candidates at a smaller image size is a weak basis for a decision the whole thesis rests on.
+
+**Deliverable.** Using the R1 module (`qttn_core.py`), re-run the encoding × ansatz comparison at **16×16** with the fixed readout (`root_multi_pauli`, per R1's result — R2 was written assuming R1 would pick a fixed readout, and it did): `{scalar_ry, multi_axis} × {strongly_entangling, iqp}`, 5 seeds each, **using R1's protocol of record (1024 train / 30 epochs), not the original 256/15** — the 256/15 protocol is now known to be underpowered for this task regardless of ansatz. Then either (a) confirm Multi-Axis+IQP and port it into `qttn_core.py` as the default, or (b) if `StronglyEntanglingLayers` wins at 16×16, **update the stated architecture of record** in `research_log.md` Current Status and in this roadmap — do not leave the documentation and the code disagreeing.
+
+**Est. time**: 0.5 day (reuses R1's harness entirely).
+
+---
+
+### Task R3: Re-run the decisive ablations at restored capacity (10 seeds)
+
+> **⚠️ PRECONDITION — statistical power (added 2026-07-27, REVISED 2026-07-28 after R1b measured it).**
+>
+> The concern stands: at n=10 this system resolves only ~**7.6-point** differences, while the residual/ancilla effects R3 is hunting were **2–3 points**. **As originally specified, R3 would produce another inconclusive null** — the 2026-07-26 mixed-channel failure mode at higher accuracy. But R1b measured the variance structure directly (`research_log.md` 2026-07-28, `results/r1b_control_results.json`), and the fix is not the one first proposed here:
+>
+> 1. ~~**Run paired, not unpaired.**~~ — **RETRACTED, measured and refuted.** R1b built the paired harness (data ordering pinned per seed, independent of model-init RNG consumption — verified working) and found the cross-variant seed correlation is **−0.22**. Seed identity is *not* a shared difficulty factor between variants, so pairing has nothing to cancel: min detectable effect was **10.2 pts paired vs. 7.6 pts unpaired** — pairing made it *worse*. Run-to-run variance here is dominated by within-run optimization stochasticity, not by the data draw. **Do not pair.** (The harness in `run_r1b_control.py:train_config_paired` is still useful if a future comparison *does* show positive cross-variant correlation — check before assuming either way.)
+> 2. **Score runs by the mean of the last 5 epochs, not the single final epoch.** Free improvement: MDE `8.0 → 7.2` pts, and it equalizes the arms' stds (`8.1/10.0 → 8.2/8.2`). Per-seed val-acc curves are already saved in `r1b_control_results.json` if you want to re-check this.
+> 3. **Run ~60 seeds per arm, not 10.** This is the actual fix. At pooled std `8.2` and ~18s per run at 1024/30:
+>
+>    | effect size to resolve | seeds per arm | ≈ time per arm |
+>    |---|---|---|
+>    | 2 pts | 130 | 39 min |
+>    | **3 pts** | **58** | **17 min** |
+>    | 5 pts | 21 | 6 min |
+>    | 8 pts | 9 | 3 min |
+>
+>    The runs are cheap enough that this is simply affordable — 10 seeds resolves only ~8-point effects, which is not the regime R3 operates in. Budget **~60 seeds/arm**.
+> 4. **Optionally reduce the variance at source.** The per-seed spread is large (`46.9 → 78.1` for the baseline arm at n=10). An lr decay or longer schedule may cut the std; if it does, the seed requirement drops quadratically. Worth 30 minutes of trying before committing to 60-seed runs.
+>
+> **Report for every R3 comparison**: mean ± std, and the minimum effect size the design could have resolved. "No significant difference" without that second number is not a finding.
+
+Only two mechanisms are worth re-testing. Do **not** re-run all five residual methods.
+
+**R3a — Spatial ancilla (Question C.1).** Current verdict rests on `52.8% ± 5.7` vs. `55.0% ± 3.5` at n=5, which is well inside noise in either direction. Re-run `investigate_spatial_ancilla.py` on the R1/R2 architecture, **10 seeds**, noise sweep averaged over all trained seeds (already the practice in that script — preserve it).
+
+**R3b — The two residual mechanisms that showed any signal.** `reupload` (Method 1: real noiseless expressivity gain, collapsed under noise) and `mixed_channel` (Method 3: small noiseless edge, 10% dead-gradient failure rate). 10 seeds each vs. baseline, both stages. Skip `near_identity` (no effect in either regime, and mechanistically it only perturbs initialization — a capacity fix does not change that argument), `lcu`/`lcu-lite` (inherits `mixed_channel`'s instability, adds ~2× shot overhead at the root, and remains untestable under noise due to the `default.mixed` postselection limitation in PennyLane 0.43.2), and the classical-bypass residual (out of scope by the purity rule).
+
+**R3c — Topology benchmark (optional, do only if time permits).** `compare_topologies.py` also used `Linear(1,4)`, and its QTTN arm scored `42.2%` — *below* the 50% single-attribute ceiling, i.e. that arm had not reliably learned even one attribute. The "MERA is more expressive than QTTN" conclusion (`51.6%` vs `42.2%`) is therefore weakly grounded. It is not load-bearing for CLEVR (the QTTN-vs-MERA decision is settled on contraction-complexity grounds, Section 5, which is a scaling argument independent of these accuracies), so re-run it only if the accuracy claim will be cited in the thesis.
+
+**Reporting rule.** For each mechanism, report the mean ± std over 10 seeds *and* state explicitly whether the difference exceeds seed-to-seed variance. The 2026-07-26 mixed-channel retraction happened precisely because a single-seed spot check produced a conclusion that reversed on a larger sample — do not repeat it.
+
+**Outcome handling.**
+- If the verdicts hold at restored capacity: promote them from PROVISIONAL back to binding rules, now with defensible evidence, and note in the log that they were re-validated post-remediation.
+- If any verdict flips: update the corresponding `NOTE` block in `quantum_implementation_plan.md`, Section 5 of this roadmap, and the Current Status block in `research_log.md`. A flip is a *good* outcome for the thesis (it means the ablation is measuring something), not a setback.
+
+**Est. time**: 1–1.5 days.
+
+---
+
+### Task R4: Classical CP-TTN control baseline (also closes Question A.3)
+
+**Problem.** There is no classical control anywhere in this investigation — not one run of a matched classical tensor-network model on the same data at the same sizes. Every result to date is quantum-vs-quantum, which cannot support a claim about quantum models *relative to their classical analogue*. This is the largest structural gap for the thesis, and it is cheap to close because the classical CP-tree implementation already exists in this repo (`qnlp/discoviz/models/cp_node.py`, and the classical TTN image tower under `qnlp/image_tower/`).
+
+This is simultaneously **Question A.3** (does the unitary constraint $U^\dagger U = I$ limit representation capacity versus unconstrained classical CP factor weights?), which is Section 6 backlog item 3 and currently the only substantive un-run item in Question A.
+
+**Deliverable.** A classical CP-TTN with matched structure (same 4×4 patch grid, same quad-tree topology, same tree depth) and **matched parameter count** to the R1/R2 quantum model, trained on identical synthetic-shapes data and seeds. Report side by side. Two variants are informative: (a) faithful analogue — no residual, no dropout, matching the quantum model's constraints; (b) the repo's actual classical node with residual + dropout, as the "what classical practice does" reference point.
+
+**Why variant (b) matters.** The existing classical tower uses residuals (`cp_node.py:28,68-69`) and dropout and got good results, while this investigation has issued binding rules *against* both for the quantum tower. That divergence needs an explanation in the thesis, and right now the only bridge is "quantum-native versions behave differently" — an argument resting on the provisional evidence R3 is re-testing. Running (a) and (b) makes the comparison explicit instead of implicit.
+
+**Est. time**: 1–2 days.
+
+---
+
+### Task R5: Documentation and consistency fixes (no experiments)
+
+1. **Resolve the $p_{crit}$ contradiction.** The 2026-07-17 noise sweep reports $p_{crit} \approx 0.05$ for a 4-qubit QTTN on 8×8 shapes; the same-day encoding/ansatz benchmark reports $p_{crit} > 0.200$ for essentially every configuration including same-family ones. Both are in the Experiment & Metrics Record and, as written, contradict each other. Read `emulate_noise_synthetic_shapes.py` and `benchmark_encodings_ansatze.py`, determine each script's actual threshold definition, and annotate both rows in the metrics table with the definition used.
+2. **Rescope the barren-plateau claim.** Four system sizes ($N \le 20$), non-monotonic variance (`1.51e-1, 6.08e-2, 8.61e-2, 5.94e-2`), currently reported as an "Empirical BP Immunity Proof" against an asymptotic $2^{-N}$ strawman. Hierarchical/TTN barren-plateau resistance under local observables is an established theoretical result — reframe the data as *consistent with* that theory and cite it, rather than presenting it as an independent proof. Fix in both `research_log.md` (2026-07-18 entry) and Section 4 of this roadmap.
+3. **Re-frame Question F's premise.** Its founding observation (`42.2% → 53.9%` under noise) came from a `Linear(1,4)` model; depolarizing noise contracts the scalar toward 0, sliding samples across a 1-D interval partition. Record this as the leading candidate mechanistic explanation. F.2's negative result (training under noise does not improve clean accuracy) **stands regardless** — but the phenomenon it was chasing may be an artifact. If R1's fixed-capacity runs no longer show eval-time noise improving accuracy, that confirms the artifact hypothesis and Question F can be closed outright rather than left "open but deprioritized."
+4. **Give the purity rule a quantitative boundary.** Question B.3 was closed *on principle* because `hybrid_trainer.py` had a classical `Linear(16, 4)` before a 4-qubit VQC — yet `Linear(48, 1)` per patch, used in every current experiment, is a strictly more aggressive classical compression. Either state what encoder width counts as "minimal I/O boundary" (e.g. output dimension ≤ qubits-per-patch × rotations-per-qubit, which `multi_axis`'s `Linear(48,3)` satisfies and `Linear(16,4)`-into-4-qubits arguably also does), or reopen B.3. Update the `NOTE — Classical Hybrid Shortcuts` block in `quantum_implementation_plan.md` accordingly.
+
+5. **Annotate the superseded training protocol (added 2026-07-27).** R1 established 1024 train / 30 epochs as the protocol of record, replacing 256/15, which is now known to be underpowered for this task *regardless of architecture*. Every pre-R1 row in the Experiment & Metrics Record was measured at 256/15 (or the older 512/128 at 8×8). Annotate those rows with their protocol so no thesis reader compares a 256/15 number against a 1024/30 number and reads the difference as an architecture effect. If R1b shows the protocol was the dominant factor all along, this annotation becomes the single most important caveat in the table.
+
+**Est. time**: 0.5 day.
+
+---
+
+### Task R6: SPSA for depth-3/4 training (this is Task 1.5, restated with a realistic budget)
+
+Unchanged in substance from Section 3, Task 1.5, but **its priority is now established rather than discretionary**: CLEVR images are 480×320. Downsampled to 16×16 an object occupies a handful of pixels, at which point `material` (rubber vs. metal — essentially specular-highlight detection) and `size` are close to unlearnable. The Step 2 pass criterion in `quantum_implementation_plan.md` (>80% on all 4 attribute heads) is **not reachable at 16×16**. So either R6 lands and CLEVR runs at 32×32, or the CLEVR task definition must be revised down (see the decision gate below).
+
+**Correction to the cost estimate.** The roadmap currently projects "~56.7s/step → ~0.2s/step (~250x speedup)". That compares a full parameter-shift gradient against 2 SPSA circuit evaluations for **one sample**, and is optimistic on two counts: (a) a real training step uses a batch — at depth-3's 0.13s forward pass, a batch of 32 costs ~8s/step, not 0.2s; (b) SPSA gradients are much noisier than exact ones and need substantially more steps to converge. Budget the actual wall-clock cost of a full training run before committing, and report convergence quality (not just per-step speed) versus a parameter-shift reference run at depth-2 where both are affordable.
+
+**Est. time**: 1 day for the estimator + a short depth-3 convergence check; add 0.5–1 day if a full depth-3 training run is needed to establish the CLEVR resolution.
+
+---
+
+### Decision Gate: when is the theory phase closed and CLEVR ready to start?
+
+Proceed to Phase 2 when **all** of the following hold:
+
+1. ✅ **R1 acceptance criterion met (2026-07-27)** — 78.75 ± 7.2% mean val accuracy over 5 seeds at 16×16 (`readout=root_multi_pauli`, `encoding=multi_axis`, 1024 train / 30 epochs), i.e. the model demonstrably binds both attributes rather than sitting near the 50% shortcut ceiling. Note: this required the capacity-fallback protocol, not the original 256/15 one — carry 1024/30 forward into R2/R3. ✅ **R1b completed 2026-07-28 — gate item 1 fully closed.** The control (`scalar`/`scalar_ry` at 1024/30) reached only `62.5 ± 6.9`, confirming the readout was genuinely binding; architecture of record unchanged.
+2. **R2 done** — the architecture of record and the code agree, in writing.
+3. **R3a and R3b done at 10 seeds** — every verdict carried into CLEVR is either re-validated or explicitly flipped, with the seed variance reported alongside.
+4. **R4 done** — a classical control exists on at least the synthetic-shapes benchmark, so CLEVR numbers will be interpretable when they arrive.
+5. **R5 done** — no known internal contradictions left in the log.
+6. **R6 resolved one way or the other** — either 32×32 training is practical, or the CLEVR task is explicitly re-scoped (e.g. drop `material`, keep `color`/`shape`/`size`, and state in the thesis that resolution, not architecture, is the limiting factor). **Do not silently run CLEVR at 16×16 against an >80%-on-4-heads pass criterion that resolution cannot support.**
+
+**Guidance for CLEVR execution once the gate is passed** (recorded here so it is not re-litigated):
+- **Noiseless simulation is the primary experiment** — this is where the architectural claim lives. `default.tensor(method='tn')` + SPSA at 32×32.
+- **A matched classical CP-TTN on identical CLEVR data is a mandatory control, not a substitute.** 80% on 4 heads means nothing in isolation: unimpressive if a small classical TTN gets 98%, genuinely interesting if it gets 82%.
+- **Noisy emulation is a scoped side study, not the main line.** `default.mixed` is $O(4^N)$ — a genuine 16-qubit noisy circuit needs ~68GB and was already confirmed OOM (2026-07-27, Part A). A depth-3 CLEVR model cannot be emulated. Run noise on a deliberately reduced 4–8 qubit CLEVR proxy and label it as a proxy in the writeup. Any noise-robustness claim needs ~10-seed averaging.
+- **Re-open Question C.2 as part of the relational task.** Whether explicit positional encoding helps *relational* reasoning is the one place the spatial ancilla could earn its keep, and the current "do not use" rule was decided on single-object classification, which structurally cannot test it.
+
+**Total Phase 1.5 estimate**: 4–6 days (R1 0.5–1, R2 0.5, R3 1–1.5, R4 1–2, R5 0.5, R6 1–2).
+
+---
+
+## 8. Phase 1.6 — Purge, Regenerate & Re-examine (added 2026-07-28)
+
+**Why this section exists.** R1b, R2 and R4 established the architecture of record and, in doing so, confirmed that a large fraction of this project's figures and stated conclusions were produced by a model that is not the one going forward. Rather than patch case by case, this phase does a single controlled pass: freeze the current state, triage every artifact, consolidate the code, regenerate what still matters, and re-examine the assumptions that survived unexamined.
+
+### 8.0 Governing principle: supersede and archive, do NOT erase
+
+This is a deliberate departure from a literal "purge", and it is not negotiable for thesis integrity:
+
+* **The research log is a lab notebook.** Rewriting history in it destroys the property that makes it credible. If an examiner asks "how do you know the current numbers are right?", the strongest answer is "here is the audit that found the error, here is exactly what it invalidated, here is the re-run." Delete that and you are left with unexplained numbers that silently changed.
+* **Some superseded results are themselves findings.** The mixed-channel retraction (2026-07-26) is a real methodological lesson about single-seed noise sweeps, and it only exists because the flawed run is on record.
+* **Superseded scripts are the reproduction record** for logged results. They move to `deprecated/` with a status README; they are not deleted.
+
+What *is* purged: the **authority** of bad results. Every superseded artifact gets an explicit status marker so it cannot be silently reused. Nothing is quietly removed and nothing is quietly kept.
+
+### 8.1 Gate
+
+**Do not start Phase B until R3 completes.** R3 determines whether the residual and spatial-ancilla rules stand, which determines what the regenerated figures claim. Purging first means doing it twice. Phase A is safe to run immediately.
+
+---
+
+### Phase A — Freeze (30 min)
+
+Commit the current working tree and tag it **`phase16-pre-purge`**. This makes every subsequent move reversible and gives the audit a fixed reference point to diff against. Do this **before** anything is moved or deleted.
+
+(Tag named for the purge, not the remediation: the R1–R4 remediation work is already on disk and part of what gets frozen. `git diff phase16-pre-purge` then shows exactly what Phase C/D changed.)
+
+**Done 2026-07-28** — commit `chore(phase1.6): freeze pre-purge state`, tag `phase16-pre-purge`.
+
+---
+
+### Phase B — Artifact triage (half day)
+
+Every figure gets exactly one disposition. Rationale for each is in `research_log.md` 2026-07-28 (figure audit).
+
+**Note (verified 2026-07-28): the PennyLane `default.mixed` broadcasting bug does NOT affect any existing figure.** Both scripts that could have hit it already evaluate noise sample-by-sample with a comment naming the bug (`benchmark_encodings_ansatze.py:253`, `compare_topologies.py:164`). That knowledge existed on 2026-07-17 but never reached the log and never propagated to the July-26 scripts — which is itself the strongest argument for Phase C's consolidation.
+
+#### KEEP — no classifier head involved, data valid as-is
+| Fig | File | Note |
+|---|---|---|
+| 1 | `fidelity_distributions.png` | 4-qubit node, random rotations. |
+| 6 | `barren_plateau_scaling.png` | **Caption fix only** — "empirical BP immunity proof" overstates 4 points at N≤20 against an asymptotic strawman. Reframe as consistent with known TTN theory. |
+| 7 | `topology_barren_plateaus.png` | Separate `dev_bp` path (`compare_topologies.py:190`), no head. Same caption fix. |
+| 17 | `entropy_vs_tree_depth.png` | Random weights, structural entropy. |
+| 18 | `entropy_propagation_vs_noise.png` | Ceiling-effect confound already documented; keep that caveat. |
+
+#### KEEP + CAVEAT — usable once annotated
+| Fig | File | Required annotation |
+|---|---|---|
+| 2 | `training_metrics.png` | 4-dim readout, so not bottlenecked. Valid as "gradients flow, it converges"; **not** valid for accuracy claims (256/15 protocol superseded). |
+| 3 | `noise_tolerance_curve.png` | Reconcile $p_{crit}$ definition against Fig 4 (R5.1) **before** citing either. |
+| 4 | `encoding_ansatz_sweep.png` | One seed per config across 12 configs. R2 supersedes the conclusion: encoding resolved, ansatz choice not. |
+| 5 | `representation_bias_results.png` | Data fine; the "proves the QTTN learns spatial representations" claim needs the R4 classical control alongside it. |
+
+#### REGENERATE
+| Fig | File | Produced by |
+|---|---|---|
+| 9–12, 15, 16 | `quantum_residual_*`, `ancilla_residual_*`, `spatial_ancilla_*` | R3 (already running) |
+| 13, 14 | `mixed_channel_extended_seeds_*` | Superseded by R3's 58-seed arms; the *methodological* lesson survives in text and needs no figure. |
+| 19 | `noise_scheduling_training.png` | Re-run on the architecture of record — Question F's premise is suspect (see 8.5). |
+
+#### RETIRE — do not regenerate
+| Fig | File | Why |
+|---|---|---|
+| 8 | `topology_noise_resilience.png` | The QTTN-vs-MERA decision rests on **contraction complexity** (Section 5), a scaling argument independent of accuracy. Regenerating a comparison whose QTTN arm scored 42.2% — below the 50% single-attribute ceiling — to re-derive a conclusion already held on other grounds is wasted effort. Retire the accuracy claim; keep the complexity argument. |
+
+---
+
+### Phase C — Code consolidation (1 day)
+
+1. **Single model path.** Everything routes through `qttn_core.HierarchicalQTTNClassifier` and `phase15_common`. No experiment script may define its own model class — that drift is precisely what let the scalar-readout regression and the un-propagated PennyLane workaround both go unnoticed across four files.
+2. **Move to `deprecated/`** (with a README naming what each produced and what supersedes it): `investigate_quantum_residuals.py`, `investigate_ancilla_residuals.py`, `investigate_mixed_channel_seeds.py`, `investigate_spatial_ancilla.py`, `hybrid_trainer.py`. Retain — do not delete — since they reproduce logged results.
+3. **Regression tests** (`test_qttn_core.py`), each targeting a failure this project actually hit:
+   * **p→0 identity**: depolarizing at p=0 is exactly the identity, so noisy must equal clean to ~1e-15. Catches the `default.mixed` broadcasting bug class in any framework.
+   * **Readout width**: assert the classifier's readout dimension matches the configured `readout`, so a `Linear(1,4)` bottleneck cannot reappear silently.
+   * **Chance-level guard**: fail loudly when any arm lands within a few points of 25%, rather than reporting it as a result (this is what would have caught R4's dead classical baseline immediately).
+   * **Batched-vs-rowwise agreement** on the noisy path.
+
+---
+
+### Phase D — Regenerate figures (1 day)
+
+A single `make_figures.py` producing every thesis figure from the current architecture with consistent seeds, protocol and styling.
+
+**Non-negotiable: every accuracy figure carries the MLP reference line.** That control is what converts "our model scores X%" into an interpretable statement, and its absence is exactly what let R4's classical baseline sit at chance level unnoticed. Any figure comparing architectures without a classical reference is not publishable in this project.
+
+---
+
+### Phase E — Document reconciliation (half day)
+
+Status markers on every log entry and figure reference; the figure-status table; and these framing corrections:
+* Barren-plateau claim rescoped (Figs 6, 7).
+* $p_{crit}$ definitions reconciled (Figs 3, 4).
+* Question F's premise re-examined (8.5).
+* R4's result stated correctly: **at matched parameter count the quantum tower is competitive with a classical MLP** (79.0 ± 8.7 vs 70.5 ± 18.1, difference inside the 8.9-pt limit); it loses only when the MLP is given ~5× the parameters (96.0 ± 1.5, +17.0 pts, resolved). The defensible thesis claim is **parameter efficiency**, not raw accuracy.
+* **Question A.3 remains open and is NOT answered by R4** — `CPQuadRankLayer` scored 33.9% against the MLP's 96.0% (+62.1 pts, limit 5.5), so the CP node, not classical computation, is what underperforms. The quantum-vs-CP gap is a baseline artifact and must not be cited as quantum advantage.
+
+---
+
+### 8.5 Assumptions to re-examine
+
+Carried unexamined until now; each needs an explicit position in the thesis.
+
+1. **The purely-quantum scope rule is in tension with the project's own data.** R2 measured that widening the classical patch encoder from `Linear(48,1)` to `Linear(48,3)` bought **+12.6 pts** — a larger effect than any quantum architectural change measured anywhere in this investigation. Meanwhile Question B.3 was closed *on principle* because a `Linear(16,4)` constituted "classical capacity substituting for quantum work". The classical encoder is demonstrably doing more measurable work than the quantum topology. This needs a stated, defended position — either a quantitative boundary for what counts as minimal I/O (R5.4), or an acknowledgement that encoder width is a genuine architectural variable — not a rule inherited without scrutiny.
+2. **Question F's founding observation** (eval-time noise improving accuracy) most likely came from a `Linear(1,4)` readout sliding samples across a 1-D decision partition as expectation values contract toward zero. Re-test on the architecture of record; if the effect vanishes, close Question F outright rather than leaving it "open but deprioritized".
+3. **Noise emulation at 4–8 qubits is assumed to generalize to the 16-qubit model.** Never tested, and untestable directly — `default.mixed` is $O(4^N)$ and a genuine 16-qubit noisy circuit needs ~68GB (confirmed OOM, 2026-07-27). State it as a standing assumption in the noise chapter rather than leaving it implicit.
+4. **16×16 as the architectural ceiling** — resolved or not by R6/SPSA; gates the CLEVR resolution decision.
+5. **Benchmark discriminability is adequate** (revised 2026-07-28): an earlier concern that synthetic shapes might be saturated does **not** hold up — the MLP reaches 96.0% while the quantum tower sits at 79.0%, leaving ample headroom. The real constraint is per-run variance (±8.7), which the 58-seed protocol already accommodates. Synthetic shapes remains usable; no benchmark change needed.
+
+**Total Phase 1.6 estimate**: ~3–4 days after R3 lands.
