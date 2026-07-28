@@ -61,6 +61,10 @@ Key design decisions:
 
 > **NOTE — Classical Hybrid Shortcuts:** This project's direction is a purely quantum implementation. Do **not** insert classical components inside the core quantum pipeline to substitute for quantum circuit capacity — e.g. a classical compression layer before a variational circuit to reduce the qubit width it would otherwise need (`qnlp/image_tower/classification/quantum/hybrid_trainer.py`'s `Linear(16,4)` before a 4-qubit VQC is the rejected example; that file is deprecated as an architecture direction, 2026-07-26). Qubit-budget problems should be solved by genuinely quantum means (active qubit recycling, tensor-network simulators), not by offloading work to classical layers. The only classical components that belong in these models are the unavoidable I/O boundary: encoding raw pixel/token data into rotation angles at the start, and projecting measured expectation values into class logits or an embedding space at the end — both are necessary interfaces, not research targets, and should stay as minimal as possible (a single `Linear` layer, no additional capacity). Do not propose experiments that tune, grow, or characterize these boundary layers as though they were part of the quantum architecture question; close such proposals on principle rather than running them. See `llm/quantum_investigation_roadmap.md` Section 6 (backlog items 5 and 7, both closed 2026-07-26) for the specific questions this ruled out.
 
+> **⚠️ CODE AUDIT #2 (2026-07-28) — the trained model is not a coherent quantum tree.** Every `QuantumNode` builds its own 4-qubit device; level-1 nodes return a single `⟨Z⟩` and those **classical scalars** are re-encoded as rotation angles into a separate root circuit. There is **zero entanglement across tree levels**, and the inter-level bond is one real scalar rather than the $\chi=2$ qubit the design specifies. The coherent version exists (`train_synthetic_shapes.py`, 2026-07-17, one 16-qubit device, survivors passed as qubits) and was replaced undocumented — the same regression pattern as the scalar readout. **Task R7 ports back to it.** Until then, results describe a quantum-node/classical-wiring hybrid, and "quantum native throughout" is true of the design but not of what has been trained. The node-level ablations below stand as node-level results; they are not tree-level results until re-checked on the coherent tree.
+>
+> **⚠️ SCOPE (2026-07-28): the project proceeds NOISELESS ONLY.** Noise work is limited to one close-out sweep (Task R8) on the coherent base model. Phase 3 (ZNE/Mitiq, optimizer-under-noise, CLEVR noise calibration) is closed out of scope, and CLEVR is run without noisy emulation. Standing limitation to state in the thesis: all noise results characterise a single 4–5 qubit node, not the tree, because `default.mixed` is $O(4^N)$ and a 16-qubit noisy circuit needs ~68GB.
+>
 > **✅ NOTE STATUS UPDATE (2026-07-28): the residual and positional-encoding rules are RE-VALIDATED and binding again.** They were downgraded to provisional on 2026-07-27 after a code audit found every supporting experiment ran through a scalar-readout bottleneck (`nn.Linear(1, 4)` — the whole image compressed to one number, all results pinned in a `50–57%` band against the `50.0%` single-attribute shortcut ceiling). Task R3 re-ran them at the architecture of record with 30 seeds:
 >
 > * **Residuals**: `mixed_channel` `−10.9` pts vs baseline (limit `4.7`) — rejection confirmed on positive evidence. `reupload` `+1.5` (limit `3.8`) — a true null; state it as "no demonstrated benefit at effects ≥ 3.8 pts", **not** as harmful.
@@ -113,7 +117,7 @@ Each row has per-object attribute arrays (`color`, `shape`, `material`, `size`, 
 **Pass criteria:** All 4 attribute heads reach >80% accuracy in simulation.
 
 - Stage 1 — Simulation: all 4 attribute heads converge; per-attribute accuracy >80%
-- Stage 2 — Emulation: identify which attributes degrade fastest under noise; use to guide circuit depth decisions
+- ~~Stage 2 — Emulation~~ — **removed 2026-07-28**: CLEVR is run noiseless (scope decision). See `quantum_investigation_roadmap.md` Task R8.
 
 ---
 
@@ -139,7 +143,7 @@ def get_spatial_relation(obj_a_coords, obj_b_coords):
 **Pass criteria:** Spatial relation accuracy significantly above chance (>60%) in simulation.
 
 - Stage 1 — Simulation: spatial relation head learns; object attribute accuracy maintained from Step 2
-- Stage 2 — Emulation: measure which TTN levels are most noise-sensitive for relational vs. attribute tasks
+- ~~Stage 2 — Emulation~~ — **removed 2026-07-28**: CLEVR is run noiseless (scope decision).
 
 ---
 

@@ -97,14 +97,16 @@ These core research questions form the scientific contribution of your thesis. E
   1. **Gradient Variance Scaling**: Measure the variance of the gradients $\text{Var}[\partial_{\theta} \mathcal{L}]$ empirically as a function of the number of image patches (tree depth) and qubits per patch. Verify if the variance decreases polynomially $\mathcal{O}(1/\text{Poly}(N))$ or exponentially $\mathcal{O}(2^{-N})$.
   2. ~~**Effect of Final Classical Head**~~ — **CLOSED 2026-07-26, rejected on principle (no experiment run).** This asks whether *tuning* the classical readout layer improves quantum trainability — a hybrid-architecture optimization question, not a purely-quantum one. The minimal classical head (measurement → class logits) stays as an unavoidable I/O boundary since some classical decision layer is required for any classifier, but it is not a research target for further investigation.
 
-### Question E: Noise Sensitivity and Quantum Error Mitigation
+### Question E: Noise Sensitivity and Quantum Error Mitigation — ❌ CLOSED 2026-07-28 (scope decision)
+> Closed with the evidence already collected. E.1 (logarithmic noise resilience) and E.3 (error-mitigation overhead) are not pursued; E.2 remains a partial answer with its ceiling-effect confound. Task R8 provides one close-out sweep. All noise results characterise a single 4–5 qubit node, not the tree — a limitation to state, not fix.
 * **Context**: Because information is pooled hierarchically, a leaf qubit only undergoes a few gates before being measured or traced out. The maximum gate depth per qubit scales logarithmically: $\mathcal{O}(\log_4(N_{patches}))$.
 * **Research Focus**:
   1. **Logarithmic Noise Resilience**: Does this logarithmic gate depth make the QTTN more resilient to depolarizing and amplitude damping noise than flat VQCs of comparable width?
   2. ~~**Entropy Propagation via Partial Trace**: How does noise propagate through the partial trace/pooling operations? Does discarding qubits "wash away" noise, or does it propagate mixed-state entropy to the root of the tree?~~ — **Done 2026-07-27**, [investigate_noise_regularization.py](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/investigate_noise_regularization.py), full writeup in `research_log.md`. Partial answer only: the entropy gap between level-1 and root narrows with noise (consistent with washing away), but this is confounded by root already sitting close to the $\ln(2)$ ceiling (less room to grow regardless of propagation). Not a clean result — would need a design keeping both levels similarly far from saturation to answer definitively.
   3. **Error Mitigation Overhead**: Implement Zero-Noise Extrapolation (ZNE) and Readout Error Mitigation. Measure how much classical accuracy is recovered on emulated IBM noise backends, and quantify the classical sampling overhead (number of shots) required.
 
-### Question F: Depolarizing Noise as Implicit Regularization — CLOSED (scheduling sub-question) 2026-07-27
+### Question F: Depolarizing Noise as Implicit Regularization — ❌ FULLY CLOSED 2026-07-28
+> The scheduling sub-question already had a clean negative result (below). Sub-question 1 (mechanism) is now closed too, under the noise scope decision: the eval-time effect is recorded as an observation with a probable mechanism (expectation values contracting toward zero, which can move samples across a decision boundary) and is folded into Task R8's close-out sweep rather than investigated separately.
 * **Context (added 2026-07-26, promoted from an informal Section 5 note)**: Test accuracy on under-trained QTTN models has twice been observed to *improve* under depolarizing noise rather than degrade — clean `42.2%` $\to$ noisy `53.9%` at $p=0.10$ in the topology benchmark, and clean `85.9%` $\to$ `91.4%` at $p=0.005$ in the synthetic-shapes noise sweep (see Experiment & Metrics Record). This is distinct from Question E's noise-*tolerance* framing — E asks how much accuracy survives noise; F asks why noise sometimes makes the model *better*.
 * **Verdict (sub-question 2, scheduling)**: **No — training under noise does not act as a trainable regularizer.** Tested directly (2026-07-27, [investigate_noise_regularization.py](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/investigate_noise_regularization.py), 5 seeds, always evaluated clean): final clean accuracy was `55.0% ± 3.5` (noiseless-trained) vs. `54.1% ± 5.0` for both `p=0.02` and `p=0.05` trained variants — noisy training is mildly *worse*, not better, monotonically across both noise levels tested. **The eval-time noise-improves-accuracy effect and "noise as a trainable regularizer" are different phenomena that only superficially resemble each other** — the project has solid repeated evidence for the former, but the classical-dropout analogy the latter implied does not hold up.
 * **Research Focus**:
@@ -145,7 +147,11 @@ These core research questions form the scientific contribution of your thesis. E
   - Filter to scenes with exactly two objects. Derive the relative spatial relation (left/right/front/behind) using their 3D coordinates.
   - Train the model to predict this relation, validating whether the hierarchical tree encodes spatial coordinates.
 
-### Phase 3: Noisy Emulation & Mitigation Benchmarks (Milestone 3)
+### Phase 3: Noisy Emulation & Mitigation Benchmarks (Milestone 3) — ❌ CLOSED OUT OF SCOPE 2026-07-28
+
+> **All three tasks below are closed without further experiments.** Per the scope decision of 2026-07-28 (`research_log.md`), the project proceeds on **noiseless simulation only**. Noise is not the thesis contribution; the existing depolarizing sweeps are sufficient to characterise tolerance, and Task **R8** provides a single close-out sweep on the coherent base model. Tasks 3.1 (CLEVR noise calibration), 3.2 (ZNE/Mitiq) and 3.3 (optimizer-under-noise comparison) are **not** to be executed. Section 6 backlog item 1 is closed by this decision, and item 18 (Qiskit cross-check) is dropped.
+>
+> **Standing limitation for the thesis**: noisy simulation was capped at 4–5 qubits throughout by the $O(4^N)$ density-matrix cost, so all noise results characterise a single quantum node rather than the full tree. State this; do not fix it.
 > **⚠️ CHECKBOX DISCREPANCY (flagged 2026-07-26, not yet resolved)**: These three tasks were previously marked `[x]` complete with no corresponding log entries — an audit found no ZNE, Mitiq, or SPSA-vs-parameter-shift-vs-backprop comparison anywhere in `research_log.md`. Corrected to `[ ]` below to reflect actual state. See Section 6 backlog item 1. **CLEVR-relevant partial coverage exists elsewhere**: Task 3.1's noise-sweep goal is substantially covered by the many depolarizing noise sweeps run throughout this investigation (topology benchmark, residual/ancilla investigations, entropy-vs-noise) — just not on CLEVR data specifically, which doesn't exist yet. Task 3.2 (ZNE/Mitiq) and Task 3.3 (SPSA vs. parameter-shift vs. backprop convergence comparison, distinct from Task 1.5's SPSA-for-speed motivation) remain genuinely undone.
 - [ ] **Task 3.1**: Calibrate Noisy Emulation.
   - Set up a noisy backend simulator (`default.mixed` or Qiskit's noise model mimicking an IBM device).
@@ -248,7 +254,7 @@ Cross-checking this roadmap and `quantum_implementation_plan.md` against `resear
 
 | # | Item | Source | Status | Est. time |
 |---|---|---|---|---|
-| 1 | **Phase 3 checkbox discrepancy**: ZNE, readout error mitigation (Mitiq), SPSA vs. parameter-shift vs. backprop comparison | Roadmap Phase 3 (marked `[x]` but unlogged) | Not actually done — checkboxes need real experiments or to be unchecked | 2–3 days (new Mitiq dependency + calibration) |
+| 1 | ~~Phase 3: ZNE, readout error mitigation (Mitiq), optimizer-under-noise comparison~~ | Roadmap Phase 3 | **CLOSED OUT OF SCOPE 2026-07-28** — project proceeds noiseless only. No experiments required; the checkboxes are resolved by the scope decision rather than by execution. | — |
 | 2 | ~~Question A.2: Entanglement entropy vs. classical TTN area-law~~ | Question A | **Done 2026-07-26** — bound match is architecturally guaranteed (single-qubit bottleneck); real finding is entropy saturating the bound more with depth (72.7%→89.7%, depth 1→2). See results above. | — |
 | 3 | **Question A.3**: Does the unitary constraint limit expressibility vs. unconstrained classical CP factors? | Question A | **ATTEMPTED 2026-07-28 (R4), NOT ANSWERED.** The classical CP baseline scored `33.9%` against an MLP's `96.0%` — the CP node is broken, so the quantum-vs-CP gap is an artifact and must not be cited. Needs a classical TTN competitive with the MLP reference before the question can be posed. | 1–2 days (fix or replace the CP baseline first) |
 | 4 | ~~Question B.1 / Task 1.4: Tensor-network simulator device benchmark~~ | Question B / Task 1.1b, 1.4 | **Done 2026-07-26** — forward pass works at 32×32 (0.13s) and 64×64 (1.2s) via `default.tensor(method='tn')`; gradients correct but slow (56.7s/step at depth-3). Training-cost fix is item 14 (SPSA, Task 1.5). | — |
@@ -267,8 +273,10 @@ Cross-checking this roadmap and `quantum_implementation_plan.md` against `resear
 
 | 15 | **Question C.2**: does explicit positional encoding help *relational* tasks? | Question C | **PROMOTED to REQUIRED 2026-07-28.** R3's `−19.5` ancilla result comes from a translation-invariant task where position barely affects the label, so it says nothing about relational reasoning. CLEVR's left/right/front/behind task is the only discriminating test. Run with and without the ancilla. | folded into Phase 2 |
 | 16 | **Classical controls for every CLEVR accuracy claim** | R4 (new) | **REQUIRED 2026-07-28.** R4 showed a quantum-vs-classical claim is uninterpretable without a matched-parameter classical reference, and that a broken baseline can manufacture a 57.8-pt fake result. Build controls in from day one. | folded into Phase 2 |
-| 17 | **Position on the purely-quantum scope rule** | §8.5 item 1 (new) | **OPEN.** R2 measured that widening the *classical* encoder bought `+12.6` pts — more than any quantum architectural effect measured in this project — while Question B.3 was closed on principle for being "classical capacity substituting for quantum work". Needs a stated, defended position. | 0.5 day (writing, not experiment) |
-| 18 | **Qiskit Aer cross-check of the noise chapter** | PennyLane bug (new) | **RECOMMENDED, not blocking.** A second independent implementation agreeing on a few small noise sweeps is strong validation after a silent-corruption bug, and it sets up the un-run Task 3.2 (ZNE/Mitiq), which wants Qiskit anyway. | 1 day |
+| 19 | **Task R7: port to the coherent quantum tree** | Code Audit #2 (new) | **BLOCKING, added 2026-07-28.** The trained model measures and re-encodes between levels, so it has zero inter-level entanglement and is a quantum-node/classical-wiring hybrid, not a quantum TTN. Must be fixed before figures are regenerated. | 1 day |
+| 20 | **Task R8: noise close-out** | Scope decision (new) | One sweep on the coherent base model, then the noise track closes. | 0.5 day |
+| 17 | **Position on the purely-quantum scope rule** | §8.5 item 1 (new) | **OPEN, and sharpened by Code Audit #2** — the hybrid tree was a larger violation of the same rule than anything Question B.3 rejected. R2 measured that widening the *classical* encoder bought `+12.6` pts — more than any quantum architectural effect measured in this project — while Question B.3 was closed on principle for being "classical capacity substituting for quantum work". Needs a stated, defended position. | 0.5 day (writing, not experiment) |
+| 18 | ~~Qiskit Aer cross-check of the noise chapter~~ | PennyLane bug | **DROPPED 2026-07-28** — proposed to validate the noise chapter after the silent-corruption bug; with the noise track closed the motivation goes with it. The `default.mixed` bug is downgraded to a documented curiosity: the workaround and its regression test stay, but nothing on the forward path uses that device. | — |
 
 **Total backlog**: roughly 2–5 days of remaining work (items 2, 4, 5, 6, 7, 8, 9, 10, 11, 12 are done or closed; item 13 deprioritized). Remaining open items: item 1 (Phase 3 checkbox discrepancy — ZNE/Mitiq/optimizer comparison, 2-3 days, discretionary), item 3 (Question A.3, expressibility, 1-2 days), and item 14 (SPSA for depth-3/4 training, 1 day — only needed if CLEVR will use images larger than 16×16; otherwise park it as documented-but-not-executed infrastructure and proceed to CLEVR at the validated 16×16 size). **Any future backlog item that proposes adding or tuning a classical component inside the core quantum pipeline (compression heads, hybrid readouts, classical-bypass shortcuts) should be closed on principle without running an experiment** — the project direction is a purely quantum implementation; only the unavoidable classical I/O boundary (pixel-to-angle encoding in, class logits out) is exempt. **None of the five quantum-native residual methods tested show a robustly-confirmed win**, and the spatial ancilla is confirmed unnecessary — if either line is revisited, it should start from a fresh hypothesis rather than re-attempting to rescue a mechanism whose apparent benefit didn't survive a larger sample.
 
@@ -466,6 +474,40 @@ This is simultaneously **Question A.3** (does the unitary constraint $U^\dagger 
 
 ---
 
+### Task R7 (BLOCKING, added 2026-07-28): Port to the coherent quantum tree
+
+**Problem.** The trained model is not a coherent quantum tree. Every `QuantumNode` builds **its own 4-qubit device** (`qttn_core.py:229`); level-1 nodes return a single `⟨Z⟩` each, and those four **classical scalars** are re-encoded as `RY` angles into a *separate* root circuit (`qttn_core.py:214-218`). The tree measures at every level, so there is **zero entanglement across tree levels**, and the inter-level bond is one real scalar — narrower than the $\chi=2$ single qubit the design specifies. Full writeup: `research_log.md` 2026-07-28 "Code Audit #2".
+
+**The coherent version already exists**: `train_synthetic_shapes.py` (2026-07-17) — one 16-qubit device, level-1 unitaries on wires `[0-3] [4-7] [8-11] [12-15]`, level-2 applied **directly to the survivors** `[0, 4, 8, 12]`, measured only at the end. It reached `75.0%` on the *old* 256/15 protocol. The July-26 scripts replaced it, undocumented — the same regression pattern as the scalar readout.
+
+**Why it happened, and why the reason no longer applies**: `default.mixed` is $O(4^N)$, so a 16-qubit *noisy* circuit needs ~68GB (OOM-confirmed) and every noisy circuit was capped at 4–5 qubits. The hybrid is what permits a "tree" under that cap. But it only ever applied to **noisy** simulation — noiseless 16-qubit statevector is $2^{16}$ amplitudes, trivial, and `default.tensor` runs the coherent tree at 64 and 256 qubits already.
+
+**Deliverable.**
+1. Add a coherent tree to `qttn_core` (single device, all patches encoded together, survivors passed as qubits, measured once at the end), keeping the existing `readout` / `encoding` / `ansatz` / `mode` / `use_ancilla` axes. Use `train_synthetic_shapes.py:50-70` as the reference implementation.
+2. Re-baseline on the protocol of record. **Do not expect the hybrid's numbers to reproduce** — these are different models, not two implementations of one.
+3. Re-run **R3** (4 arms × 30 seeds; ~25 min with the parallel workers) and **R4** (classical control, 21 seeds) on the coherent model. R2's encoding/ansatz choice should carry over but is cheap to confirm.
+4. Add a regression test asserting the tree is coherent — one device for the whole tower, no intermediate `expval` — so this specific regression cannot recur silently. It is the second instance of a coherent design being replaced by a cheaper approximation without a record.
+
+**What carries over and what does not.** The node-level ablations (residuals, spatial ancilla) are mechanisms *within* a node and each node is a genuine 4-qubit VQC, so they stand as **node-level** results — but they are not tree-level results until re-checked here. Question A.2 (entropy saturation) and E.2 (noise propagation) were measured on coherent circuits and describe the coherent model, not the hybrid that was trained.
+
+**Est. time**: 1 day.
+
+---
+
+### Task R8 (added 2026-07-28): Noise close-out
+
+Per the scope decision of 2026-07-28, the project proceeds **noiseless only**. This task is the single close-out experiment, not the start of a noise programme.
+
+**Deliverable.** One depolarizing sweep on the coherent **base** model at the largest coherently-simulable size, covering the standing observation that a small amount of noise sometimes *improves* accuracy (evidence already exists: `42.2% → 53.9%` at p=0.10 in the topology benchmark, `85.9% → 91.4%` at p=0.005 in the synthetic-shapes sweep). Report the degradation curve, answer the small-noise question, close the track.
+
+**Explicitly NOT in scope** — none of these require an experiment to close: quantum trajectories, a Qiskit Aer cross-check, ZNE/Mitiq (Task 3.2), the optimizer-under-noise comparison (Task 3.3), CLEVR noise calibration (Task 3.1), and per-variant noise sweeps.
+
+**Standing limitation to state in the thesis rather than fix**: noisy simulation was capped at 4–5 qubits throughout by the $O(4^N)$ density-matrix cost, so every noise result characterises a **single quantum node**, not the full tree. Whether node-level noise tolerance extends to a deep tree is untested and will remain so.
+
+**Est. time**: 0.5 day.
+
+---
+
 ### Task R5: Documentation and consistency fixes (no experiments)
 
 1. **Resolve the $p_{crit}$ contradiction.** The 2026-07-17 noise sweep reports $p_{crit} \approx 0.05$ for a 4-qubit QTTN on 8×8 shapes; the same-day encoding/ansatz benchmark reports $p_{crit} > 0.200$ for essentially every configuration including same-family ones. Both are in the Experiment & Metrics Record and, as written, contradict each other. Read `emulate_noise_synthetic_shapes.py` and `benchmark_encodings_ansatze.py`, determine each script's actual threshold definition, and annotate both rows in the metrics table with the definition used.
@@ -497,13 +539,15 @@ Proceed to Phase 2 when **all** of the following hold:
 2. ✅ **R2 done (2026-07-28)** — architecture of record pinned in `phase15_common.ARCH`, code and documentation agree, and a regression test fails if it drifts.
 3. ✅ **R3 done (2026-07-28) at 30 seeds** — every verdict re-validated on positive evidence, with the resolution limit reported alongside each. Nothing flipped; two narratives (mixed-channel instability, reupload noise-collapse) were shown to be bottleneck artifacts.
 4. ✅ **R4 done (2026-07-28)** — classical control exists. Outcome: quantum is parameter-competitive, not accuracy-dominant. **Question A.3 remains open** (CP baseline broken). CLEVR must carry matched-parameter classical controls from day one.
-5. **R5 — STILL OPEN.** No known internal contradictions left in the log.
-6. **R6 — STILL OPEN.** Resolved one way or the other — either 32×32 training is practical, or the CLEVR task is explicitly re-scoped (e.g. drop `material`, keep `color`/`shape`/`size`, and state in the thesis that resolution, not architecture, is the limiting factor). **Do not silently run CLEVR at 16×16 against an >80%-on-4-heads pass criterion that resolution cannot support.**
+5. **R7 — STILL OPEN, BLOCKING.** The tower is a coherent quantum tree, re-baselined, with R3 and R4 re-run on it. Until this lands, every result describes a quantum-node/classical-wiring hybrid rather than a quantum TTN.
+6. **R8 — STILL OPEN.** Noise close-out done and the noise track formally closed.
+7. **R5 — STILL OPEN.** No known internal contradictions left in the log.
+8. **R6 — STILL OPEN.** Resolved one way or the other — either 32×32 training is practical, or the CLEVR task is explicitly re-scoped (e.g. drop `material`, keep `color`/`shape`/`size`, and state in the thesis that resolution, not architecture, is the limiting factor). **Do not silently run CLEVR at 16×16 against an >80%-on-4-heads pass criterion that resolution cannot support.**
 
 **Guidance for CLEVR execution once the gate is passed** (recorded here so it is not re-litigated):
 - **Noiseless simulation is the primary experiment** — this is where the architectural claim lives. `default.tensor(method='tn')` + SPSA at 32×32.
 - **A matched classical CP-TTN on identical CLEVR data is a mandatory control, not a substitute.** 80% on 4 heads means nothing in isolation: unimpressive if a small classical TTN gets 98%, genuinely interesting if it gets 82%.
-- **Noisy emulation is a scoped side study, not the main line.** `default.mixed` is $O(4^N)$ — a genuine 16-qubit noisy circuit needs ~68GB and was already confirmed OOM (2026-07-27, Part A). A depth-3 CLEVR model cannot be emulated. Run noise on a deliberately reduced 4–8 qubit CLEVR proxy and label it as a proxy in the writeup. Any noise-robustness claim needs ~10-seed averaging.
+- **No noisy emulation on CLEVR at all** (revised 2026-07-28). The noise track closes with Task R8 on synthetic shapes; CLEVR is run noiseless. This supersedes the earlier plan for a reduced-qubit CLEVR noise proxy.
 - **Re-open Question C.2 as part of the relational task.** Whether explicit positional encoding helps *relational* reasoning is the one place the spatial ancilla could earn its keep, and the current "do not use" rule was decided on single-object classification, which structurally cannot test it.
 
 **Total Phase 1.5 estimate**: 4–6 days (R1 0.5–1, R2 0.5, R3 1–1.5, R4 1–2, R5 0.5, R6 1–2).
@@ -526,7 +570,9 @@ What *is* purged: the **authority** of bad results. Every superseded artifact ge
 
 ### 8.1 Gate
 
-**Do not start Phase B until R3 completes.** R3 determines whether the residual and spatial-ancilla rules stand, which determines what the regenerated figures claim. Purging first means doing it twice. Phase A is safe to run immediately.
+~~**Do not start Phase B until R3 completes.**~~ R3 completed 2026-07-28.
+
+**REVISED GATE (2026-07-28): do not start Phase B until Task R7 completes.** Code Audit #2 found that R1–R4 all ran on a measure-and-re-encode hybrid rather than a coherent quantum tree. Regenerating figures from a model that is about to be replaced would be wasted work, so the figure numbers must come from the coherent model (R7), not from R3-on-the-hybrid. The **triage in Phase B is unaffected** — which figures to keep, regenerate or retire does not change; only the source of the regenerated numbers does. Phase A is complete (tag `phase16-pre-purge`).
 
 ---
 
