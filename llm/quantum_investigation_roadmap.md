@@ -579,6 +579,18 @@ The theory phase is closed and **Phase 2 (CLEVR) is unblocked**. Carry these fou
 
 **Why this section exists.** R1b, R2 and R4 established the architecture of record and, in doing so, confirmed that a large fraction of this project's figures and stated conclusions were produced by a model that is not the one going forward. Rather than patch case by case, this phase does a single controlled pass: freeze the current state, triage every artifact, consolidate the code, regenerate what still matters, and re-examine the assumptions that survived unexamined.
 
+### 8.-1 Phase checklist
+
+| phase | status |
+|---|---|
+| A — Freeze (tag `phase16-pre-purge`) | ✅ done 2026-07-28 |
+| B — Artifact triage | ✅ done 2026-07-28 |
+| C — Code consolidation + archive | ✅ done 2026-07-29 |
+| D — Regenerate figures | ✅ done 2026-07-29 |
+| E — Document reconciliation | ✅ done 2026-07-29 |
+
+*Added after two planned steps (the R7 readout fix, and Phase C itself) were written up as decided and then not executed. Both were caught by the user asking rather than by any process. Mark a phase done only when its artifacts exist on disk.*
+
 ### 8.0 Governing principle: supersede and archive, do NOT erase
 
 This is a deliberate departure from a literal "purge", and it is not negotiable for thesis integrity:
@@ -597,7 +609,7 @@ What *is* purged: the **authority** of bad results. Every superseded artifact ge
 
 ---
 
-### Phase A — Freeze (30 min)
+### ✅ Phase A — Freeze — DONE 2026-07-28
 
 Commit the current working tree and tag it **`phase16-pre-purge`**. This makes every subsequent move reversible and gives the audit a fixed reference point to diff against. Do this **before** anything is moved or deleted.
 
@@ -607,7 +619,9 @@ Commit the current working tree and tag it **`phase16-pre-purge`**. This makes e
 
 ---
 
-### Phase B — Artifact triage (half day)
+### ✅ Phase B — Artifact triage — DONE 2026-07-28 (executed 2026-07-29 in Phase C)
+
+> Triage below is final: **5 KEEP, 4 KEEP+CAVEAT, 10 REGENERATE/ARCHIVE, 1 RETIRE.** Acted on in Phase C — superseded figures moved to `results/superseded/` with a README, and every figure reference in `research_log.md` marked inline.
 
 Every figure gets exactly one disposition. Rationale for each is in `research_log.md` 2026-07-28 (figure audit).
 
