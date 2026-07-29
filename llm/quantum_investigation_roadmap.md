@@ -81,7 +81,7 @@ These core research questions form the scientific contribution of your thesis. E
   2. **Active Qubit Recycling (Mid-Circuit Measurements & Resets)**: In a QTTN, once a block unitary is applied to a 4-patch register and 3 qubits are traced out, those 3 qubits are never used again. If we physically measure and reset them to $|0\rangle$, can we reuse them for the next patch block? How does this reduce the total physical qubit budget (e.g., from 80 qubits down to 8–12 active qubits)? What are the latency and gate error overheads of mid-circuit measurements on current NISQ hardware? — **Validated at depth 2 only (2026-07-17); confirmed NOT to extend to depth 3 for classical simulation purposes (2026-07-26). Still valid as a real-hardware qubit-budget technique.**
   3. ~~**Classical Compression Calibration (Hybrid Setup)**~~ — **CLOSED 2026-07-26, rejected on principle (no experiment run).** [hybrid_trainer.py](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/hybrid_trainer.py)'s classical `Linear(16, 4)` compression before the 4-qubit VQC substitutes classical capacity for quantum circuit width — this is a hybrid-architecture shortcut, not a purely-quantum solution to the qubit wall. The project's stated direction is a purely quantum implementation; qubit-budget problems should be solved via genuinely quantum means (active qubit recycling — sub-question 2, done — or tensor-network simulators — sub-question 1) rather than classical compression. `hybrid_trainer.py` is deprecated as an architecture direction; see `llm/quantum_implementation_plan.md`'s NOTE — Classical Hybrid Shortcuts.
 
-### Question C: Spatial Positional Encoding — Explicit vs. Implicit — PROVISIONAL for sub-questions 1 & 3 (was CLOSED 2026-07-26; downgraded 2026-07-27)
+### Question C: Spatial Positional Encoding — Explicit vs. Implicit — ✅ CLOSED for sub-questions 1 & 3 (re-validated 2026-07-28); **C.2 REQUIRED in CLEVR**
 > **✅ RE-TESTED 2026-07-28 (Task R3), verdict UPHELD and now resolved.** At the architecture of record, 30 seeds: `with_ancilla` `59.9 ± 6.9` vs baseline `79.4 ± 8.0` — **`−19.5` pts against a `3.8`-pt resolution limit.** The July verdict (`52.8 ± 5.7` vs `55.0 ± 3.5` at n=5, inside noise) reached the same conclusion without evidence; this one has it.
 >
 > **⚠️ SCOPE — this must travel with the result and is enforced in `combine_r3.py`.** Do **not** write this up as "positional encoding is harmful". Two limits: (a) the task is translation-invariant single-object classification, where position barely affects the label, so an explicit position mechanism has nothing to contribute and a negative result is close to structurally guaranteed; (b) it tests the **per-quadrant** ancilla (4 positions), not the original **per-patch** design (16). What it licenses: do not use it for this class of task.
@@ -553,7 +553,17 @@ Proceed to Phase 2 when **all** of the following hold:
 5. ✅ **R7 done (2026-07-29).** Coherent tree at `89.3 ± 3.9` (287 params), beating the hybrid by 9.9 pts and the bare classical CP node by 9.7, tying `classical_full` at fewer parameters. Question A.3 answered in the quantum node's favour.
 6. ✅ **R8 dropped (2026-07-28).** No experiment needed: tolerance already characterised at single-node scale, training-under-noise shown not to help, and full-tree emulation infeasible at $O(4^N)$. The noise track is closed by the scope decision, not by a further run.
 7. ✅ **R5 done (2026-07-29).** No known internal contradictions left in the log.
-8. **R6 — STILL OPEN.** Resolved one way or the other — either 32×32 training is practical, or the CLEVR task is explicitly re-scoped (e.g. drop `material`, keep `color`/`shape`/`size`, and state in the thesis that resolution, not architecture, is the limiting factor). **Do not silently run CLEVR at 16×16 against an >80%-on-4-heads pass criterion that resolution cannot support.**
+8. ✅ **R6 deferred into CLEVR (2026-07-29), not blocking.** 16×16 cannot support the ">80% on 4 attribute heads" criterion, but the fix is one question with three options — **bigger patches** (works today, but classical preprocessing rather than quantum scaling), **SPSA** (deeper trees), **higher bond dimension** (principled, needs TN training) — best decided against real CLEVR data rather than in the abstract. **Do not silently run CLEVR at 16×16 against a criterion that resolution cannot support**: pick one of the three, or re-scope the criterion explicitly.
+
+---
+
+## ✅ DECISION GATE PASSED — 2026-07-29
+
+The theory phase is closed and **Phase 2 (CLEVR) is unblocked**. Carry these four requirements, each established by a specific failure in this investigation:
+1. **Matched-parameter classical controls from day one** — R4; a mis-specified baseline once produced a fake 57.8-pt quantum-advantage result.
+2. **Question C.2 run both ways** (with and without the spatial ancilla) on the relational task — R3's `−19.5` came from a position-irrelevant task.
+3. **Noiseless only** — scope decision, 2026-07-28.
+4. **Resolution limit reported with every comparison** — R1b; "no significant difference" without the minimum detectable effect is not a finding.
 
 **Guidance for CLEVR execution once the gate is passed** (recorded here so it is not re-litigated):
 - **Noiseless simulation is the primary experiment** — this is where the architectural claim lives. `default.tensor(method='tn')` + SPSA at 32×32.
