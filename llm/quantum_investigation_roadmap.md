@@ -635,7 +635,14 @@ Every figure gets exactly one disposition. Rationale for each is in `research_lo
 
 ---
 
-### Phase D — Regenerate figures (1 day)
+### ✅ Phase D — Regenerate figures — DONE 2026-07-29
+
+> `make_figures.py` produces all regenerated figures from current results, with consistent styling and provenance stated in every caption. Three figures written to `results/figures/`:
+> * **`model_comparison.png`** — the headline. Accuracy and accuracy-per-parameter for all six models, with chance, the single-attribute ceiling, and the MLP reference marked.
+> * **`ablations_and_noise.png`** — R3's node-level ablations and noise sweeps, captioned explicitly as **hybrid** data, since `mixed_channel` and the ancilla were deliberately not ported to the coherent tree.
+> * **`readout_bottleneck.png`** — the R7 readout finding (34.1 / 35.6 / 78.4), with the explanation that the gap is not "more numbers" but a one-qubit marginal.
+>
+> The MLP reference line is enforced in code, not left to discipline. Figures 6/7's caption rescoping and the $p_{crit}$ reconciliation remain part of R5 (they are edits to retained figures, not regenerations).
 
 A single `make_figures.py` producing every thesis figure from the current architecture with consistent seeds, protocol and styling.
 
