@@ -716,6 +716,22 @@ Prompted by whether the wide readout survives deeper trees. Analysis, not experi
 * **Where each is affordable**: hardware with recycling — yes ($k=2$ is ~8-qubit nodes, ~14 physical qubits at depth 2). Tensor-network simulation — yes ($\chi=4$ is a small bond). **Statevector training — no**: $k=2$ at 16 patches is 32 qubits, past the ~29-qubit wall on 18 GB. This is the same wall as depth-3, reached from a different direction.
 * **Framing for the thesis**: $\chi = 1$ qubit is a **simulation-driven constraint, not a design preference**. The capacity limit is measured (entropy saturates its ceiling; relieving it at the readout is worth 43 points), the principled fix is identified, and its cost is quantified. That is a considerably stronger position than presenting the wide readout as an architectural choice.
 
+### [2026-07-29] Run Attempt: R7 Baseline Invalid (My Bug), R4 Incomplete — but the Corrected Rank Sweep Moved classical_bare Again
+* **R7 baseline: 10 seeds wasted, entirely my error.** `run_r7_coherent` still defaulted to `pc.ARCH` (`root_multi_pauli`) rather than `pc.COHERENT_ARCH` (`top_layer_qubits`). I had identified this one-line fix and flagged it, then handed over run commands without applying it. All 10 seeds reproduced the known-bad configuration: seed 0 `34.1%`, matching the earlier failed pilot exactly. **Fixed**: the script now uses `COHERENT_ARCH` and exposes `--shared-l1`, defaulting to per-block level-1 weights (287 params), which is what both the 2026-07-17 reference and the readout diagnostic used.
+* **R4 coherent: incomplete, also my error.** I quoted "~40 min parallel" but gave a command that runs 21 seeds **sequentially** at ~18 min/seed — about 6 hours. It got through tuning and one quantum seed before stopping, and because R4 had no per-seed checkpointing, nothing was saved. **Fixed**: `--seeds` allows sharding across workers and `--out-suffix` prevents clobbering; every seed now checkpoints.
+* **What the run did establish** — the corrected rank sweep (rank now a free axis) changed `classical_bare` a third time:
+
+  | version of the tuner | winning config | params | score |
+  |---|---|---|---|
+  | rank derived from param match | `bond_dim=8, rank=1` | 308 | `33.9%` |
+  | rank derived, larger budget | `bond_dim=4, rank=2` | 340 | `56.7%` |
+  | **rank swept freely** | **`bond_dim=2, rank=4`** | **428** | **`80.8%`** |
+
+  `classical_full` settled at `lr=0.03, bond_dim=4, rank=2`, 352 params, `90.3%`. Both tuning scores are 3 seeds.
+* **The parameter-efficiency picture is the real finding here.** `classical_bare` only reaches `80.8%` by using **428 parameters — 1.49x the quantum model's 287**, essentially exhausting the 1.5x budget cap. At the quantum model's own parameter count it does considerably worse. So the honest framing of Question A.3 is not "quantum beats classical" but: **the unitarity-constrained quantum node reaches comparable accuracy at roughly two-thirds of the parameters**, which is the same parameter-efficiency claim R4 supported on the hybrid, now on firmer ground.
+* **First coherent quantum data point**: seed 0 scored **`89.1%`** at 30 epochs (per-block weights, `top_layer_qubits`) — above the 15-epoch diagnostic's `78.4%` and above the hybrid's `79.4%`. One seed, so provisional, but it suggests the coherent tree is not merely equal to the hybrid but better, consistent with the pilot's plateau analysis showing it still improving past epoch 15.
+* **Standing caution**: `classical_bare` has now moved `33.9 -> 56.7 -> 80.8` across three tuner revisions, entirely from how the search space was defined. Every one of those numbers was reported at the time as a measurement. **Treat any single tuned baseline as provisional until the search space itself has been sanity-checked** — the MLP reference exists precisely to catch this and would have flagged the first two.
+
 ### [2026-07-28] Next Steps (revised: theory phase closing, scaling questions move to CLEVR)
 The theoretical exploration is being closed. Remaining work is finishing the coherent baseline, writing up, and regenerating figures. **The three "what do we do when 16 statevector qubits isn't enough" questions — bigger patches vs SPSA vs bond dimension — are all deferred into the CLEVR scope**, since they are the same question and CLEVR is where the answer actually matters.
 

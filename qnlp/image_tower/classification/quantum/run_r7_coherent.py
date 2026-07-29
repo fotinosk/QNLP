@@ -55,6 +55,13 @@ def main():
     ap.add_argument("--arm", default="baseline", choices=ARMS)
     ap.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2, 3, 4])
     ap.add_argument("--epochs", type=int, default=pc.PROTOCOL["epochs"])
+    ap.add_argument(
+        "--shared-l1",
+        action="store_true",
+        help="Share level-1 weights across the four blocks (211 params). Default is per-block "
+        "(287 params), which is what train_synthetic_shapes.py used for its 75%% result and what "
+        "the R7 readout diagnostic used.",
+    )
     ap.add_argument("--pilot", action="store_true", help="Report plateau analysis instead of a full comparison.")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
@@ -63,13 +70,18 @@ def main():
     out = args.out or f"r7_{mode}"
     print(
         f"R7 coherent tree | arm={mode} | seeds={args.seeds} | epochs={args.epochs}\n"
-        f"architecture={pc.ARCH} | ~17.5 min/run at 30 epochs",
+        f"architecture={pc.COHERENT_ARCH} | l1_weights={'shared' if args.shared_l1 else 'per-block'}"
+        f" | ~17.5 min/run at 30 epochs",
         flush=True,
     )
 
     curves = []
     for s in args.seeds:
-        curve, model = pc.train_run(lambda: CoherentQTTNClassifier(**pc.ARCH, mode=mode), seed=s, epochs=args.epochs)
+        curve, model = pc.train_run(
+            lambda: CoherentQTTNClassifier(**pc.COHERENT_ARCH, mode=mode, share_level1_weights=args.shared_l1),
+            seed=s,
+            epochs=args.epochs,
+        )
         curves.append(curve)
         score = sum(curve[-pc.SCORE_LAST_K :]) / pc.SCORE_LAST_K
         # Sanity check the tree is still coherent for this trained model, not
@@ -92,7 +104,12 @@ def main():
         curves,
         coherent=True,
         epochs=args.epochs,
-        num_params=sum(p.numel() for p in CoherentQTTNClassifier(**pc.ARCH, mode=mode).parameters()),
+        num_params=sum(
+            p.numel()
+            for p in CoherentQTTNClassifier(
+                **pc.COHERENT_ARCH, mode=mode, share_level1_weights=args.shared_l1
+            ).parameters()
+        ),
     )
     # The chance-level guard is a real failure for a full run, but a 2-3 epoch
     # diagnostic legitimately sits at chance, so warn rather than abort there.
@@ -125,7 +142,16 @@ def main():
         )
         arm["plateau_epochs"] = plateaus
 
-    pc.save({"architecture": pc.ARCH, "coherent": True, "epochs": args.epochs, "arm": arm}, f"{out}_results.json")
+    pc.save(
+        {
+            "architecture": pc.COHERENT_ARCH,
+            "shared_l1": args.shared_l1,
+            "coherent": True,
+            "epochs": args.epochs,
+            "arm": arm,
+        },
+        f"{out}_results.json",
+    )
 
 
 if __name__ == "__main__":

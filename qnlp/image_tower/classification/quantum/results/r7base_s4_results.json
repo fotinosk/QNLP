@@ -1,0 +1,61 @@
+{
+  "architecture": {
+    "readout": "root_multi_pauli",
+    "encoding": "multi_axis",
+    "ansatz": "iqp"
+  },
+  "coherent": true,
+  "epochs": 30,
+  "arm": {
+    "config": "baseline",
+    "n_seeds": 1,
+    "score_per_seed": [
+      34.6875
+    ],
+    "score_mean": 34.6875,
+    "score_std": 0.0,
+    "final_val_acc_per_seed": [
+      39.0625
+    ],
+    "final_val_acc_mean": 39.0625,
+    "final_val_acc_std": 0.0,
+    "peak_val_acc_mean": 42.1875,
+    "val_acc_curves_per_seed": [
+      [
+        25.0,
+        23.4375,
+        37.5,
+        26.5625,
+        32.8125,
+        39.0625,
+        29.6875,
+        31.25,
+        40.625,
+        32.8125,
+        32.8125,
+        32.8125,
+        37.5,
+        37.5,
+        34.375,
+        42.1875,
+        34.375,
+        37.5,
+        31.25,
+        37.5,
+        34.375,
+        39.0625,
+        29.6875,
+        26.5625,
+        32.8125,
+        42.1875,
+        31.25,
+        31.25,
+        29.6875,
+        39.0625
+      ]
+    ],
+    "coherent": true,
+    "epochs": 30,
+    "num_params": 211
+  }
+}

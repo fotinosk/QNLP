@@ -228,6 +228,15 @@ def main():
         help="Run only the classical/MLP arms. Use when the expensive quantum arm is run " "separately, then combine.",
     )
     ap.add_argument(
+        "--seeds",
+        type=int,
+        nargs="+",
+        default=None,
+        help="Explicit seed list, for sharding the expensive quantum arm across parallel workers. "
+        "The full 21-seed quantum arm is ~6h sequential; one seed per worker is ~18 min.",
+    )
+    ap.add_argument("--out-suffix", default="", help="Suffix so parallel workers do not clobber each other.")
+    ap.add_argument(
         "--seeds-per-arm",
         type=int,
         default=21,
@@ -235,7 +244,7 @@ def main():
         "to be much larger than the 2-3 pt intra-quantum effects R3 chases.",
     )
     args = ap.parse_args()
-    seeds = list(range(args.seeds_per_arm))
+    seeds = args.seeds if args.seeds else list(range(args.seeds_per_arm))
 
     if args.coherent:
         arch = pc.COHERENT_ARCH
@@ -309,7 +318,7 @@ def main():
                 "seeds_per_arm": args.seeds_per_arm,
                 "arms": arms,
             },
-            f"r4_classical_only{'_coherent' if args.coherent else ''}.json",
+            f"r4_classical_only{'_coherent' if args.coherent else ''}{args.out_suffix}.json",
         )
         return
     cmps = [
@@ -418,7 +427,7 @@ def main():
             "quantum_vs_mlp": q_vs_mlp,
             "quantum_vs_mlp_param_matched": q_vs_mlp_matched,
         },
-        "r4_classical_control_results.json",
+        f"r4_classical_control_results{'_coherent' if args.coherent else ''}{args.out_suffix}.json",
     )
 
 
