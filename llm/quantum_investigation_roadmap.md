@@ -644,7 +644,13 @@ Every figure gets exactly one disposition. Rationale for each is in `research_lo
 
 ---
 
-### Phase C — Code consolidation (1 day)
+### ✅ Phase C — Code consolidation — DONE 2026-07-29
+
+> **Executed as supersede-and-archive, per §8.0 — nothing deleted.**
+> * **`deprecated/`** holds the six superseded scripts (`investigate_quantum_residuals`, `investigate_ancilla_residuals`, `investigate_mixed_channel_seeds`, `investigate_spatial_ancilla`, `investigate_noise_regularization`, `hybrid_trainer`) with a README stating what each produced and what supersedes it. They are the reproduction record for logged results; deleting them would leave logged numbers unregenerable. Verified no live code imports them.
+> * **`results/superseded/`** holds the ten compromised figures with a README giving the common defect (scalar readout) and each figure's additional problem — Figure 8 retired outright, Figure 12's caption asserting a retracted claim.
+> * **Every figure reference in `research_log.md` now carries an inline status marker** — `[SUPERSEDED — do not use]`, `[RETAINED]`, or `[RETAINED WITH CAVEAT]` — so a compromised figure cannot be pulled into the thesis without seeing its status.
+> * **Regression tests** (`test_qttn_core.py`, 40 tests): p→0 noisy-vs-clean identity, readout width, batched-vs-rowwise agreement, chance-level guard, gradient reachability, tree coherence via Bloch length, ARCH pinning, and refusal of un-ported variants. Each targets a failure this project actually shipped.
 
 1. **Single model path.** Everything routes through `qttn_core.HierarchicalQTTNClassifier` and `phase15_common`. No experiment script may define its own model class — that drift is precisely what let the scalar-readout regression and the un-propagated PennyLane workaround both go unnoticed across four files.
 2. **Move to `deprecated/`** (with a README naming what each produced and what supersedes it): `investigate_quantum_residuals.py`, `investigate_ancilla_residuals.py`, `investigate_mixed_channel_seeds.py`, `investigate_spatial_ancilla.py`, `hybrid_trainer.py`. Retain — do not delete — since they reproduce logged results.

@@ -71,7 +71,7 @@ This log tracks the theoretical derivations, simulation results, noisy emulation
   * Confirmed that a minimum of 3 CNOTs (connecting all child wires directly to the parent wire) is required to achieve $\approx 73\%$ of maximum entropy transfer (`0.5089 / 0.6931`). Adding more CNOTs beyond 3 yields diminishing returns.
 * **Fidelity Distribution Plot**:
   ![Fidelity Distributions](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/fidelity_distributions.png)
-  *Figure 1: Pairwise state fidelity distributions of the 4-qubit node output across different CNOT configurations, compared to the ideal uniform Haar-random distribution (red dashed line). As CNOT density increases, the output qubit is entangled with the child registers and collapses into a mixed state, shifting the fidelity distribution away from the uniform flat profile toward higher overlap (lower pure-state expressibility).*
+  **[RETAINED]** *Figure 1: Pairwise state fidelity distributions of the 4-qubit node output across different CNOT configurations, compared to the ideal uniform Haar-random distribution (red dashed line). As CNOT density increases, the output qubit is entangled with the child registers and collapses into a mixed state, shifting the fidelity distribution away from the uniform flat profile toward higher overlap (lower pure-state expressibility).*
 
 ### [2026-07-17] Completed Experiment: Equivalence & Scaling Validation of Standard vs. Recycled QTTN
 * **Objective**: Implement both a standard 16-qubit QTTN and a recycled 7-qubit QTTN using mid-circuit measurements and resets, verify that their outputs match exactly, and compare their resource scaling (qubits and gate depth).
@@ -120,7 +120,7 @@ This log tracks the theoretical derivations, simulation results, noisy emulation
   * Run Command: `/opt/homebrew/Caskroom/miniconda/base/envs/qnlp/bin/python -u qnlp/image_tower/classification/quantum/train_synthetic_shapes.py`
 * **Training Metrics Plot**:
   ![QTTN Training Metrics](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/training_metrics.png)
-  *Figure 2: Noiseless training curves of the 16-qubit QTTN model on the synthetic shapes dataset over 6 epochs. The left panel shows the steady minimization of the Cross-Entropy loss. The right panel shows training accuracy (green) and validation accuracy (red) climbing and stabilizing around 75%, indicating successful feature learning without overfitting.*
+  **[RETAINED WITH CAVEAT]** *Figure 2: Noiseless training curves of the 16-qubit QTTN model on the synthetic shapes dataset over 6 epochs. The left panel shows the steady minimization of the Cross-Entropy loss. The right panel shows training accuracy (green) and validation accuracy (red) climbing and stabilizing around 75%, indicating successful feature learning without overfitting.*
 
 ### [2026-07-17] Completed Task: Noisy Emulation & Noise Tolerance Sweep on Synthetic Shapes
 * **Objective**: Implement a noisy evaluation script using PennyLane's mixed-state device and depolarizing noise channels, sweep depolarizing noise rates ($p \in [0.0, 0.20]$), and plot the noise tolerance accuracy curve.
@@ -140,7 +140,7 @@ This log tracks the theoretical derivations, simulation results, noisy emulation
   * Run Command: `/opt/homebrew/Caskroom/miniconda/base/envs/qnlp/bin/python -u qnlp/image_tower/classification/quantum/emulate_noise_synthetic_shapes.py`
 * **Noise Tolerance Curve Plot**:
   ![QTTN Noise Tolerance Curve](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/noise_tolerance_curve.png)
-  *Figure 3: Test accuracy of the 4-qubit QTTN model under depolarizing noise channels swept from p = 0.0 to p = 0.20. The red line shows model accuracy, and the blue dashed line represents the 25% random guess baseline. The model maintains high performance up to p = 0.02, demonstrating favorable noise-resilience characteristics.*
+  **[RETAINED WITH CAVEAT]** *Figure 3: Test accuracy of the 4-qubit QTTN model under depolarizing noise channels swept from p = 0.0 to p = 0.20. The red line shows model accuracy, and the blue dashed line represents the 25% random guess baseline. The model maintains high performance up to p = 0.02, demonstrating favorable noise-resilience characteristics.*
 
 ### [2026-07-17] Completed Task: Multi-Dimensional Ansatz & Data Encoding Benchmarks
 * **Objective**: Evaluate 4 data encoding styles (Angle, Multi-Axis, Amplitude, ZZ Feature Map) against 3 ansatz architectures (HEA, IQP, ALT) on the 8x8 synthetic shapes dataset under depolarizing noise sweeps.
@@ -162,7 +162,7 @@ This log tracks the theoretical derivations, simulation results, noisy emulation
   * Run Command: `/opt/homebrew/Caskroom/miniconda/base/envs/qnlp/bin/python -u qnlp/image_tower/classification/quantum/benchmark_encodings_ansatze.py`
 * **Ansatz & Encoding Sweep Plot**:
   ![Multi-Dimensional Encoding and Ansatz Sweep](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/encoding_ansatz_sweep.png)
-  *Figure 4: Comparative noise degradation curves for all 12 combinations of data encodings (Angle, Multi-Axis, Amplitude, ZZ Map) and variational ansätze (HEA, IQP, ALT) on the 8x8 synthetic shapes dataset.*
+  **[RETAINED WITH CAVEAT]** *Figure 4: Comparative noise degradation curves for all 12 combinations of data encodings (Angle, Multi-Axis, Amplitude, ZZ Map) and variational ansätze (HEA, IQP, ALT) on the 8x8 synthetic shapes dataset.*
 
 ### [2026-07-17] Completed Task: Investigating Representation Bias (Color vs. Shape) on 32x32 Shapes
 * **Objective**: Train the 16-qubit Multi-Axis IQP classifier on 32x32 synthetic shapes under three experimental modes (Color-Only, Shape-Only/Grayscale, and Overlapping/Feature Binding) to measure whether the QTTN indexes primarily on color or shape features.
@@ -181,7 +181,7 @@ This log tracks the theoretical derivations, simulation results, noisy emulation
   * Run Command: `/opt/homebrew/Caskroom/miniconda/base/envs/qnlp/bin/python -u qnlp/image_tower/classification/quantum/train_overlapping_32x32.py`
 * **Representation Bias Comparison Plot**:
   ![QTTN Accuracy Across Shape vs. Color Modes](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/representation_bias_results.png)
-  *Figure 5: Test accuracy of the 16-qubit QTTN model (Multi-Axis + IQP) on 32x32 canvases under three dataset modes: Color-Only, Shape-Only (Grayscale), and Overlapping (Feature Binding).*
+  **[RETAINED WITH CAVEAT]** *Figure 5: Test accuracy of the 16-qubit QTTN model (Multi-Axis + IQP) on 32x32 canvases under three dataset modes: Color-Only, Shape-Only (Grayscale), and Overlapping (Feature Binding).*
 
 
 ### [2026-07-17] Completed Task: Overlapping Mode Feature Binding Convergence Proof
@@ -213,7 +213,7 @@ This log tracks the theoretical derivations, simulation results, noisy emulation
   * Run Command: `/opt/homebrew/Caskroom/miniconda/base/envs/qnlp/bin/python -u qnlp/image_tower/classification/quantum/test_barren_plateaus.py`
 * **Barren Plateau Scaling Plot**:
   ![Barren Plateau Scaling Sweep](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/barren_plateau_scaling.png)
-  *Figure 6: Scaling curves of QTTN leaf gradient variance against qubit count N on a semi-log scale (left) and log-log scale (right). The variance remains stable near $10^{-2}$, indicating strong resistance to the barren plateau phenomenon.*
+  **[RETAINED]** *Figure 6: Scaling curves of QTTN leaf gradient variance against qubit count N on a semi-log scale (left) and log-log scale (right). The variance remains stable near $10^{-2}$, indicating strong resistance to the barren plateau phenomenon.*
 
 ### [2026-07-18] Completed Task: Comparative Topology Benchmark (QTTN vs. MPS vs. MERA)
 * **Objective**: Compare Tree Tensor Networks (QTTN), Matrix Product States (MPS), and Multi-Scale Entanglement Renormalization Ansatz (MERA) on gradient scaling, noiseless training, and depolarizing noise sweeps.
@@ -229,10 +229,10 @@ This log tracks the theoretical derivations, simulation results, noisy emulation
 * **Plots**:
   * **Barren Plateau Comparison**:
     ![Topology Barren Plateau Sweep](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/topology_barren_plateaus.png)
-    *Figure 7: Log-log scaling of gradient variance for the three topologies, showing stable, non-vanishing gradients for QTTN, MERA, and shallow MPS.*
+    **[RETAINED]** *Figure 7: Log-log scaling of gradient variance for the three topologies, showing stable, non-vanishing gradients for QTTN, MERA, and shallow MPS.*
   * **Noise Resilience Comparison**:
-    ![Topology Noise Sweep](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/topology_noise_resilience.png)
-    *Figure 8: Test classification accuracy under depolarizing noise sweeps. QTTN and MERA maintain high noise tolerance, while the linear MPS chain drops significantly faster.*
+    ![Topology Noise Sweep](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/superseded/topology_noise_resilience.png)
+    **[SUPERSEDED — do not use; see results/superseded/README.md]** *Figure 8: Test classification accuracy under depolarizing noise sweeps. QTTN and MERA maintain high noise tolerance, while the linear MPS chain drops significantly faster.*
 
 ### [2026-07-26] Backlog Audit: Gap Between Proposed and Executed Investigations
 * **Objective**: Cross-check `quantum_investigation_roadmap.md` and `quantum_implementation_plan.md` against this log to find proposed experiments that were never actually run, and checkboxes marked complete without a corresponding log entry.
@@ -273,10 +273,10 @@ This log tracks the theoretical derivations, simulation results, noisy emulation
   * Python Script: `qnlp/image_tower/classification/quantum/investigate_quantum_residuals.py`
   * Run Command: `conda run -n qnlp python -u qnlp/image_tower/classification/quantum/investigate_quantum_residuals.py`
 * **Plots & Raw Results**:
-  * ![Quantum Residual Training Comparison](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/quantum_residual_comparison_training.png)
-    *Figure 9: Loss and validation-accuracy curves (mean ± std over 3 seeds) for baseline vs. data re-uploading vs. near-identity init.*
-  * ![Quantum Residual Noise Comparison](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/quantum_residual_comparison_noise.png)
-    *Figure 10: Test accuracy under depolarizing noise sweep ($p=0$ to $0.20$) for the seed=0 trained model of each variant. Re-uploading collapses below baseline's noise floor at $p \ge 0.10$ due to doubled noise-channel exposure from the repeated encoding step.*
+  * ![Quantum Residual Training Comparison](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/superseded/quantum_residual_comparison_training.png)
+    **[SUPERSEDED — do not use; see results/superseded/README.md]** *Figure 9: Loss and validation-accuracy curves (mean ± std over 3 seeds) for baseline vs. data re-uploading vs. near-identity init.*
+  * ![Quantum Residual Noise Comparison](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/superseded/quantum_residual_comparison_noise.png)
+    **[SUPERSEDED — do not use; see results/superseded/README.md]** *Figure 10: Test accuracy under depolarizing noise sweep ($p=0$ to $0.20$) for the seed=0 trained model of each variant. Re-uploading collapses below baseline's noise floor at $p \ge 0.10$ due to doubled noise-channel exposure from the repeated encoding step.*
   * Raw JSON: `qnlp/image_tower/classification/quantum/results/quantum_residual_comparison_results.json`
 
 ### [2026-07-26] Completed Experiment: Ancilla/Channel-Based Quantum Residuals (Mixed-Unitary Channel & LCU)
@@ -301,10 +301,10 @@ This log tracks the theoretical derivations, simulation results, noisy emulation
   * Python Script: `qnlp/image_tower/classification/quantum/investigate_ancilla_residuals.py`
   * Run Command: `conda run -n qnlp python -u qnlp/image_tower/classification/quantum/investigate_ancilla_residuals.py`
 * **Plots & Raw Results**:
-  * ![Ancilla Residual Training Comparison](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/ancilla_residual_comparison_training.png)
-    *Figure 11: Loss and validation-accuracy curves (mean ± std over 3 seeds) for baseline vs. mixed-unitary channel vs. LCU. The wide shaded bands for the ancilla methods reflect the seed=1 dead-gradient failures.*
-  * ![Ancilla Residual Noise Comparison](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/ancilla_residual_comparison_noise.png)
-    *Figure 12: Test accuracy under depolarizing noise sweep for baseline vs. mixed-unitary channel (seed=0 models; LCU excluded due to the `default.mixed` postselection limitation). Mixed-channel holds a consistent lead over baseline's noise floor.*
+  * ![Ancilla Residual Training Comparison](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/superseded/ancilla_residual_comparison_training.png)
+    **[SUPERSEDED — do not use; see results/superseded/README.md]** *Figure 11: Loss and validation-accuracy curves (mean ± std over 3 seeds) for baseline vs. mixed-unitary channel vs. LCU. The wide shaded bands for the ancilla methods reflect the seed=1 dead-gradient failures.*
+  * ![Ancilla Residual Noise Comparison](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/superseded/ancilla_residual_comparison_noise.png)
+    **[SUPERSEDED — do not use; see results/superseded/README.md]** *Figure 12: Test accuracy under depolarizing noise sweep for baseline vs. mixed-unitary channel (seed=0 models; LCU excluded due to the `default.mixed` postselection limitation). Mixed-channel holds a consistent lead over baseline's noise floor.*
   * Raw JSON: `qnlp/image_tower/classification/quantum/results/ancilla_residual_comparison_results.json`
 
 ### [2026-07-26] Completed Experiment: Extended-Seed Re-test of Mixed-Unitary Channel (Method 3) — Corrects Earlier Noise-Robustness Claim
@@ -324,10 +324,10 @@ This log tracks the theoretical derivations, simulation results, noisy emulation
   * Python Script: `qnlp/image_tower/classification/quantum/investigate_mixed_channel_seeds.py`
   * Run Command: `conda run -n qnlp python -u qnlp/image_tower/classification/quantum/investigate_mixed_channel_seeds.py`
 * **Plots & Raw Results**:
-  * ![Per-Seed Final Val Acc Bar Chart](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/mixed_channel_extended_seeds_bar.png)
-    *Figure 13: Final validation accuracy per seed (10 seeds) for baseline vs. mixed-unitary channel. The single failed mixed_channel run (seed=1) is grayed out.*
-  * ![Extended Noise Sweep, All Seeds vs. Converged-Only](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/mixed_channel_extended_seeds_noise.png)
-    *Figure 14: Noise sweep averaged across all 10 trained seed models (left) and converged seeds only (right), with std shading. Baseline and mixed_channel are statistically indistinguishable at low noise; baseline is equal-or-better at high noise — the opposite of the single-seed result reported previously.*
+  * ![Per-Seed Final Val Acc Bar Chart](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/superseded/mixed_channel_extended_seeds_bar.png)
+    **[SUPERSEDED — do not use; see results/superseded/README.md]** *Figure 13: Final validation accuracy per seed (10 seeds) for baseline vs. mixed-unitary channel. The single failed mixed_channel run (seed=1) is grayed out.*
+  * ![Extended Noise Sweep, All Seeds vs. Converged-Only](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/superseded/mixed_channel_extended_seeds_noise.png)
+    **[SUPERSEDED — do not use; see results/superseded/README.md]** *Figure 14: Noise sweep averaged across all 10 trained seed models (left) and converged seeds only (right), with std shading. Baseline and mixed_channel are statistically indistinguishable at low noise; baseline is equal-or-better at high noise — the opposite of the single-seed result reported previously.*
   * Raw JSON: `qnlp/image_tower/classification/quantum/results/mixed_channel_extended_seeds_results.json`
 
 ### [2026-07-26] Decision: Quantum-Native Residual Connections — Investigation Closed, Do Not Use
@@ -358,10 +358,10 @@ This log tracks the theoretical derivations, simulation results, noisy emulation
   * Python Script: `qnlp/image_tower/classification/quantum/investigate_spatial_ancilla.py`
   * Run Command: `conda run -n qnlp python -u qnlp/image_tower/classification/quantum/investigate_spatial_ancilla.py`
 * **Plots & Raw Results**:
-  * ![Spatial Ancilla Training Comparison](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/spatial_ancilla_comparison_training.png)
-    *Figure 15: Loss and validation-accuracy curves (mean ± std over 5 seeds) for with vs. without the explicit spatial ancilla.*
-  * ![Spatial Ancilla Noise Comparison](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/spatial_ancilla_comparison_noise.png)
-    *Figure 16: Noise sweep averaged across all 5 trained seed models per variant, with std shading. The two curves overlap within noise — no meaningful difference.*
+  * ![Spatial Ancilla Training Comparison](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/superseded/spatial_ancilla_comparison_training.png)
+    **[SUPERSEDED — do not use; see results/superseded/README.md]** *Figure 15: Loss and validation-accuracy curves (mean ± std over 5 seeds) for with vs. without the explicit spatial ancilla.*
+  * ![Spatial Ancilla Noise Comparison](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/superseded/spatial_ancilla_comparison_noise.png)
+    **[SUPERSEDED — do not use; see results/superseded/README.md]** *Figure 16: Noise sweep averaged across all 5 trained seed models per variant, with std shading. The two curves overlap within noise — no meaningful difference.*
   * Raw JSON: `qnlp/image_tower/classification/quantum/results/spatial_ancilla_comparison_results.json`
 
 ### [2026-07-26] Decision: Purely-Quantum Scope — Close All Open Questions Involving Classical Components in the Core Pipeline
@@ -390,7 +390,7 @@ This log tracks the theoretical derivations, simulation results, noisy emulation
   * Python Script: `qnlp/image_tower/classification/quantum/entropy_vs_tree_depth.py`
   * Run Command: `conda run -n qnlp python -u qnlp/image_tower/classification/quantum/entropy_vs_tree_depth.py`
 * **Plot**: ![Entropy vs. Tree Depth](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/entropy_vs_tree_depth.png)
-  *Figure 17: Root-qubit Von Neumann entropy at tree depth 1 (4 leaves) and depth 2 (16 leaves), with the area-law bound $\ln(2)$ shown as a reference line. Entropy climbs toward the bound with depth rather than staying flat, reflecting more efficient entanglement generation in deeper trees — the bound itself is architecturally guaranteed, not empirically at risk of violation.*
+  **[RETAINED]** *Figure 17: Root-qubit Von Neumann entropy at tree depth 1 (4 leaves) and depth 2 (16 leaves), with the area-law bound $\ln(2)$ shown as a reference line. Entropy climbs toward the bound with depth rather than staying flat, reflecting more efficient entanglement generation in deeper trees — the bound itself is architecturally guaranteed, not empirically at risk of violation.*
 
 ### [2026-07-26] Investigation: Depth-3 Recycling Feasibility — Discovers a Hard Simulation Wall, Corrects the Project's 32×32 Assumption
 * **Objective**: Extend the A.2 entropy measurement to tree depth 3 (64 leaf patches, 32×32 image equivalent) using the active-qubit-recycling technique, on the assumption (stated in the A.2 entry above) that the already-validated depth-2 recycling result would extend naturally.
@@ -446,9 +446,9 @@ This log tracks the theoretical derivations, simulation results, noisy emulation
   * Run Command: `conda run -n qnlp python -u qnlp/image_tower/classification/quantum/investigate_noise_regularization.py`
 * **Plots & Raw Results**:
   * ![Entropy Propagation vs. Noise](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/entropy_propagation_vs_noise.png)
-    *Figure 18: Von Neumann entropy of the level-1 survivor qubit vs. the root qubit (after 2 pooling levels) as depolarizing noise increases. The gap between them narrows with noise, but root's proximity to the ln(2) ceiling confounds interpretation.*
-  * ![Noise-Scheduled Training, Evaluated Clean](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/noise_scheduling_training.png)
-    *Figure 19: Clean test accuracy over training, for models trained at three different noise rates (5 seeds each, shaded std). Training under noise does not improve — and mildly hurts — final clean accuracy.*
+    **[RETAINED]** *Figure 18: Von Neumann entropy of the level-1 survivor qubit vs. the root qubit (after 2 pooling levels) as depolarizing noise increases. The gap between them narrows with noise, but root's proximity to the ln(2) ceiling confounds interpretation.*
+  * ![Noise-Scheduled Training, Evaluated Clean](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/qnlp/image_tower/classification/quantum/results/superseded/noise_scheduling_training.png)
+    **[SUPERSEDED — do not use; see results/superseded/README.md]** *Figure 19: Clean test accuracy over training, for models trained at three different noise rates (5 seeds each, shaded std). Training under noise does not improve — and mildly hurts — final clean accuracy.*
   * Raw JSON: `qnlp/image_tower/classification/quantum/results/noise_regularization_results.json`
 
 ### [2026-07-27] Code Audit: Scalar-Readout Bottleneck Invalidates the July-26/27 Decision Layer — Remediation Required Before CLEVR

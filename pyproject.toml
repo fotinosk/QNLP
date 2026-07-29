@@ -1,6 +1,12 @@
 [tool.ruff]
 line-length = 120
 
+# Archived code is a reproduction record for results in llm/research_log.md.
+# Reformatting it would alter the artifact it exists to preserve, so it is
+# excluded from lint and format rather than modified. See
+# qnlp/image_tower/classification/quantum/deprecated/README.md.
+extend-exclude = ["**/deprecated/**"]
+
 [tool.ruff.lint]
 # E: pycodestyle, F: Pyflakes, I: isort
 select = ["E", "F", "I"]
