@@ -141,15 +141,94 @@ These core research questions form the scientific contribution of your thesis. E
   - **Plan**: implement SPSA (Simultaneous Perturbation Stochastic Approximation) gradient estimation, which needs a constant ~2 circuit evaluations per step *regardless of parameter count*, instead of parameter-shift's 2×(num params). At depth-3's per-eval cost this would turn ~56.7s/step into an estimated ~0.2s/step (~250x speedup) — plausibly making depth-3 training practical and depth-4 worth a serious attempt.
   - **Est. time**: 1 day (SPSA gradient estimator + a short training run at depth-3 to confirm convergence quality, since SPSA gradients are noisier/approximate compared to exact parameter-shift).
 
-### Phase 2: CLEVR Dataset Integration & Feature Learning (Milestone 2)
-- [ ] **Task 2.1**: Implement the CLEVR data ingestion pipeline.
-  - Write a Polars-based script to filter the `dpdl-benchmark/clevr` HuggingFace dataset to scenes containing exactly one object.
-  - Extract the object attributes (`color`, `shape`, `material`, `size`) and format them into 4 classification targets.
-- [ ] **Task 2.2**: Train the QTTN on CLEVR Single-Object Attribute Classification.
-  - Classify the object's composite properties. Target accuracy: $>80\%$ on all 4 heads in noiseless simulation.
-- [ ] **Task 2.3**: Train on CLEVR Multi-Object (Relational) Classification.
-  - Filter to scenes with exactly two objects. Derive the relative spatial relation (left/right/front/behind) using their 3D coordinates.
-  - Train the model to predict this relation, validating whether the hierarchical tree encodes spatial coordinates.
+### Phase 2: CLEVR — Experiment Plan (Milestone 2) — **UNBLOCKED 2026-07-29, START HERE**
+
+**Read first**: `research_log.md` Current Status (the result and the settled rules), then this section. The model is `qttn_core.CoherentQTTNClassifier` with `phase15_common.COHERENT_ARCH`; the harness is `phase15_common`; the guards are `test_qttn_core.py`. Do not write a new model class — per-script model drift is what caused both audits.
+
+**Four standing requirements**, each traced to a specific failure in Phase 1:
+1. **Matched-parameter classical controls from day one.** Never report a quantum accuracy without a size-matched classical reference beside it. A mis-specified baseline once produced a fake 57.8-pt quantum-advantage result; the MLP reference is what caught it.
+2. **Report the resolution limit with every comparison.** `pc.compare()` does this. "No significant difference" without the minimum detectable effect is not a finding.
+3. **Noiseless only.**
+4. **Sweep, never derive, any capacity parameter** — and check the chosen value is not degenerate. Deriving CP rank from a parameter budget silently forced rank=1 and produced three different "measurements" of the same baseline.
+
+---
+
+#### Task C0 — Data pipeline
+Polars ingestion of `dpdl-benchmark/clevr`; filter to 1-object and 2-object scenes; extract `color` (8), `shape` (3), `material` (2), `size` (2); derive the 2-object spatial relation from `3d_coords` (the helper in `quantum_implementation_plan.md` Step 3). Emit fixed train/val splits at **16×16, 32×32 and 64×64** so resolution is a switch, not a re-run. Report class balance per attribute — `material` and `size` are binary and may be near-degenerate.
+
+**Est.**: 0.5 day.
+
+---
+
+#### Task C1 — Learnability gate (do this BEFORE any quantum run)
+**The single most valuable experiment in Phase 2, and it costs minutes.** Train only the **MLP reference** on each attribute at each resolution.
+
+Rationale: at 16×16 a CLEVR object is a handful of pixels, and `material` (rubber vs. metal — essentially specular-highlight detection) may carry no signal at all. **If an MLP cannot learn an attribute at a given resolution, no quantum model will, and a quantum null there measures the data, not the architecture.** This is the R4 lesson applied before spending compute rather than after.
+
+Deliverable: a resolution × attribute table of MLP accuracies. It settles three things at once —
+* **which resolution to use** (the deferred bigger-patches decision, see C5),
+* **which attributes are in scope** (drop any that are unlearnable even classically, and say so in the thesis: resolution, not architecture, is the limit),
+* **the ceiling each quantum result should be read against.**
+
+**Est.**: 2 hours. **Gate**: do not start C3 until this table exists.
+
+---
+
+#### Task C2 — Readout width for multi-attribute output
+**Predicted bottleneck; test it explicitly.** The tower currently emits **4 numbers** (`top_layer_qubits`, ⟨Z⟩ on wires 0/4/8/12). CLEVR asks for **four simultaneous attributes** spanning 8 × 3 × 2 × 2 = 96 combinations. Four real numbers feeding four heads is very likely too narrow — and R7 measured exactly this failure mode, where widening the readout from 3 to 4 values was worth **43 points**.
+
+Compare, on single-object CLEVR at the C1-chosen resolution:
+| readout | values | note |
+|---|---|---|
+| `top_layer_qubits` | 4 | current |
+| `top_layer_multi_pauli` (**to implement**) | 12 | ⟨X⟩,⟨Y⟩,⟨Z⟩ on all four top-layer wires — the full single-qubit information of each, ~free (no extra wires or gates, only more measurements) |
+
+Add the variant to `qttn_core` alongside the existing readouts and extend the readout-width regression test. If 12 values clearly beats 4, use it and record that the bond, not the circuit, was again the constraint.
+
+**Est.**: 0.5 day.
+
+---
+
+#### Task C3 — Single-object attribute classification
+Four heads off the shared readout. Quantum coherent vs. **size-matched MLP** and **classical CP tree** (rank swept freely), all on identical splits and seeds.
+
+**Pass criterion — revised.** The old ">80% on all 4 heads" is not defensible if C1 shows an attribute is unlearnable at the chosen resolution. Replace with: **per-attribute accuracy within a stated margin of the MLP reference, at fewer parameters.** That is the claim Phase 1 actually supports (parameter efficiency), and it degrades gracefully when an attribute turns out to be data-limited.
+
+Seeds: start at 10; `pc.seeds_needed()` will say whether more are required once the variance is known. The coherent model's variance on shapes was low (3.9), so this may be cheap.
+
+**Est.**: 1–2 days including compute.
+
+---
+
+#### Task C4 — Relational task, run **with and without** the spatial ancilla
+Two-object scenes; predict left/right/front/behind. **This is Question C.2 and it is REQUIRED, not optional.**
+
+R3 measured the ancilla at `−19.5` pts, but on a translation-invariant single-object task where position barely affects the label — a setting where a positional mechanism has nothing to contribute and a negative result is near-structural. Here **position is the label**, so this is the only place the question can be settled. Note R3 tested a *per-quadrant* ancilla (4 positions); the original design was *per-patch* (16). Prefer per-patch here, and say which was tested.
+
+Also the first genuine test of whether implicit tree topology encodes spatial relations at all — the assumption behind dropping positional encoding.
+
+**Pass criterion**: relation accuracy meaningfully above chance (25%) with the resolution limit stated, and a classical control beside it.
+
+**Est.**: 1–2 days.
+
+---
+
+#### Task C5 — Resolution/scaling route (only if C1 demands it)
+If C1 shows attributes need more than 16 qubits' worth of detail, choose one and record why:
+* **(a) Bigger patches** — 32×32 at 8×8 patches keeps 16 qubits. Works today, no new machinery. **But the extra pixels are absorbed by the classical encoder**: the circuit sees exactly as much as before. Defensible only if stated as resolution scaling, not quantum scaling.
+* **(b) SPSA on `default.tensor`** — genuinely deeper trees (64 patches). ~1 day, uncertain; `default.tensor`'s parameter-shift backward was measured at 242 s per batch, so SPSA is essential rather than optional.
+* **(c) Higher bond dimension (χ=2^k)** — the principled fix for the readout bottleneck: a k-qubit root carries 4^k − 1 parameters instead of 3. Affordable on hardware and under tensor-network simulation, **not** for statevector training (k=2 at 16 patches is 32 qubits, past the ~29-qubit wall on 18 GB).
+
+Recommendation: try **(a)** first because it is free, and be explicit in the thesis about what it does and does not demonstrate.
+
+---
+
+#### Cost model (measured, 2026-07-29)
+* Coherent 16-qubit tree, `lightning.qubit` + adjoint: **~17.5 min per 30-epoch run**; `default.qubit` + backprop is ~72 min.
+* Classical arms and MLPs: seconds per seed.
+* **Run at most 4–5 concurrent workers.** Ten concurrent 16-qubit processes exhausted 18 GB and six were killed silently.
+* Launch with the env python directly, not `conda run`, which buffers all output until exit.
+* Every runner checkpoints per seed; a killed worker costs one seed.
 
 ### Phase 3: Noisy Emulation & Mitigation Benchmarks (Milestone 3) — ❌ CLOSED OUT OF SCOPE 2026-07-28
 

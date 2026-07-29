@@ -20,6 +20,7 @@ This log tracks the theoretical derivations, simulation results, noisy emulation
 
 ## Current Status & Roadmap
 * **Active Branch**: `thesis/quantum-image-tower`
+* **▶ START HERE (fresh context)**: read this status block, then **[quantum_investigation_roadmap.md](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/llm/quantum_investigation_roadmap.md) Section 3, "Phase 2: CLEVR — Experiment Plan"**, which is written to be executed cold (tasks C0–C5, standing requirements, measured cost model). Code entry points: model `qttn_core.CoherentQTTNClassifier`, config `phase15_common.COHERENT_ARCH`, harness `phase15_common`, guards `test_qttn_core.py` (40 tests). **Do not write a new model class** — per-script model drift caused both audits.
 * **Current Focus (as of 2026-07-29)**: **The theory phase is CLOSED. Next is Phase 2 (CLEVR).** Every decision-gate item in [quantum_investigation_roadmap.md](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/llm/quantum_investigation_roadmap.md) Section 7 is resolved: R1, R1b, R2, R3, R4, R5, R7 done; R6 and R8 dropped with stated reasons. Figures regenerated (Section 8 Phase D). No known internal contradictions remain.
 * **THE RESULT**: the coherent quantum tree scores **`89.3% ± 3.9` at 287 parameters** on 16×16 synthetic shapes (4 seeds, 1024/30, last-5-epoch mean).
 
@@ -43,6 +44,7 @@ This log tracks the theoretical derivations, simulation results, noisy emulation
   * **Readout width is the binding constraint**, not an incidental setting: `35.6%` (root qubit) vs `78.4%` (four top-layer wires). χ=1 is a simulation limit, not a design preference.
 * **Deferred into CLEVR (one question, three options)**: 16×16 cannot support CLEVR's ">80% on 4 attribute heads" criterion. Choose among **bigger patches** (works today; classical preprocessing, not quantum scaling), **SPSA** (deeper trees), or **higher bond dimension** (principled; needs TN training) — against real data rather than in the abstract.
 * **Carried into CLEVR as requirements**: matched-parameter classical controls from day one; Question C.2 run both ways; noiseless only; resolution limit reported with every comparison.
+* **The four rules CLEVR inherits** (each from a specific Phase-1 failure): matched-parameter classical controls from day one; report the resolution limit with every comparison; noiseless only; and **sweep, never derive, any capacity parameter** — deriving CP rank from a parameter budget silently forced rank=1 and produced three different "measurements" of the same baseline.
 * **Two caveats to keep visible in the write-up**: the classical arms were hyperparameter-tuned while the quantum arm inherited `lr=0.03` from R1 (so the quantum result is conservative), and `classical_bare` moved `33.9 → 56.7 → 79.6` across three revisions of the search space — the MLP reference is what caught that, and it is now enforced in the figure code.
 
 ---
