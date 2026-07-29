@@ -48,7 +48,11 @@ IMAGE TOWER HIERARCHY (updated 2026-07-27, see status notes below)
                 quantum_implementation_plan.md]
 ```
 
-> **⚠️ READ FIRST (2026-07-27)**: the three architecture rules in the status notes below (no spatial ancilla, no residuals, image-size ceiling framing) were decided by experiments that ran through a **scalar-readout bottleneck** — the whole image compressed to one number before a `nn.Linear(1, 4)` head. They are **PROVISIONAL** pending re-test. See `research_log.md` 2026-07-27 "Code Audit" and **Section 7 — Phase 1.5 Remediation Plan** below. Do not start Phase 2 (CLEVR) until Section 7's decision gate is passed.
+> **✅ READ FIRST (2026-07-29): the theory phase is CLOSED and Phase 2 (CLEVR) is unblocked.** Every rule below has been re-validated on the **coherent** quantum tree (Task R7), which is now the model of record: `89.3% ± 3.9` at 287 parameters, beating every matched classical control except a 999-param MLP.
+>
+> Two audits shaped this. The first found a **scalar-readout bottleneck** (`nn.Linear(1, 4)`) behind every July-26/27 decision; the second found the tree was **measuring and re-encoding between levels**, so it carried no inter-level entanglement. Both are fixed, both are regression-tested, and every affected verdict was re-run rather than assumed. See `research_log.md` 2026-07-27 "Code Audit", 2026-07-28 "Code Audit #2", and 2026-07-29 "R7 COMPLETE".
+>
+> The diagram below still describes the **depth-2, χ=1** structure correctly, with one correction: the tower reads the **four top-layer qubits**, not a single root — reading only the root scores `35.6%` against `78.4%`.
 
 **Status notes (2026-07-27)**:
 - **Image size**: 16×16 (depth-2 tree, 16 leaf patches) is the only size with validated end-to-end *training* (every experiment in this investigation used this size). 32×32 (depth-3) and 64×64 (depth-4) have validated *forward-pass* simulation only, via `default.tensor(method='tn')` — training at these sizes is blocked on gradient cost (parameter-shift is impractically slow; SPSA, Task 1.5, is the proposed fix, not yet implemented).
@@ -657,7 +661,9 @@ A single `make_figures.py` producing every thesis figure from the current archit
 
 ---
 
-### Phase E — Document reconciliation (half day)
+### ✅ Phase E — Document reconciliation — DONE 2026-07-29
+
+> Status markers applied throughout; the figure-status table and protocol boundaries are in `research_log.md`; all four framing corrections are complete (Task R5). The implementation plan now describes the coherent tree as built, with the two-stage Simulation→Emulation protocol replaced by a noiseless single stage plus mandatory classical control and resolution limit.
 
 Status markers on every log entry and figure reference; the figure-status table; and these framing corrections:
 * Barren-plateau claim rescoped (Figs 6, 7).

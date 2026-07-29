@@ -20,22 +20,30 @@ This log tracks the theoretical derivations, simulation results, noisy emulation
 
 ## Current Status & Roadmap
 * **Active Branch**: `thesis/quantum-image-tower`
-* **Current Focus (as of 2026-07-28)**: **Phase 1.6 — purge & regenerate** ([roadmap](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/llm/quantum_investigation_roadmap.md) Section 8). Phase 1.5 tasks **R1, R1b, R2, R3, R4 are complete**; **R5 (docs) and R6 (SPSA) remain**. R3 was the gate for Phase 1.6 and has landed, so figure regeneration and code consolidation are unblocked. **Still do not start Phase 2 (CLEVR)** — the decision gate needs R5 and R6, and R6 determines whether CLEVR can run at a resolution that supports its own pass criterion.
-* **Background**: the 2026-07-27 code audit (entry below) found that every experiment behind the July-26/27 decisions compressed the whole image to a **single scalar** before a `nn.Linear(1, 4)` head — which is why those results sat in a `50–57%` band against the `50.0%` single-attribute shortcut ceiling. The architecture of record now reaches `79–81%` on the same task.
-* **ARCHITECTURE OF RECORD — per topology** (pinned in `phase15_common`; regression-tested):
-  * **Coherent tree (model of record going forward)** — `COHERENT_ARCH`: `readout=top_layer_qubits`, `encoding=multi_axis`, `ansatz=iqp`.
-  * **Hybrid (superseded, retained for reproducing R1–R4)** — `ARCH`: `readout=root_multi_pauli`, same encoding/ansatz.
-  * **The readout is topology-dependent**, which a single `ARCH` had hidden: on the coherent tree `root_multi_pauli` scores `35.6%` and `top_layer_qubits` `78.4%` — a 43-point gap, because the root is one qubit's marginal of a 16-qubit state.
-  * Protocol: **1024 train / 64 test / 30 epochs**, scored by the mean of the last 5 epochs, comparisons **unpaired**.
-  * R2 resolved the *encoding* (`+12.6` pts vs a `3.6`-pt limit) but **not** the ansatz (`+1.6` vs `4.8`) — IQP is adopted for lower seed variance, not measured accuracy.
-* **Architecture decisions — status after R3/R4** (30 seeds/arm, resolution limits stated):
-  * **No residual/skip connections — CONFIRMED, now on positive evidence.** `mixed_channel` is `−10.9` pts vs baseline (limit `4.7`); `reupload` is `+1.5` (limit `3.8`, unresolved). Both at 0/30 failures. The July dead-gradient instability and noise-collapse narratives were artifacts of the bottlenecked model.
-  * **No spatial ancilla — CONFIRMED for this task class, with a scope caveat that must travel with it.** `−19.5` pts (limit `3.8`). But this task is translation-invariant single-object classification where position barely affects the label, and it tests the per-quadrant ancilla (4 positions), not the original per-patch design (16). **Question C.2 (relational) is now a required part of CLEVR**, not optional — it is the only place the question can be settled.
-  * **Quantum vs. classical — first measurement in the project's history (R4).** At matched parameter count the quantum tower is competitive with a classical MLP (`79.0 ± 8.7` vs `70.5 ± 18.1`, inside the `8.9`-pt limit); it loses to a `999`-param MLP by `17.0` pts (resolved). **The defensible claim is parameter efficiency, not raw accuracy.**
-  * **Question A.3 remains OPEN.** R4 does not answer it: the classical CP node scores `33.9%` against the MLP's `96.0%`, so the CP baseline is broken and the quantum-vs-CP gap is an artifact. Do not cite it.
-  * **No classical capacity inside the pipeline** — binding rule in `quantum_implementation_plan.md`, **but see the open tension**: R2 measured that widening the *classical* encoder bought `+12.6` pts, more than any quantum architectural change measured anywhere here. Needs an explicit position (roadmap §8.5 item 1).
-  * **Noise is not a trainable regularizer** (Question F) — the negative result stands, but its founding observation is suspect and is being re-tested (roadmap §8.5 item 2).
-  * **Image size**: 16×16 remains the only size with validated end-to-end *training*. 32×32/64×64 have validated forward passes only (`default.tensor`); training needs R6 (SPSA).
+* **Current Focus (as of 2026-07-29)**: **The theory phase is CLOSED. Next is Phase 2 (CLEVR).** Every decision-gate item in [quantum_investigation_roadmap.md](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/llm/quantum_investigation_roadmap.md) Section 7 is resolved: R1, R1b, R2, R3, R4, R5, R7 done; R6 and R8 dropped with stated reasons. Figures regenerated (Section 8 Phase D). No known internal contradictions remain.
+* **THE RESULT**: the coherent quantum tree scores **`89.3% ± 3.9` at 287 parameters** on 16×16 synthetic shapes (4 seeds, 1024/30, last-5-epoch mean).
+
+  | model | score | params |
+  |---|---|---|
+  | `mlp_reference` | `96.0 ± 1.5` | 999 |
+  | **`quantum_coherent`** | **`89.3 ± 3.9`** | **287** |
+  | `classical_full` (CP + residual + dropout) | `88.4 ± 5.5` | 352 |
+  | `classical_bare` (CP) | `79.6 ± 10.3` | 428 |
+  | `quantum_hybrid` (superseded) | `79.4 ± 8.0` | 211 |
+  | `mlp_param_matched` | `70.5 ± 18.1` | 257 |
+
+  Resolved (Welch): beats the hybrid `+9.9` (limit 5.7), beats the bare classical CP tree `+9.7` (limit 6.3), beats a same-size MLP `+18.8` (limit 9.0); ties `classical_full`. **Question A.3 is answered**: under matched constraints the unitarity-constrained quantum node beats the unconstrained classical CP node while using 33% fewer parameters.
+* **ARCHITECTURE OF RECORD — coherent tree** (`phase15_common.COHERENT_ARCH`, regression-tested): one 16-qubit device, patch *p* on wire *p*, `multi_axis` encoding (RX/RY/RZ), `iqp` block unitaries on `[0-3] [4-7] [8-11] [12-15]` with **per-block** level-1 weights, level-2 on the survivors `[0,4,8,12]` **passed as qubits**, readout `top_layer_qubits` (⟨Z⟩ on all four), `Linear(4, n_classes)`. Protocol 1024 train / 64 test / 30 epochs, scored on the last-5-epoch mean, comparisons **unpaired via Welch**. Runs on `lightning.qubit` + adjoint.
+  * The **hybrid** (`ARCH`, `root_multi_pauli`) is retained only to reproduce R1–R4.
+* **Design rules — all settled**:
+  * **No residual/skip connections.** Five mechanisms rejected; confirmed at 30 seeds on positive evidence (`mixed_channel` `−10.9`, limit 4.7; `reupload` a true null at `+1.5`, limit 3.8).
+  * **No spatial ancilla — *for translation-invariant classification only*** (`−19.5`, limit 3.8). **Question C.2 (relational) is REQUIRED in CLEVR**, with and without the ancilla; this result says nothing about relational reasoning.
+  * **Classical components**: bounded by a checkable rule — *the encoder may set state-preparation parameters but may not reduce the qubit count the architecture would otherwise require*. This dissolves the R2-vs-B.3 tension: the `+12.6` pts from `multi_axis` came from using all three of a qubit's rotation parameters where `scalar_ry` used one.
+  * **Noiseless only.** Noise closed at single-node scale (stable to p≈0.02); full-tree emulation infeasible at $O(4^N)$.
+  * **Readout width is the binding constraint**, not an incidental setting: `35.6%` (root qubit) vs `78.4%` (four top-layer wires). χ=1 is a simulation limit, not a design preference.
+* **Deferred into CLEVR (one question, three options)**: 16×16 cannot support CLEVR's ">80% on 4 attribute heads" criterion. Choose among **bigger patches** (works today; classical preprocessing, not quantum scaling), **SPSA** (deeper trees), or **higher bond dimension** (principled; needs TN training) — against real data rather than in the abstract.
+* **Carried into CLEVR as requirements**: matched-parameter classical controls from day one; Question C.2 run both ways; noiseless only; resolution limit reported with every comparison.
+* **Two caveats to keep visible in the write-up**: the classical arms were hyperparameter-tuned while the quantum arm inherited `lr=0.03` from R1 (so the quantum result is conservative), and `classical_bare` moved `33.9 → 56.7 → 79.6` across three revisions of the search space — the MLP reference is what caught that, and it is now enforced in the figure code.
 
 ---
 
