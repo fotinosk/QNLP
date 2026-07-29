@@ -508,7 +508,14 @@ Per the scope decision of 2026-07-28, the project proceeds **noiseless only**. T
 
 ---
 
-### Task R5: Documentation and consistency fixes (no experiments)
+### ✅ Task R5 — DONE 2026-07-29: Documentation and consistency fixes (no experiments)
+
+> All five items complete; full writeup in `research_log.md` 2026-07-29. Headlines:
+> * **$p_{crit}$ was never a contradiction** — one script computes it (first swept $p$ below 50% accuracy), the other computes nothing and the log eyeballed it. Under one criterion the same data gives 0.10, not 0.05, and the residual difference is explained by clean accuracy (85.9% vs 95-97%), since $p_{crit}$ is an absolute-accuracy threshold and therefore conflates tolerance with clean accuracy.
+> * **Barren-plateau claim rescoped** from "empirical proof" to "consistent with known theory" — 4 points at $N \le 20$ against an asymptotic strawman cannot establish a scaling law. Data sound, figures retained, wording fixed.
+> * **Question F fully closed**; its founding observation is attributed to a `Linear(1,4)` readout-calibration effect.
+> * **The purely-quantum rule now has a checkable boundary**: *the classical encoder may set the parameters of state preparation, but may not reduce the qubit count the architecture would otherwise require.* This dissolves the R2-vs-B.3 tension rather than adjudicating it — the `+12.6` pts came from `multi_axis` using all three of a qubit's rotation parameters where `scalar_ry` used one, i.e. from using the **quantum** resource fully, not from added classical capacity.
+> * **Protocol boundaries marked** in the metrics table so pre-R1 (256/15), post-R1 hybrid, and post-R7 coherent numbers are not compared across.
 
 1. **Resolve the $p_{crit}$ contradiction.** The 2026-07-17 noise sweep reports $p_{crit} \approx 0.05$ for a 4-qubit QTTN on 8×8 shapes; the same-day encoding/ansatz benchmark reports $p_{crit} > 0.200$ for essentially every configuration including same-family ones. Both are in the Experiment & Metrics Record and, as written, contradict each other. Read `emulate_noise_synthetic_shapes.py` and `benchmark_encodings_ansatze.py`, determine each script's actual threshold definition, and annotate both rows in the metrics table with the definition used.
 2. **Rescope the barren-plateau claim.** Four system sizes ($N \le 20$), non-monotonic variance (`1.51e-1, 6.08e-2, 8.61e-2, 5.94e-2`), currently reported as an "Empirical BP Immunity Proof" against an asymptotic $2^{-N}$ strawman. Hierarchical/TTN barren-plateau resistance under local observables is an established theoretical result — reframe the data as *consistent with* that theory and cite it, rather than presenting it as an independent proof. Fix in both `research_log.md` (2026-07-18 entry) and Section 4 of this roadmap.
@@ -539,9 +546,9 @@ Proceed to Phase 2 when **all** of the following hold:
 2. ✅ **R2 done (2026-07-28)** — architecture of record pinned in `phase15_common.ARCH`, code and documentation agree, and a regression test fails if it drifts.
 3. ✅ **R3 done (2026-07-28) at 30 seeds** — every verdict re-validated on positive evidence, with the resolution limit reported alongside each. Nothing flipped; two narratives (mixed-channel instability, reupload noise-collapse) were shown to be bottleneck artifacts.
 4. ✅ **R4 done (2026-07-28)** — classical control exists. Outcome: quantum is parameter-competitive, not accuracy-dominant. **Question A.3 remains open** (CP baseline broken). CLEVR must carry matched-parameter classical controls from day one.
-5. **R7 — STILL OPEN, BLOCKING.** The tower is a coherent quantum tree, re-baselined, with R3 and R4 re-run on it. Until this lands, every result describes a quantum-node/classical-wiring hybrid rather than a quantum TTN.
-6. **R8 — STILL OPEN.** Noise close-out done and the noise track formally closed.
-7. **R5 — STILL OPEN.** No known internal contradictions left in the log.
+5. ✅ **R7 done (2026-07-29).** Coherent tree at `89.3 ± 3.9` (287 params), beating the hybrid by 9.9 pts and the bare classical CP node by 9.7, tying `classical_full` at fewer parameters. Question A.3 answered in the quantum node's favour.
+6. ✅ **R8 dropped (2026-07-28).** No experiment needed: tolerance already characterised at single-node scale, training-under-noise shown not to help, and full-tree emulation infeasible at $O(4^N)$. The noise track is closed by the scope decision, not by a further run.
+7. ✅ **R5 done (2026-07-29).** No known internal contradictions left in the log.
 8. **R6 — STILL OPEN.** Resolved one way or the other — either 32×32 training is practical, or the CLEVR task is explicitly re-scoped (e.g. drop `material`, keep `color`/`shape`/`size`, and state in the thesis that resolution, not architecture, is the limiting factor). **Do not silently run CLEVR at 16×16 against an >80%-on-4-heads pass criterion that resolution cannot support.**
 
 **Guidance for CLEVR execution once the gate is passed** (recorded here so it is not re-litigated):

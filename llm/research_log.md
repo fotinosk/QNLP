@@ -759,6 +759,34 @@ Prompted by whether the wide readout survives deeper trees. Analysis, not experi
 * **Not settled**: shared vs per-block level-1 weights. All coherent runs used per-block (287 params), matching the 2026-07-17 reference. The shared variant (211 params) is untested and would, if comparable, strengthen the parameter-efficiency claim further. `--shared-l1` exists for whenever it is wanted; it is not blocking.
 * **Reproduce**: `run_r7_coherent --arm baseline --seeds N --out r7base_sN` (one worker per seed; **at most 4–5 concurrently** — ten concurrent 16-qubit `lightning.qubit` processes exhausted 18 GB and six were killed silently). Classical arms: `run_r4_classical_control --coherent --skip-quantum --out-suffix _fixedrank`. Aggregated: `results/r7_coherent_baseline.json`.
 
+### [2026-07-29] Task R5 COMPLETE: Documentation and Consistency Fixes
+No experiments. Four items, each a claim in this log that was stated more strongly than its evidence.
+
+**R5.1 — The $p_{crit}$ contradiction: resolved, and it was never a contradiction.** The two figures use different criteria on different models.
+* `benchmark_encodings_ansatze.py:319-332` **computes** $p_{crit}$ as *the first swept $p$ at which accuracy falls below 50%*, defaulting to `0.20` — so "`p_crit > 0.200`" means "never fell below 50% within the swept range", not "measured at 0.2".
+* `emulate_noise_synthetic_shapes.py` **computes no $p_{crit}$ at all.** The "$p_{crit} \approx 0.05$" in the 2026-07-17 entry is a narrative reading of the curve, taken from accuracy falling `85.9% → 66.4%` at $p=0.05$.
+* Applying the formal criterion to that same data (`85.9%` clean, `66.4%` at 0.05, `33.6%` at 0.10) gives **$p_{crit} = 0.10$**, not 0.05.
+* **Why the numbers still differ under one criterion**: the models differ. Figure 3's `hea_3cnot` model starts at `85.9%` clean; Figure 4's multi-axis models start at `95.3–96.9%`. A model starting 10 points higher takes more noise to cross a fixed 50% line. **The apparent contradiction was a threshold-definition artifact compounded by a baseline-accuracy difference, not a measurement conflict.**
+* **Fix**: cite $p_{crit}$ only with its definition attached, and note that it is a threshold on *absolute* accuracy, so it conflates noise tolerance with clean accuracy. Anywhere a noise-*tolerance* claim is wanted, use relative degradation instead.
+
+**R5.2 — Barren-plateau claim rescoped (Figures 6, 7).** The 2026-07-18 entry calls this an "Empirical BP Immunity Proof", from 4 system sizes at $N \le 20$ with non-monotonic variance (`1.51e-1, 6.08e-2, 8.61e-2, 5.94e-2`), compared against an asymptotic $2^{-N}$ strawman. Four points cannot establish an asymptotic scaling law, and the comparison target is not a claim anyone makes about structured circuits. **Corrected framing**: hierarchical and tree architectures are *known theoretically* to resist barren plateaus under local observables; this data is **consistent with** that literature and shows no vanishing-gradient onset up to $N=20$. Cite the theory; present the measurement as corroboration, not proof. The data itself is sound and the figures are retained unchanged — this is a caption and wording fix.
+
+**R5.3 — Question F closed.** The scheduling sub-question already had a clean negative result (training under noise does not improve clean accuracy, 5 seeds). The mechanism sub-question is now closed too, under the noiseless-only scope decision. Its founding observation (`42.2% → 53.9%` under noise) came from a `Linear(1,4)` model, where depolarizing noise contracts a scalar toward zero and can move samples across a 1-D decision boundary — a readout-calibration effect, not regularization. Recorded as the probable mechanism; not investigated further.
+
+**R5.4 — A stated position on the purely-quantum rule.** The tension: R2 measured that widening the classical patch encoder from `Linear(48,1)` to `Linear(48,3)` bought `+12.6` pts — larger than any quantum architectural effect measured in this project — while Question B.3 was closed *on principle* because a `Linear(16,4)` before a 4-qubit VQC was "classical capacity substituting for quantum circuit width".
+
+  **Position, with a checkable boundary**: *the classical encoder may set the parameters of state preparation, but may not reduce the number of qubits the architecture would otherwise require.*
+
+  | case | verdict under the rule |
+  |---|---|
+  | `Linear(48,3)` → RX, RY, RZ on one qubit | **Permitted.** The architecture assigns one qubit per patch; the encoder fills that qubit's three rotation parameters. It cannot express more than the circuit consumes. |
+  | `Linear(16,4)` → 4-qubit VQC for data needing 16 qubits | **Prohibited.** Reduces qubit count; the classical layer is doing the compression the circuit should do. |
+  | Classical scalars carried between tree levels (the hybrid) | **Prohibited.** Replaces a quantum bond outright — the largest violation this project committed, and R7 removed it. |
+
+  **This also dissolves the tension rather than merely adjudicating it.** The `+12.6` points did not come from adding classical capacity: `scalar_ry` left **two of the three available rotation parameters per qubit unused**, and `multi_axis` uses the full single-qubit parameterisation. The gain came from using the *quantum* resource fully, not from offloading work to the encoder. Question B.3's closure stands, and Question B.3 and R2 were never in conflict.
+
+**R5.5 — Superseded protocols annotated.** Every pre-R1 row in the metrics table was measured at 256 train / 15 epochs (or 512/128 at 8×8), a protocol now known to be underpowered for this task regardless of architecture. Pre-R1 and post-R1 numbers must not be compared directly, and pre-R7 numbers describe the measure-and-re-encode hybrid rather than the coherent tree. Both boundaries are marked in the table.
+
 ### [2026-07-28] Next Steps (revised: theory phase closing, scaling questions move to CLEVR)
 The theoretical exploration is being closed. Remaining work is finishing the coherent baseline, writing up, and regenerating figures. **The three "what do we do when 16 statevector qubits isn't enough" questions — bigger patches vs SPSA vs bond dimension — are all deferred into the CLEVR scope**, since they are the same question and CLEVR is where the answer actually matters.
 
@@ -786,6 +814,7 @@ The theoretical exploration is being closed. Remaining work is finishing the coh
 
 | Date | Model Configuration | Dataset | Metric | Result | Notes / Insights |
 | :--- | :--- | :--- | :--- | :--- | :--- |
+| — | **⚠️ PROTOCOL BOUNDARY 1** | — | — | — | **Every row below this line and above BOUNDARY 2 used 256 train / 15 epochs (or 512/128 at 8x8) — underpowered for this task regardless of architecture (R1/R1b). Do not compare across the boundary.** |
 | 2026-07-17 | 4-qubit Node: 0 CNOTs | Random Rotations | VN Entropy / KL Div | 0.0000 / 0.0109 | Product state. Perfect pure-state coverage. |
 | 2026-07-17 | 4-qubit Node: 1 CNOT | Random Rotations | VN Entropy / KL Div | 0.3412 / 0.2366 | Entangling 1 child. State becomes mixed. |
 | 2026-07-17 | 4-qubit Node: 2 CNOTs | Random Rotations | VN Entropy / KL Div | 0.4332 / 0.3890 | Entangling 2 children. Entropy increases. |
@@ -794,12 +823,12 @@ The theoretical exploration is being closed. Remaining work is finishing the coh
 | 2026-07-17 | 4-qubit Node: 6 CNOTs | Random Rotations | VN Entropy / KL Div | 0.5139 / 0.7562 | Multi-ring. Max mixedness achieved. |
 | 2026-07-17 | Standard vs. Recycled QTTN | 16-Patch Random | Output Difference | 0.00000000e+00 | Verified exact output equivalence. Qubits: 16 -> 7. |
 | 2026-07-17 | 16-qubit QTTN: hea_3cnot | 16x16 Shapes (256/64) | Cross-Entropy Loss / Val Acc | 0.8490 / 75.0% | Vectorized run. Verified trainability & convergence. |
-| 2026-07-17 | 4-qubit QTTN: hea_3cnot | 8x8 Shapes (512/128) | Noisy Acc vs. Depolarizing p | p=0: 85.9%, p=0.02: 89.8%, p=0.05: 66.4% | Verified noise threshold pcrit ~ 0.05. |
+| 2026-07-17 | 4-qubit QTTN: hea_3cnot | 8x8 Shapes (512/128) | Noisy Acc vs. Depolarizing p | p=0: 85.9%, p=0.02: 89.8%, p=0.05: 66.4% | ⚠️ The log's "p_crit ~ 0.05" is a narrative reading; **no threshold is computed in this script**. Under the formal <50% criterion used by the sweep below, this model's p_crit is **0.10**. See R5.1. |
 | 2026-07-17 | 4-qubit QTTN: ANGLE + HEA | 8x8 Shapes (512/128) | Depolarizing Noise Sweep | Noiseless: 78.1%, p_crit > 0.200 | Sweep run. Normal angle prep. |
 | 2026-07-17 | 4-qubit QTTN: ANGLE + IQP | 8x8 Shapes (512/128) | Depolarizing Noise Sweep | Noiseless: 86.7%, p_crit > 0.200 | Sweep run. Normal angle prep. |
 | 2026-07-17 | 4-qubit QTTN: ANGLE + ALT | 8x8 Shapes (512/128) | Depolarizing Noise Sweep | Noiseless: 93.8%, p_crit > 0.200 | Sweep run. Normal angle prep. |
 | 2026-07-17 | 4-qubit QTTN: MULTI_AXIS + HEA | 8x8 Shapes (512/128) | Depolarizing Noise Sweep | Noiseless: 96.9%, p_crit > 0.200 | Sweep run. Highest overall performance. |
-| 2026-07-17 | 4-qubit QTTN: MULTI_AXIS + IQP | 8x8 Shapes (512/128) | Depolarizing Noise Sweep | Noiseless: 95.3%, p_crit > 0.200 | Sweep run. Excellent thesis baseline choice. |
+| 2026-07-17 | 4-qubit QTTN: MULTI_AXIS + IQP | 8x8 Shapes (512/128) | Depolarizing Noise Sweep | Noiseless: 95.3%, p_crit > 0.200 | p_crit := first swept p with acc < 50%; ">0.200" = never crossed in range. Single seed. Superseded by R2 at 16x16. |
 | 2026-07-17 | 4-qubit QTTN: MULTI_AXIS + ALT | 8x8 Shapes (512/128) | Depolarizing Noise Sweep | Noiseless: 96.1%, p_crit > 0.200 | Sweep run. High performance, shallow depth. |
 | 2026-07-17 | 2-qubit QTTN: AMPLITUDE + HEA | 8x8 Shapes (512/128) | Depolarizing Noise Sweep | Noiseless: 66.4%, p_crit = 0.150 | Sweep run. Extreme qubit compression. |
 | 2026-07-17 | 2-qubit QTTN: AMPLITUDE + IQP | 8x8 Shapes (512/128) | Depolarizing Noise Sweep | Noiseless: 76.6%, p_crit > 0.200 | Sweep run. 2 qubits, 4 parameters, 76.6% acc. |
