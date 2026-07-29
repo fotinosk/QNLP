@@ -87,11 +87,28 @@ def t_crit(df):
     return 1.96
 
 
-def mde_unpaired(std_a, std_b, n):
+def mde_unpaired(std_a, std_b, n_a, n_b=None):
     """95% CI half-width on a difference of means: the smallest effect this
-    design could distinguish from zero."""
-    pooled = np.sqrt((std_a**2 + std_b**2) / 2.0)
-    return float(t_crit(2 * n - 2) * pooled * np.sqrt(2.0 / n))
+    design could distinguish from zero.
+
+    Uses Welch's unequal-variance, unequal-n form. The earlier version took
+    n = min(n_a, n_b) and applied the equal-n pooled formula, which throws away
+    every observation in the larger arm. That mattered in practice: the R7
+    coherent baseline (n=4, std 3.9) against the hybrid (n=30, std 8.0) looked
+    "unresolved" at a 10.8-pt limit, when the correct limit is ~5.8 and the
+    9.9-pt gap is resolved. Small n on one arm is not by itself a reason for
+    more seeds -- especially when that arm is the low-variance one.
+    """
+    if n_b is None:
+        n_b = n_a
+    va, vb = std_a**2 / n_a, std_b**2 / n_b
+    se = np.sqrt(va + vb)
+    if se == 0:
+        return float("inf")
+    # Welch-Satterthwaite degrees of freedom.
+    denom = (va**2 / max(n_a - 1, 1)) + (vb**2 / max(n_b - 1, 1))
+    df = int(max(1, round((va + vb) ** 2 / denom))) if denom > 0 else 1
+    return float(t_crit(df) * se)
 
 
 def seeds_needed(pooled_std, target_effect):
@@ -188,9 +205,10 @@ def summarise(name, curves, **extra):
 def compare(arm_a, arm_b):
     """Unpaired comparison of two summarised arms, reporting the resolution
     limit alongside the difference -- a null is meaningless without it."""
-    n = min(arm_a["n_seeds"], arm_b["n_seeds"])
+    n_a, n_b = arm_a["n_seeds"], arm_b["n_seeds"]
+    n = min(n_a, n_b)
     diff = arm_b["score_mean"] - arm_a["score_mean"]
-    m = mde_unpaired(arm_a["score_std"], arm_b["score_std"], n)
+    m = mde_unpaired(arm_a["score_std"], arm_b["score_std"], n_a, n_b)
     pooled = float(np.sqrt((arm_a["score_std"] ** 2 + arm_b["score_std"] ** 2) / 2.0))
     # Degenerate guard: zero observed variance (e.g. n=1, or every seed landing
     # identically) would otherwise report any difference as "resolved".
@@ -210,6 +228,8 @@ def compare(arm_a, arm_b):
             else f"unresolved (|{diff:+.1f}| <= {m:.1f} pts)"
         ),
         "n_seeds": n,
+        "n_seeds_a": n_a,
+        "n_seeds_b": n_b,
         "pooled_std": pooled,
         "seeds_needed_for_observed_diff": seeds_needed(pooled, max(abs(diff), 0.5)),
     }

@@ -732,6 +732,33 @@ Prompted by whether the wide readout survives deeper trees. Analysis, not experi
 * **First coherent quantum data point**: seed 0 scored **`89.1%`** at 30 epochs (per-block weights, `top_layer_qubits`) — above the 15-epoch diagnostic's `78.4%` and above the hybrid's `79.4%`. One seed, so provisional, but it suggests the coherent tree is not merely equal to the hybrid but better, consistent with the pilot's plateau analysis showing it still improving past epoch 15.
 * **Standing caution**: `classical_bare` has now moved `33.9 -> 56.7 -> 80.8` across three tuner revisions, entirely from how the search space was defined. Every one of those numbers was reported at the time as a measurement. **Treat any single tuned baseline as provisional until the search space itself has been sanity-checked** — the MLP reference exists precisely to catch this and would have flagged the first two.
 
+### [2026-07-29] Task R7 COMPLETE: The Coherent Tree Is the Best Model the Project Has, at the Smallest Parameter Count
+* **Result** (coherent tree, `COHERENT_ARCH`, per-block level-1 weights, 1024/30, scored on the last-5 mean):
+
+  | model | score | params | n |
+  |---|---|---|---|
+  | `mlp_reference` | `96.0 ± 1.5` | 999 | 21 |
+  | **`quantum_coherent`** | **`89.3 ± 3.9`** | **287** | 4 |
+  | `classical_full` (CP + residual + dropout) | `88.4 ± 5.5` | 352 | 21 |
+  | `classical_bare` (CP, corrected rank sweep) | `79.6 ± 10.3` | 428 | 21 |
+  | `quantum_hybrid` | `79.4 ± 8.0` | 211 | 30 |
+  | `mlp_param_matched` | `70.5 ± 18.1` | 257 | 21 |
+
+  | comparison vs coherent | diff | resolves ≥ | verdict |
+  |---|---|---|---|
+  | vs `quantum_hybrid` | `+9.9` | 5.7 | **better** |
+  | vs `classical_bare` | `+9.7` | 6.3 | **better** |
+  | vs `classical_full` | `+0.9` | 5.6 | tie |
+  | vs `mlp_param_matched` | `+18.8` | 9.0 | **better** |
+  | vs `mlp_reference` | `−6.7` | 6.2 | worse |
+
+* **The claim this supports**: at **287 parameters** the coherent quantum tower beats the hybrid it replaced, ties the strongest classical tensor network (which needs 352 params *and* residual + dropout), beats the bare CP node (which needs 428), and beats a same-size MLP by 18.8 points. It trails only a 999-param MLP, at 3.5x its size. **This is a resolved parameter-efficiency result, and it is the quantum-vs-classical statement the investigation previously could not make.**
+* **Question A.3 answered.** Under matched constraints — no residual, no dropout — the unitarity-constrained quantum node beats the unconstrained classical CP node by `+9.7` pts (limit 6.3) while using **33% fewer parameters** (287 vs 428). The unitary constraint does not cost representation capacity on this task; it appears to help. This supersedes the earlier "not answerable" verdict, which was an artifact of the rank-matching flaw.
+* **Coherence is doing real work.** Survivor Bloch length fell from `0.98` at init to `0.38–0.73` after training across seeds, and the coherent tree beats the measure-and-re-encode hybrid by 9.9 points. Restoring inter-level entanglement was worth it.
+* **4 seeds is sufficient here, and the earlier "10 seeds" demand was a statistics bug, not a data problem.** `phase15_common.compare` took `n = min(n_a, n_b)` and applied an equal-n pooled formula, discarding every observation in the larger arm. Against arms with n=21–30 this was badly conservative: coherent-vs-hybrid read as "unresolved at a 10.8-pt limit" when the correct Welch limit is `5.7` and the 9.9-pt gap is resolved. **Fixed** to Welch's unequal-variance, unequal-n form. The coherent model's low variance (`3.9` vs the hybrid's `8.0` and the MLP's `18.1`) is what makes small n adequate — low-variance arms need fewer seeds, and the expensive arm here is the low-variance one.
+* **Not settled**: shared vs per-block level-1 weights. All coherent runs used per-block (287 params), matching the 2026-07-17 reference. The shared variant (211 params) is untested and would, if comparable, strengthen the parameter-efficiency claim further. `--shared-l1` exists for whenever it is wanted; it is not blocking.
+* **Reproduce**: `run_r7_coherent --arm baseline --seeds N --out r7base_sN` (one worker per seed; **at most 4–5 concurrently** — ten concurrent 16-qubit `lightning.qubit` processes exhausted 18 GB and six were killed silently). Classical arms: `run_r4_classical_control --coherent --skip-quantum --out-suffix _fixedrank`. Aggregated: `results/r7_coherent_baseline.json`.
+
 ### [2026-07-28] Next Steps (revised: theory phase closing, scaling questions move to CLEVR)
 The theoretical exploration is being closed. Remaining work is finishing the coherent baseline, writing up, and regenerating figures. **The three "what do we do when 16 statevector qubits isn't enough" questions — bigger patches vs SPSA vs bond dimension — are all deferred into the CLEVR scope**, since they are the same question and CLEVR is where the answer actually matters.
 
@@ -843,6 +870,8 @@ The theoretical exploration is being closed. Remaining work is finishing the coh
 | 2026-07-28 | R4: classical CP tree + residual + dropout | 16x16 Overlapping (1024/30) | Score, last-5 mean (21 seeds) | 59.3% ± 2.9 | ⚠️ SUPERSEDED — rank forced to 1 by parameter matching. See corrected row below. |
 | 2026-07-28 | R7: coherent tree, readout=root_multi_pauli | 16x16 Overlapping (1024/15, 1 seed) | Score, last-5 mean | 35.6% | Root qubit's marginal only — a severe bottleneck. |
 | 2026-07-28 | **R7: coherent tree, readout=top_layer_qubits** | 16x16 Overlapping (1024/15, 1 seed) | Score, last-5 mean | **78.4%** (peak 89.1%) | **+43 pts from readout alone.** Level with the hybrid's 79.4% in half the epochs. |
+| 2026-07-29 | **R7 FINAL: coherent tree (287 params)** | 16x16 Overlapping (1024/30) | Score, last-5 mean (4 seeds) | **89.3% ± 3.9** | Beats hybrid +9.9 and classical_bare +9.7 (both resolved); ties classical_full. Best score-per-parameter in the project. |
+| 2026-07-29 | R4 corrected: classical CP bare, rank swept freely | 16x16 Overlapping (1024/30) | Score, last-5 mean (21 seeds) | 79.6% ± 10.3 | 428 params (1.49x quantum). Confirms the 80.8% tuning estimate. |
 | 2026-07-28 | R4 corrected: classical CP bare (rank swept freely) | 16x16 Overlapping (1024/30) | Score, last-5 mean (21 seeds) | 56.7% ± 6.9 | 340 params, lr=0.003/bond_dim=4/rank=2. Matched-constraint arm for Question A.3. |
 | 2026-07-28 | R4 corrected: classical CP + residual + dropout | 16x16 Overlapping (1024/30) | Score, last-5 mean (21 seeds) | 88.4% ± 5.5 | 352 params. +31.7 vs bare — residual/dropout strongly load-bearing classically. |
 
