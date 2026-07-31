@@ -20,8 +20,17 @@ This log tracks the theoretical derivations, simulation results, noisy emulation
 
 ## Current Status & Roadmap
 * **Active Branch**: `thesis/quantum-image-tower`
-* **▶ START HERE (fresh context)**: read this status block, then **[quantum_investigation_roadmap.md](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/llm/quantum_investigation_roadmap.md) Section 3, "Phase 2: CLEVR — Experiment Plan"**, which is written to be executed cold (tasks C0–C5, standing requirements, measured cost model). Code entry points: model `qttn_core.CoherentQTTNClassifier`, config `phase15_common.COHERENT_ARCH`, harness `phase15_common`, guards `test_qttn_core.py` (40 tests). **Do not write a new model class** — per-script model drift caused both audits.
-* **Current Focus (as of 2026-07-29)**: **The theory phase is CLOSED. Next is Phase 2 (CLEVR).** Every decision-gate item in [quantum_investigation_roadmap.md](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/llm/quantum_investigation_roadmap.md) Section 7 is resolved: R1, R1b, R2, R3, R4, R5, R7 done; R6 and R8 dropped with stated reasons. Figures regenerated (Section 8 Phase D). No known internal contradictions remain.
+* **▶ START HERE (fresh context)**: read this status block, then **[quantum_investigation_roadmap.md](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/llm/quantum_investigation_roadmap.md) Section 3, "Phase 2: CLEVR — Experiment Plan"**, which is written to be executed cold (tasks C0–C5, standing requirements, measured cost model). Code entry points: model `qttn_core.CoherentQTTNClassifier`, config `phase15_common.COHERENT_ARCH`, Phase-1 harness `phase15_common`, Phase-2 harness `clevr/clevr_common.py`, data `qnlp/utils/data/clevr_objects.py`, sharded-run merger `clevr/combine_clevr.py`, guards `test_qttn_core.py` + `clevr/test_clevr.py` (**65 tests**). Phase-2 orientation: `qnlp/image_tower/classification/clevr/README.md`. **Do not write a new model class** — per-script model drift caused both audits.
+* **Current Focus (as of 2026-07-31)**: **Phase 2 (CLEVR) is UNDER WAY. C0, C1, C2, C3 and C5 are DONE; C3b dropped by decision; C4 is the only remaining experiment.** The theory phase is CLOSED — every decision-gate item in [quantum_investigation_roadmap.md](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/llm/quantum_investigation_roadmap.md) Section 7 is resolved (R1, R1b, R2, R3, R4, R5, R7 done; R6 and R8 dropped with stated reasons), figures regenerated (Section 8 Phase D), no known internal contradictions.
+* **Phase 2 status**:
+  * **C0 (data) — DONE 2026-07-30.** Two errors in the plan itself were found and fixed: CLEVR has **no 1- or 2-object scenes** (3–10 always), so the datasets are built by **cropping objects out of full scenes**; and the plan's relation helper used **world axes instead of CLEVR's camera-rotated axes**. Data cached at 16/32/64 px, class balance measured (no degenerate head), both verification montages generated and inspected. Code: 12-value readout, multi-head output, `positional` axis, classical controls generalised to any patch size. **65 tests pass** (`test_qttn_core.py` + `clevr/test_clevr.py`).
+  * **C1 (learnability gate) — DONE 2026-07-30, PASSED.** **All four attribute heads are learnable; none dropped.** `material` reaches `82.5%` against a `50.2%` floor at 16×16. **Decision: run at 16×16** (16×16 and 32×32 are statistically tied on every head, so the smaller wins on cost and needs no caveat). ⚠️ Its first run wrongly declared 64×64 unlearnable on all four heads — one hardcoded `lr`, now swept.
+  * **C5 (resolution route) — CLOSED 2026-07-30 with no work needed.** C1 shows 16×16 supports every attribute, so none of bigger patches / SPSA / higher bond dimension is required. Route (a) stays implemented and regression-tested if relations later need it.
+  * **C2 (readout width) — DONE 2026-07-31. ADOPT `top_layer_multi_pauli` (12 values, 462 params).** Chosen on **stability**, not resolved accuracy: 0/3 seed collapses vs the narrow arm's 1/3, and per-head std 5–35× tighter. ⚠️ **Colour lags badly** (27–39% vs a 1186-param MLP's 95.2%) but is **NOT a capacity wall** — `classical_full` wins colour through a *narrower* 8-number head, and the quantum colour curve peaks at epoch 29 of 30. **Under-trained, not capacity-limited.** Report head-by-head, never averaged. ⚠️ 12 observables cost ~3× under adjoint differentiation (65 min → ~3 h per seed): free on hardware, not in simulation.
+  * **C3 (attributes) — DONE 2026-07-31.** **At 462 params the quantum tower beats `classical_full` (551 params) on shape `+12.7` and material `+8.8`, both resolved** — Phase 1's parameter-efficiency claim reproducing on real data. Ties/loses elsewhere: `size` saturated for everyone, **colour `27.0` vs `76.6`**. ⚠️ **Colour is confounded until C3b runs** (tuned classical vs untuned quantum) and must not be cited as a capacity limit meanwhile. ⚠️ `mlp_reference` beats **every** TTN arm on every head — the claim is about the quantum-vs-classical *node*, not about beating classical vision.
+  * **C4 (relational, Question C.2) — NEXT and REQUIRED.** Two arms (`positional=none` vs `on_wire`) plus the four classical controls. Its viability guard must clear the majority floor before any C.2 verdict is read.
+  * **🖥️ USE THE CLUSTER for long / multi-seed runs — it costs nothing locally.** SGE is already set up (`qsub scripts/submit_*.sh`; env `/SAN/intelsys/discoviz/envs/qnlp311/bin/python`; project `/SAN/intelsys/discoviz/fotinos/QNLP`), and seed sharding maps directly onto an SGE **array job** (`#$ -t 1-N`), which is the exact checkpoint layout `combine_clevr.py` expects. **Decisions taken on local-cost grounds should be revisited**: 3 seeds instead of 10 (C2/C3 — the reason several C2 comparisons were unresolved), the dropped C3b lr sweep (the one thing that would close the colour confound), C3c's 90-epoch run, and C4's `ancilla2` escalation. **Full setup checklist, job scripts and merge recipes: `clevr/CLUSTER.md`.** Ready to submit: C3b (lr sweep, 4 lrs × 3 seeds) and C4 (2 arms × 10 seeds), plus data build and verification jobs. **The local cost model below still governs anything run on the laptop**, where 4–5 concurrent workers is the ceiling and contention has already corrupted two measurements this phase.
+  * **⚠️ COST MODEL (LOCAL) IS DIFFERENT for CLEVR.** A quantum seed costs **~62 min**, not Phase 1's ~17.5 min (measured 2026-07-30 on an idle machine; ~2.8× of the gap is unexplained). Whole-phase quantum budget ≈ **8.4 h wall at 5 workers**. Budget from the table in the 2026-07-30 entry, not from the Phase-1 number, and only trust timings taken with nothing else running.
 * **THE RESULT**: the coherent quantum tree scores **`89.3% ± 3.9` at 287 parameters** on 16×16 synthetic shapes (4 seeds, 1024/30, last-5-epoch mean).
 
   | model | score | params |
@@ -42,7 +51,7 @@ This log tracks the theoretical derivations, simulation results, noisy emulation
   * **Classical components**: bounded by a checkable rule — *the encoder may set state-preparation parameters but may not reduce the qubit count the architecture would otherwise require*. This dissolves the R2-vs-B.3 tension: the `+12.6` pts from `multi_axis` came from using all three of a qubit's rotation parameters where `scalar_ry` used one.
   * **Noiseless only.** Noise closed at single-node scale (stable to p≈0.02); full-tree emulation infeasible at $O(4^N)$.
   * **Readout width is the binding constraint**, not an incidental setting: `35.6%` (root qubit) vs `78.4%` (four top-layer wires). χ=1 is a simulation limit, not a design preference.
-* **Deferred into CLEVR (one question, three options)**: 16×16 cannot support CLEVR's ">80% on 4 attribute heads" criterion. Choose among **bigger patches** (works today; classical preprocessing, not quantum scaling), **SPSA** (deeper trees), or **higher bond dimension** (principled; needs TN training) — against real data rather than in the abstract.
+* **~~Deferred into CLEVR (one question, three options)~~ — RESOLVED 2026-07-30 by C1, and the premise was wrong.** This said "16×16 cannot support CLEVR's >80% on 4 attribute heads criterion" and offered bigger patches / SPSA / higher bond dimension. **C1 measured the opposite**: at 16×16 a classical reference reaches `95.2 / 69.9 / 82.5 / 99.0` on colour/shape/material/size, and 32×32 is statistically tied. The prediction assumed whole 480×320 scenes downsampled to 16×16; C0 crops individual objects instead, so an object fills the frame. **No scaling route is needed — C5 is closed.**
 * **Carried into CLEVR as requirements**: matched-parameter classical controls from day one; Question C.2 run both ways; noiseless only; resolution limit reported with every comparison.
 * **The four rules CLEVR inherits** (each from a specific Phase-1 failure): matched-parameter classical controls from day one; report the resolution limit with every comparison; noiseless only; and **sweep, never derive, any capacity parameter** — deriving CP rank from a parameter budget silently forced rank=1 and produced three different "measurements" of the same baseline.
 * **Two caveats to keep visible in the write-up**: the classical arms were hyperparameter-tuned while the quantum arm inherited `lr=0.03` from R1 (so the quantum result is conservative), and `classical_bare` moved `33.9 → 56.7 → 79.6` across three revisions of the search space — the MLP reference is what caught that, and it is now enforced in the figure code.
@@ -811,12 +820,205 @@ The theoretical exploration is being closed. Remaining work is finishing the coh
 6. **Noise write-up** — no experiments. Tolerance characterised at single-node scale, training-under-noise shown not to help, full-tree emulation infeasible at $O(4^N)$. State the single-node limitation.
 
 **Deferred into CLEVR (Phase 2) — one decision, three options:**
-7. 16x16 cannot support CLEVR's ">80% on all 4 attribute heads" criterion. The options are **bigger patches** (32x32 at 8x8 patches keeps 16 qubits; works today, but it is classical preprocessing, not quantum scaling), **SPSA** (genuinely deeper trees, ~1 day, uncertain), or **higher bond dimension** (the principled fix, needs tensor-network training). Decide inside CLEVR against real data rather than in the abstract.
+7. ⚠️ **SUPERSEDED 2026-07-30 by Task C1 — this prediction was measured false.** ~~16x16 cannot support CLEVR's ">80% on all 4 attribute heads" criterion. The options are **bigger patches**, **SPSA**, or **higher bond dimension**. Decide inside CLEVR against real data rather than in the abstract.~~ It was decided against real data, and the answer was that no scaling route is needed: at 16×16 the classical reference reaches `95.2 / 69.9 / 82.5 / 99.0`. The premise assumed downsampled full scenes; C0 crops individual objects. C5 is closed.
 
 **Carried into CLEVR as requirements** (established by this work):
 * **Classical controls from day one** — matched-parameter reference alongside every accuracy claim, with rank swept freely (see the R4 correction above).
 * **Question C.2 is required** — run the relational task with and without the spatial ancilla. R3's `-19.5` came from a translation-invariant task and says nothing about relational reasoning.
 * **Noiseless only.**
+
+### [2026-07-30] Task C0 COMPLETE: CLEVR Data Pipeline — and Two Errors in the Phase-2 Plan Itself
+
+* **Objective**: build the CLEVR datasets for Phase 2 (single-object attributes, two-object relations) at 16/32/64 px, plus the code changes C2–C4 need.
+* **Motivation / narrative fit**: Phase 1 closed with a parameter-efficiency result on a 4-class synthetic task. Phase 2 asks whether it survives on real data with compositional attributes and genuine spatial relations — the capacity a VLM image tower actually needs. C0 is the gate on everything else.
+* **Branch**: `thesis/quantum-image-tower`. **Noiseless only**, per the standing scope decision.
+
+**Error 1 — the plan's core data instruction is impossible.** Both `quantum_investigation_roadmap.md` C0 and `quantum_implementation_plan.md` Steps 2/3 say "filter to scenes with exactly one object" / "exactly two objects". **CLEVR renders 3–10 objects per scene by construction.** Verified against `dpdl-benchmark/clevr` on HuggingFace: dataset info reports 70k train / 15k test scenes, and sampled rows have 8, 5 and 3 objects. Both filters return **zero rows**. This instruction survived from the original plan through every audit because nobody had run it.
+
+**Fix — depth-normalised object crops**, `qnlp/utils/data/clevr_objects.py`. Crop side = `CROP_K / depth`, using the `pixel_coords = [x, y, depth]` the parquet already carries. The design point:
+
+$$\text{fill fraction} = \frac{2 F_{px} \cdot r_{world}/\text{depth}}{\text{CROP\_K}/\text{depth}} = \frac{2 F_{px} \, r_{world}}{\text{CROP\_K}}$$
+
+**The depth cancels.** A large object fills the same fraction of its box wherever it sits, and a small one exactly half that — so "how much of the frame is filled" is a clean distance-invariant cue for `size`. A *tight* bounding-box crop would normalise that cue away and make the `size` head unlearnable **by construction** — a data bug that would have read as an architecture result. `CROP_K = 1470` calibrated once against a rendered montage (measured fill: small `0.250`, large `0.500`, matching the analytic prediction exactly) and **frozen**. Calibration is not repeated per experiment — a moving data definition is how `classical_bare` acquired three different "measurements" in Phase 1.
+
+**Error 2 — the relation helper uses the wrong axes.** `quantum_implementation_plan.md` Step 3 compares raw world-frame `3d_coords` x and y. CLEVR's left/right/front/behind are defined against the **camera-rotated** basis, ~49° from world x, so that helper mislabels a large fraction of pairs. Replaced with projections onto CLEVR's canonical `DIR_RIGHT`/`DIR_FRONT`, plus a `1.5×` dominance margin that drops near-diagonal pairs — those have no defensible label and would cap accuracy for reasons unrelated to the model. Both files corrected; the correct version is pinned by a test that also pins the *old* helper's disagreement.
+
+**A well-posedness bug I introduced and caught before it cost anything.** My first relation implementation cropped the box containing both objects. That is ill-posed: the crop carries no information about which object is the reference, so "b is left of a" and "a is right of b" are **the same picture with opposite labels** — roughly half the dataset unlearnable noise, and a fake null for Question C.2. Fixed by making the reference object the **centred** one, matching the single-object convention. This also allows the (a,b) order to be random, which is what keeps all four relations equally frequent. Note that any *deterministic* ordering collapses the task instead: ordering by screen position makes left/right almost free, and ordering by depth does the same to front/behind. Verified numerically (crop-centre colour saturation `0.56` vs corner `0.00`) and by montage, not by assumption.
+
+**Measured class balance — the roadmap's degeneracy concern does not materialise.** C0 was told to watch for `material` and `size` being near-degenerate:
+
+| split | n | color (maj.) | shape | material | size |
+|---|---|---|---|---|---|
+| objects/train | 12,918 | 12.9% | 33.9% | 51.0% | 54.0% |
+| objects/val | 6,507 | 13.5% | 34.3% | 50.1% | 54.1% |
+| relations/train | 1,996 | — | — | — | balanced 25.0% |
+| relations/val | 1,424 | — | — | — | balanced 25.0% |
+
+All four attribute heads are close to uniform. **Because the pipeline crops rather than downsampling whole scenes, the resolution warning in `quantum_implementation_plan.md:79` is superseded**: specular highlights are plainly visible in 64px crops, so `material` has signal to find. Whether a 16-qubit tower can *use* it is C1's question, not a data question.
+
+**Code changes (all additive; 51/51 `test_qttn_core.py` tests pass, up from 41):**
+* `qttn_core.top_layer_multi_pauli` readout — ⟨X⟩,⟨Y⟩,⟨Z⟩ on all four top-layer wires, **12 values at no extra wires and no extra gates**, only more measurements. This is C2's arm.
+* `qttn_core` multi-head: `n_classes` accepts an int (unchanged Phase-1 path, returns a tensor off a plain `nn.Linear`) or a dict (one head per attribute off the **same** readout). Sharing the readout is deliberate — whether four numbers can carry four attributes is exactly what C2 measures.
+* `CoherentQTTNClassifier(positional=...)`, a **separate axis from `mode`** so the guard that `mode` only accepts baseline/reupload keeps holding. `on_wire` adds a learned rotation pair on each patch's own wire (32 params, zero extra wires). `ancilla2` deliberately **raises** rather than silently falling back — it is C4's escalation arm and only worth its ~4× cost if the free arm resolves.
+* `run_r4_classical_control`: `ClassicalTTNClassifier.forward` and `MLPReference.forward` **hardcoded 4×4 patches**, silently ignoring the `patch_size` their constructors accepted. Generalised, so C5 route (a) works for the classical arms too. **Verified byte-identical at 16×16**: parameter counts still 428 / 352 / 999 / 257, matching every logged R4 value.
+* **C5 route (a) needs no new code** and is now regression-tested: 16×16/p4, 32×32/p8 and 64×64/p16 all give a 16-patch, 16-qubit tree with a wider `patch_embed`. The test asserts the circuit width is *identical* at all three — which is precisely why this is **resolution** scaling, not quantum scaling.
+* New: `clevr_common.py` (harness), `test_clevr.py` (13 tests, all passing), `build_clevr_crops.py`, `run_c1_learnability.py`, `run_c2_readout.py`, `run_c3_attributes.py`, `run_c4_relational.py`.
+
+**Harness note.** `clevr_common` forks the training loop from `phase15_common` (dataset + multi-head) but imports **every statistic** from it — there is exactly one Welch implementation in the repo, pinned by a test. Models come from `qttn_core`; **no new model class**. One deliberate protocol deviation, also pinned: `test_samples` 64 → 512, because 64 samples across an 8-way `color` head is ~8 per class, which would make evaluation noise larger than most effects being measured. Train 1024 / 30 epochs / batch 32 / lr 0.03 / last-5 scoring / unpaired Welch are unchanged.
+
+**Reproduce**:
+```
+python -m qnlp.image_tower.classification.clevr.build_clevr_crops --calibrate
+python -m qnlp.image_tower.classification.clevr.build_clevr_crops
+python -m qnlp.image_tower.classification.clevr.build_clevr_crops --relation-montage
+python -m pytest qnlp/image_tower/classification/quantum/test_qttn_core.py qnlp/image_tower/classification/clevr/test_clevr.py -q
+```
+Cache at `data/datasets/clevr_{objects,relations}_{16,32,64}_{train,val}.npz` + manifests. Figures: `figures/clevr_crop_calibration.png`, `figures/clevr_relation_examples.png`.
+
+**Measured cost model — Phase 1's figure does not carry over.** Idle machine, 4 heads, `lightning.qubit` + adjoint:
+
+| protocol | s/epoch | min per 30-epoch run |
+|---|---|---|
+| 1024 train / 64 test | 97.6 | 48.8 |
+| 1024 train / 256 test | 107.1 | 53.6 |
+| **1024 train / 512 test** (`CLEVR_PROTOCOL`) | **124.6** | **62.3** |
+
+A CLEVR quantum seed costs **~62 min**, against the ~17.5 min R7 measured on synthetic shapes. Only part of that is the larger validation set: eval is 0.060 s/sample, so the 448 extra samples cost 13.5 min, and even at Phase 1's 64-sample eval a CLEVR run is 48.8 min. **The residual ~2.8× is unexplained** — same circuit, same 16 wires, same ansatz. I am recording it as an empirical figure rather than inventing a mechanism; if it matters later it needs its own profiling. Planned quantum budget at 5 workers: C2 ≈ 2.1 h, C3 ≈ 2.1 h, C4 ≈ 4.2 h, **~8.4 h wall**.
+
+**Measurement caution, worth carrying.** My first attempt at this table was run while three other jobs were on the machine and produced **64 test samples costing 8× more per epoch than 512** — impossible on its face, and it would have justified a completely wrong conclusion about where the cost sits. Timing measurements on this box are only valid when nothing else is running. This is the same class of error as R4's mis-specified baseline: a number that looks like a measurement and is an artifact of the setup.
+
+**Next**: C1 (learnability gate) — classical only, minutes, gates everything else.
+
+### [2026-07-30] Task C1 COMPLETE: Every Attribute Is Learnable at Every Resolution — and the Gate Nearly Reported the Opposite
+
+* **Objective**: the learnability gate. Train **only** the classical MLP reference on all four attributes at 16/32/64 px, so that no quantum null is ever attributed to the architecture when it belongs to the data.
+* **Motivation / narrative fit**: this is the R4 lesson applied *before* spending compute. It also settles the deferred C5 resolution question against real data rather than in the abstract.
+* **Result** (3 seeds, 30 epochs, best learning rate per resolution, `MLPReference(hidden=16)`):
+
+  | resolution | params | lr | color | shape | material | size |
+  |---|---|---|---|---|---|---|
+  | **16×16** | 1186 | 0.01 | `95.2 ± 0.7` | `69.9 ± 2.5` | `82.5 ± 3.1` | `99.0 ± 0.6` |
+  | 32×32 | 1618 | 0.003 | `93.6 ± 2.1` | `72.2 ± 4.1` | `84.0 ± 2.4` | `98.2 ± 0.9` |
+  | 64×64 | 3346 | 0.003 | `85.7 ± 8.4` | `65.1 ± 11.5` | `65.7 ± 10.5` | `96.1 ± 2.7` |
+  | *majority floor* | | | 15.2 | 35.4 | 50.2 | 50.6 |
+
+* **All four heads are learnable, and no head is dropped.** Every attribute clears its majority-class floor by far more than the resolution limit at both 16×16 and 32×32. **`material` is learnable at 16×16 (`82.5%` vs a 50.2% floor)** — this directly supersedes the standing warning in `quantum_implementation_plan.md:79` that rubber-vs-metal would be "close to unlearnable" at 16×16. That warning assumed whole 480×320 scenes downsampled to 16×16; C0 crops instead, so the object fills the frame and its specular highlight survives.
+* **Decision: run C2–C4 at 16×16.** 16×16 and 32×32 are **statistically tied** on every head (differences −1.6 to +2.3 pts against 4.8–9.4 pt limits). The smaller resolution wins the tie on three independent grounds: it is what Phase 1 validated, it is what the quantum cost model was measured at, and it avoids the C5 route-(a) caveat entirely. **C5 therefore closes with no scaling work**: 16×16 suffices, so neither SPSA nor higher bond dimension is needed for CLEVR.
+
+**⚠️ The gate's first run was wrong, in the project's signature failure mode.** The initial version hardcoded `lr=0.01` (inherited from R4's MLP) and reported **64×64 as unlearnable on all four heads** — every score sitting exactly at its majority-class floor, with 32×32 showing wild seed variance (`±17.9` on colour). Both were artifacts:
+
+| 64×64, 30 epochs | color | shape | material | size |
+|---|---|---|---|---|
+| lr = 0.01 (hardcoded) | 10.9 | 35.4 | 50.1 | 50.6 |
+| **lr = 0.003** | **91.9** | **75.6** | **77.2** | **97.5** |
+| lr = 0.03 | 10.9 | 35.4 | 50.0 | 50.6 |
+| lr = 0.03, 120 epochs | 10.9 | 35.4 | 50.1 | 50.6 |
+
+  Two hypotheses were tested and **rejected** before the real cause was found: tanh saturation in the patch encoder (no — `|tanh| > 0.99` was 0.0% at every resolution, and `d(tanh)/dz ≈ 0.98`), and the `enc_dim=3` bottleneck (no — 64×64 was equally dead at `enc_dim=12`, to identical decimals, which is what revealed the model was emitting a *constant*). The loss trace settled it: at 64×64 the loss sat at `4.554` — exactly the summed entropy of the four priors — from epoch 1, with a 10× smaller gradient norm.
+
+  **This is the `classical_bare` failure (33.9 → 56.7 → 79.6) reproduced inside the gate itself**, and it would have been worse here than in R4: C1 gates the entire phase, so a false "unlearnable" would have dropped attributes from the thesis and pushed a resolution decision on the strength of one arbitrary learning rate. **Fixed**: `run_c1_learnability.py` now sweeps lr per resolution and reports the best, with the incident recorded in the code so it cannot be quietly re-introduced. The reported numbers are deliberately an **optimistic ceiling** — correct for a gate, whose question is "can a classical model learn this *at all*".
+
+* **A second, smaller correction in the same script.** The recommendation originally took `argmax` of the mean over heads, which selected 32×32 over 16×16 on a **0.4-point** difference against 5–9 point limits. It now picks the *smallest* resolution not resolvably worse than the best on any head. Choosing a resolution on noise would have moved the whole phase for no measurable gain.
+* **Reproduce**: `python -m qnlp.image_tower.classification.clevr.run_c1_learnability --seeds 0 1 2` → `results/c1_learnability_objects.json`.
+* **Next**: C2 (readout width) at 16×16, then C3, then C4.
+
+### [2026-07-31] Task C3 COMPLETE: Parameter Efficiency Holds on 2 of 4 Heads — and Colour Fails Badly, with a Tuning Confound That Must Be Closed First
+
+* **Objective**: single-object CLEVR attribute classification, quantum coherent tree vs its classical counterparts, four heads off one shared readout.
+* **Config**: 16×16, readout `top_layer_multi_pauli` (C2's choice), 1024/512/30. Quantum 3 seeds (sharded, ~3 h each); classical arms 10 seeds with rank swept freely. Unpaired Welch.
+* **Result**:
+
+  | arm | params | color | shape | material | size |
+  |---|---|---|---|---|---|---|
+  | **`quantum_coherent`** | **462** | `27.0 ± 3.8` | **`58.9 ± 2.7`** | **`70.0 ± 1.0`** | `96.1 ± 0.7` |
+  | `classical_full` (CP + residual + dropout) | 551 | `76.6 ± 10.5` | `46.3 ± 6.7` | `61.2 ± 7.7` | `97.7 ± 0.6` |
+  | `classical_bare` (CP) | 563 | `52.5 ± 21.1` | `36.5 ± 3.7` | `56.8 ± 8.9` | `88.9 ± 17.9` |
+  | `mlp_reference` | 1186 | `90.4 ± 7.3` | `64.5 ± 10.0` | `81.8 ± 5.2` | `99.1 ± 0.4` |
+  | `mlp_param_matched` | 290 | `26.2 ± 17.0` | `36.9 ± 10.2` | `53.5 ± 8.0` | `84.8 ± 22.0` |
+  | *majority floor* | | 15.2 | 35.4 | 50.2 | 50.6 |
+
+* **The parameter-efficiency claim holds on shape and material, and it is a real result.** At **462 parameters** — fewer than both classical tensor networks (551, 563) — the quantum tower beats `classical_full` by **+12.7** on shape (limit 6.0) and **+8.8** on material (limit 5.6), and `classical_bare` by **+22.4** and **+13.2**. Both resolved. This is the Phase-1 claim reproducing on real data against the strongest classical TTN, which needs residual *and* dropout to get where it gets.
+* **⚠️ Colour fails badly: `27.0` vs `classical_full`'s `76.6` (−49.6, limit 8.8).** The quantum arm is beaten by every arm except the 290-param MLP, which it merely ties. Colour is the 8-way head — the one needing the most information — and C2 predicted exactly this. On `size` everything is saturated (`96.1` vs `97.7`, resolved but 1.6 pts and of no consequence).
+* **⚠️ THE COLOUR RESULT IS CONFOUNDED UNTIL C3B RUNS.** (Originally recorded 2026-07-31 as permanent, when the lr sweep was dropped for *local* cost; **reversed the same day** once the cluster was brought in — `scripts/submit_c3b_lr_sweep.sh` is written and ready to submit.) The classical arms got a **60-config sweep** (4 lrs × 3 bond dims × 5 ranks); the quantum arm ran at a **single inherited `lr=0.03`** from Phase 1. C1 showed this session that one untuned lr can drive an arm to its floor on every head, so optimisation and architecture cannot be separated here.
+
+  **Consequence, and it binds the write-up until C3b lands**: the colour gap **must not be cited as evidence of a readout or capacity limit.** The only defensible statement meanwhile is *"at `lr=0.03`, untuned, the quantum tower reached 27.0% on the 8-way colour head while tuned classical arms reached 52.5–76.6%; the comparison is confounded by tuning asymmetry and does not distinguish architecture from optimisation."* Anything stronger repeats the `classical_bare` error (33.9 → 56.7 → 79.6) with the roles reversed — an untuned arm reported as a measurement. **If C3b finds a better lr, the whole C3 comparison must be re-run at it**, otherwise the asymmetry is inverted rather than removed.
+
+  **Shape and material are unaffected and remain solid**: they are quantum *wins* achieved *despite* the handicap, so closing the confound could only strengthen them. They are, if anything, understated.
+
+* **✅ TWO FREE DIAGNOSTICS NARROW THE COLOUR CAUSE, at zero compute — and they rule OUT the capacity reading.** Both came from artifacts already on disk:
+  1. **Readout width is not the constraint.** `classical_full` reaches `76.6%` on colour with a **bond_dim=8** head (8 numbers) and `classical_bare` `52.5%` with **4** — both *narrower* than the quantum model's **12**. A wider readout scoring far worse cannot be a width limit.
+  2. **Colour never converged.** Mean quantum curve peaks at **epoch 29 of 30**, gaining `+6.1` pts from the first to the second half of training. `size` plateaus by epoch 3, `material` by epoch 10. The 30-epoch budget is inherited from a **4-class** synthetic task; the **8-way** head is the slowest to converge and was cut off mid-climb.
+
+  **Revised reading: colour is under-trained, not capacity-limited.** The epoch budget — not the readout, and not necessarily lr — is the leading suspect.
+
+  **Per-seed refinement, and it qualifies the above.** The mean curve's late rise is **driven by one seed, not all three**:
+
+  | seed | colour score | peak | slope over last 10 epochs |
+  |---|---|---|---|
+  | **0** | **31.2** | 35.0 @ ep27 | **+0.750 pts/epoch — still climbing** |
+  | 1 | 23.8 | 28.1 @ ep22 | −0.245 (plateaued) |
+  | 2 | 25.9 | 28.7 @ ep22 | −0.182 (plateaued) |
+
+  So it is not that colour is uniformly cut off mid-climb: **two seeds plateaued near 24–26%, and one found a better trajectory and was still gaining `0.75` pts/epoch when the budget ended.** Seed 0 is also the best run overall (mean over heads `64.7` vs `61.9`/`62.4`). That pattern — most seeds settling low, one escaping — is an optimisation signature, and it is what makes the long-run probe below worth doing.
+
+> **📌 RECOMMENDED NEXT EXPERIMENT — train one promising seed for longer.**
+>
+> **What**: `quantum_coherent`, **seed 0**, at 16×16 with `top_layer_multi_pauli`, everything else at the protocol of record, but **90 epochs instead of 30**.
+>
+> **Why seed 0**: it is the only seed still improving at the cutoff (`+0.750` pts/epoch on colour over the last 10 epochs), it has the highest colour score (`31.2`) and the best overall mean (`64.7`). The other two had already flattened, so extending them would likely confirm a plateau rather than reveal a ceiling.
+>
+> **What it settles**: whether colour's `27%` is the epoch budget or the architecture. If seed 0 keeps climbing to 50–60%, the 30-epoch budget — inherited from a **4-class** synthetic task and never re-examined for an **8-way** head — is the binding constraint, and every C3 colour number is an underestimate. If it plateaus near 35%, the ceiling is real and colour becomes a genuine architectural finding rather than a confound.
+>
+> **Cost**: ~9 h for one unattended seed (3× the 30-epoch run at ~3 h). No sharding needed. Cheaper variant: 60 epochs (~6 h), enough to see whether the climb continues past 30.
+>
+> **Read it as a diagnostic, not a result** — one seed cannot support a claim, and it must not be quoted as an arm. Its only job is to tell us which of the two explanations to write up. If it does show the budget is binding, the honest follow-up is to re-run the *whole* C3 comparison at the longer budget, since the classical arms would have to be given the same extension.
+* **Interpretability, and it cuts against the tensor-network family, not the quantum model.** `mlp_reference` (1186 params) beats **every** TTN arm on **every** head — quantum and classical alike. So the honest framing is not "quantum vs classical" but: *within the tensor-network family, at matched size, the unitary quantum node beats the unconstrained classical CP node on 2 of 4 attributes; the whole family trails a plain MLP of 2.6× the size.* Do not quote the quantum-vs-`classical_bare` gap on its own — `classical_bare` is beaten by the MLP too, so it is a weak baseline (the R4 interpretability gate).
+* **Stability strongly favours the quantum model**, consistent with C2: quantum std `3.8/2.7/1.0/0.7`, against `classical_full` `10.5/6.7/7.7/0.6` and `classical_bare` `21.1/3.7/8.9/17.9`. 0/3 quantum seeds collapsed. Low variance is why 3 quantum seeds resolve against 10 classical ones.
+* **Reproduce**: 3 workers `run_c3_attributes --only-quantum --seeds S --out c3_sS`, plus `run_c3_attributes --skip-quantum --seeds 0..9 --out c3_cls`; merged to `results/c3_combined_results.json`.
+* **Next**: **C3b** (lr sweep) and **C4** (relational, Question C.2), both written as SGE array jobs and ready to submit — see `clevr/CLUSTER.md`. C3b was briefly dropped for local cost and reinstated once the cluster was in use; it is what closes the colour confound.
+
+### [2026-07-31] Task C2 COMPLETE: The Wide Readout Buys STABILITY, Not Resolved Accuracy — and Colour Exposes a Real Capacity Wall
+
+* **Objective**: does a 4-value readout (`top_layer_qubits`) bottleneck four simultaneous attribute heads spanning 8×3×2×2 = 96 combinations, versus 12 values (`top_layer_multi_pauli`, ⟨X⟩⟨Y⟩⟨Z⟩ on each top-layer wire)?
+* **Config**: 16×16 (C1's resolution), `COHERENT_ARCH` + per-block level-1 weights, 3 seeds, 1024/512/30, lr 0.03, sharded one worker per seed and merged with `combine_clevr.py`.
+* **Result**:
+
+  | arm | params | color | shape | material | size | collapses |
+  |---|---|---|---|---|---|---|
+  | `top_layer_qubits` (4 values) | 342 | `29.4 ± 21.2` | `42.7 ± 7.7` | `56.0 ± 7.4` | `79.0 ± 24.6` | **1/3** |
+  | `top_layer_multi_pauli` (12 values) | 462 | `27.0 ± 3.8` | `58.9 ± 2.7` | `70.0 ± 1.0` | `96.1 ± 0.7` | **0/3** |
+  | *converged-only, narrow* | | 38.7 | 46.8 | 59.3 | 93.1 | (n=2) |
+  | *MLP reference (C1, classical)* | 1186 | **95.2** | **69.9** | **82.5** | **99.0** | — |
+
+* **The formal accuracy verdict is "unresolved" on every head, and that verdict is misleading.** The differences are large (`+16.2` shape, `+14.0` material, `+17.1` size) but so are the limits (20.3, 18.7, 61.1) — because the *narrow* arm's variance is enormous. **The variance is the finding, not an obstacle to it.**
+* **DECISION: adopt `top_layer_multi_pauli` for C3/C4, on stability rather than accuracy grounds.**
+  * **Collapse rate 0/3 vs 1/3.**
+  * **Per-head std 5–35× tighter**: `3.8 / 2.7 / 1.0 / 0.7` against `21.2 / 7.7 / 7.4 / 24.6`. Low variance is worth real compute: it is what made R7's 4-seed coherent result resolvable against 30-seed arms.
+  * Better on 3 of 4 heads converged-only (+12.1 shape, +10.7 material, +3.0 size); colour is `−11.7` but the narrow arm's colour estimate is two seeds spanning `24.8–52.6`, so it is not a meaningful comparison.
+* **⚠️ Colour is far behind the classical arms** — both quantum arms sit at **27–39%** on the 8-way head while a 1186-param MLP reaches **95.2%**, against a 15.2% floor, while every other head lands within 3–24 points of the classical reference.
+
+  **~~This is a capacity wall — 12 real numbers off four top-layer qubits cannot carry 8-way colour.~~ RETRACTED 2026-07-31, refuted by two free diagnostics** (see the C3 entry): `classical_full` reaches `76.6%` on colour through a **bond_dim=8** head — i.e. **8 numbers, narrower than the quantum model's 12** — and `classical_bare` reaches `52.5%` through **4**. A wider readout performing worse rules out readout width as the constraint. The real cause is that **colour had not converged**: its mean curve peaks at **epoch 29 of 30** and rises `+6.1` pts between the first and second halves of training, where `size` is done by epoch 3. The 30-epoch budget was inherited from a **4-class** synthetic task and is too short for the 8-way head. I stated the capacity reading before checking either, and both checks were free.
+* **My lr hypothesis was partly wrong, and the data says so.** I predicted the 1/3 collapse came from `lr=0.03` being too high for a 4-head summed loss (~4× the Phase-1 gradient scale). But the **wide arm had 0/3 collapses at the same lr**. So lr is not sufficient on its own — the *narrow readout* is what is fragile, and readout width modulates optimisation stability. An lr sweep is still worth doing for C3, but it is no longer the leading explanation.
+* **Cost-model correction**: I described the wide readout as "no extra wires, no extra gates, only more measurements". True of the circuit, **false of the simulation** — adjoint differentiation needs one backward pass per observable, so 12 observables costs **~3×** what 4 does. Measured: narrow arm 65 min/seed, wide arm ~3 h/seed. The wide readout is free on hardware and 3× in simulation. Partly offset: its low variance means far fewer seeds are needed.
+* **Known limitation**: `run_c2_readout.readout_verdict` decides only on resolved accuracy differences and is blind to collapse rates and variance, so it recommended KEEP on data that says ADOPT. The stability signal is in `combine_clevr.py`'s output above it. Fix the verdict function before reusing it.
+* **Reproduce**: 3 workers, `run_c2_readout --img-size 16 --seeds S --out c2_sS`, then `combine_clevr --prefix c2 --seeds 0 1 2 --arms top_layer_qubits top_layer_multi_pauli --params 342 462` → `results/c2_combined_results.json`.
+
+### [2026-07-30] Tooling Fix: `phase15_common.seeds_needed` Did Not Converge — It Over-Reported Required Seeds by 5x
+
+Found while building the C2 combiner, which prints "seeds needed for the observed difference" beside every comparison.
+
+* **The bug**: the fixed-point iteration `n <- ceil(2 (t_crit(2n-2) . std / effect)^2)` **oscillates and never converges whenever the answer is small**. Trace for std 1.49 / effect 8.9: `[1, 10, 1, 10, ...]`. It returned whichever value the 100-iteration loop happened to stop on. Cause: when `n_new` lands on 1, `t_crit(2n - 2) = t_crit(0)` misses the table and falls through to `_T_CRIT_95[1] = 12.706`, which blows the estimate straight back up.
+* **It failed in the expensive direction.** For an effect already resolved at 3 seeds it advised **~10 seeds/arm**. Since this function exists to decide *whether to spend more compute*, that is exactly backwards — and at ~62 min per CLEVR seed it would have bought hours of pointless runs.
+
+  | pooled std | effect | before | after |
+  |---|---|---|---|
+  | 1.49 | 8.9 | 10 | **2** |
+  | 5.0 | 20.0 | 21 | **3** |
+  | 2.0 | 15.0 | 6 | **2** |
+
+* **Fix**: a direct upward search for the smallest `n` satisfying `n >= 2 (t_crit(2n-2) . std / effect)^2`. The right-hand side falls with `n` and the left rises, so the crossing is unique and the result deterministic.
+* **Effect on logged Phase-1 numbers: negligible, but not nil.** The converged regime is unchanged (R1b 2pt: `130` exact; R2 2pt: `48`, 3pt: `22` exact). Three logged R1b values move by **one seed** — 3pt `58 → 59`, 5pt `21 → 22`, 8pt `9 → 10` — because the old iteration settled on a fixed point of `n = f(n)` rather than the smallest `n` actually meeting the criterion, so it was off by one in the *anti-conservative* direction. **No Phase-1 conclusion depends on this**; the numbers were advisory and "5-pt needs ~21" versus "~22" changes no decision. The 2026-07-28 R1b entry is left as originally written, with this note as the correction of record.
+* **Guarded**: `test_qttn_core.py::test_seeds_needed_converges_and_satisfies_its_own_criterion` now checks convergence, minimality, monotonicity in effect size, and reproduction of the logged R1b/R2 values. The bug was silent for all of Phase 1 precisely because nothing ever checked the number against its own definition.
 
 ---
 
@@ -911,6 +1113,21 @@ The theoretical exploration is being closed. Remaining work is finishing the coh
 | 2026-07-28 | **R7: coherent tree, readout=top_layer_qubits** | 16x16 Overlapping (1024/15, 1 seed) | Score, last-5 mean | **78.4%** (peak 89.1%) | **+43 pts from readout alone.** Level with the hybrid's 79.4% in half the epochs. |
 | 2026-07-29 | **R7 FINAL: coherent tree (287 params)** | 16x16 Overlapping (1024/30) | Score, last-5 mean (4 seeds) | **89.3% ± 3.9** | Beats hybrid +9.9 and classical_bare +9.7 (both resolved); ties classical_full. Best score-per-parameter in the project. |
 | 2026-07-29 | R4 corrected: classical CP bare, rank swept freely | 16x16 Overlapping (1024/30) | Score, last-5 mean (21 seeds) | 79.6% ± 10.3 | 428 params (1.49x quantum). Confirms the 80.8% tuning estimate. |
+| — | **⚠️ PROTOCOL BOUNDARY 3 — PHASE 2 (CLEVR) BEGINS** | — | — | — | **Every row below is CLEVR object crops, not synthetic shapes, with FOUR simultaneous heads and 512 test samples (vs 64). Protocol otherwise unchanged (1024 train / 30 epochs / lr 0.03 / last-5 mean / unpaired Welch). Do not compare across this boundary.** |
+| 2026-07-30 | C0: CLEVR single-object crops (`CROP_K=1470`) | 3000 train / 1500 val scenes | Crops yielded, per-attribute balance | 12,918 train / 6,507 val | Majority rates: colour 12.9%, shape 33.9%, material 51.0%, size 54.0% — **no degenerate head**. |
+| 2026-07-30 | C0: CLEVR two-object relation crops | 5000 train / 2500 val scenes | Crops yielded, class balance | 1,996 train / 1,424 val | Exactly balanced 25% per relation by subsampling. Reference object centred, else the label is ambiguous. |
+| 2026-07-30 | C0: crop geometry | — | Fraction of crop box filled | small 0.250, large 0.500 | Depth-**invariant** by construction — this is what keeps `size` learnable. Matches the analytic prediction exactly. |
+| 2026-07-30 | **C1: MLP reference, 16×16** (patch 4, lr 0.01) | CLEVR objects (1024/512/30) | Score, last-5 mean (3 seeds) | **95.2 / 69.9 / 82.5 / 99.0** | colour/shape/material/size. 1186 params. **All four heads LEARNABLE** → resolution of record. |
+| 2026-07-30 | C1: MLP reference, 32×32 (patch 8, lr 0.003) | CLEVR objects (1024/512/30) | Score, last-5 mean (3 seeds) | 93.6 / 72.2 / 84.0 / 98.2 | 1618 params. Statistically tied with 16×16 on every head → smaller resolution chosen. |
+| 2026-07-30 | C1: MLP reference, 64×64 (patch 16, lr 0.003) | CLEVR objects (1024/512/30) | Score, last-5 mean (3 seeds) | 85.7 / 65.1 / 65.7 / 96.1 | 3346 params. Learnable, but higher variance; `material` margin inside its limit. |
+| 2026-07-30 | ⚠️ C1 ARTIFACT: same 64×64 model at the hardcoded lr=0.01 | CLEVR objects (1024/512/30) | Score, last-5 mean | 10.9 / 35.4 / 50.1 / 50.6 | **All four heads exactly at their floors.** Pure optimisation artifact — retracted, lr now swept. Not a data limit. |
+| 2026-07-31 | C2: coherent tree, `top_layer_qubits` (4 values, 342 params) | CLEVR objects (1024/512/30) | Score, last-5 mean (3 seeds) | 29.4 ± 21.2 / 42.7 ± 7.7 / 56.0 ± 7.4 / 79.0 ± 24.6 | colour/shape/material/size. ⚠️ **1 of 3 seeds collapsed** (all heads at floor). |
+| 2026-07-31 | **C2: coherent tree, `top_layer_multi_pauli` (12 values, 462 params) — READOUT OF RECORD** | CLEVR objects (1024/512/30) | Score, last-5 mean (3 seeds) | **27.0 ± 3.8 / 58.9 ± 2.7 / 70.0 ± 1.0 / 96.1 ± 0.7** | **0/3 collapses; std 5–35× tighter.** Adopted on stability, not resolved accuracy. Costs ~3× under adjoint (1 backward pass per observable). |
+| 2026-07-31 | **C3: `quantum_coherent` (462 params)** | CLEVR objects (1024/512/30) | Score, last-5 mean (3 seeds) | **27.0 / 58.9 / 70.0 / 96.1** | Same arm as C2's wide readout. **Beats `classical_full` on shape +12.7 (limit 6.0) and material +8.8 (limit 5.6) at fewer params.** |
+| 2026-07-31 | C3: `classical_full` (CP + residual + dropout, 551 params) | CLEVR objects (1024/512/30) | Score, last-5 mean (10 seeds) | 76.6 ± 10.5 / 46.3 ± 6.7 / 61.2 ± 7.7 / 97.7 ± 0.6 | Tuned over 60 configs. Beats quantum on colour +49.6 — ⚠️ **confounded**: quantum was untuned at lr=0.03. |
+| 2026-07-31 | C3: `classical_bare` (CP, rank swept freely, 563 params) | CLEVR objects (1024/512/30) | Score, last-5 mean (10 seeds) | 52.5 ± 21.1 / 36.5 ± 3.7 / 56.8 ± 8.9 / 88.9 ± 17.9 | Loses to `mlp_reference` on every head → weak baseline; do not quote the quantum-vs-bare gap alone (R4 gate). |
+| 2026-07-31 | C3: `mlp_reference` (1186 params) | CLEVR objects (1024/512/30) | Score, last-5 mean (10 seeds) | 90.4 ± 7.3 / 64.5 ± 10.0 / 81.8 ± 5.2 / 99.1 ± 0.4 | **Beats every TTN arm — quantum and classical — on every head.** Bounds what the thesis can claim. |
+| 2026-07-31 | C3: `mlp_param_matched` (290 params) | CLEVR objects (1024/512/30) | Score, last-5 mean (10 seeds) | 26.2 ± 17.0 / 36.9 ± 10.2 / 53.5 ± 8.0 / 84.8 ± 22.0 | Quantum beats it on shape +22.0 and material +16.5; ties on colour and size. |
 | 2026-07-28 | R4 corrected: classical CP bare (rank swept freely) | 16x16 Overlapping (1024/30) | Score, last-5 mean (21 seeds) | 56.7% ± 6.9 | 340 params, lr=0.003/bond_dim=4/rank=2. Matched-constraint arm for Question A.3. |
 | 2026-07-28 | R4 corrected: classical CP + residual + dropout | 16x16 Overlapping (1024/30) | Score, last-5 mean (21 seeds) | 88.4% ± 5.5 | 352 params. +31.7 vs bare — residual/dropout strongly load-bearing classically. |
 

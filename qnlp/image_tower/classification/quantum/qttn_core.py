@@ -45,7 +45,13 @@ NUM_LAYERS = 2
 # the top node, read AFTER that node has acted -- i.e. the root plus the three
 # qubits the tree nominally discards at the top. "top_layer_qubits" is the
 # accurate name and the one to use going forward.
-READOUTS = ("scalar", "root_multi_pauli", "level1_survivors", "top_layer_qubits")
+READOUTS = (
+    "scalar",
+    "root_multi_pauli",
+    "level1_survivors",
+    "top_layer_qubits",
+    "top_layer_multi_pauli",
+)
 READOUT_ALIASES = {"top_layer_qubits": "level1_survivors"}
 ENCODINGS = ("scalar_ry", "multi_axis")
 ANSATZE = ("strongly_entangling", "iqp")
@@ -58,12 +64,46 @@ ANSATZE = ("strongly_entangling", "iqp")
 # Section 7 R3b for why those are not re-run.
 MODES = ("baseline", "reupload", "mixed_channel")
 
+# Explicit-position mechanisms for the coherent tree (CLEVR task C4 / Question C.2).
+# "ancilla2" is declared here but deliberately unbuilt -- see CoherentQTTNClassifier.
+POSITIONALS = ("none", "on_wire", "ancilla2")
+
 READOUT_DIM = {
     "scalar": 1,  # <Z> on the root qubit only
     "root_multi_pauli": 3,  # full Bloch vector of the root qubit -- still ONE qubit's marginal
     "level1_survivors": NUM_QUBITS,  # deprecated alias of top_layer_qubits
     "top_layer_qubits": NUM_QUBITS,  # <Z> on all four wires entering the top node
+    # Full single-qubit information of every top-layer wire. Costs no extra wires
+    # and no extra gates -- only more measurements -- so it is the cheapest way to
+    # widen the bond, which R7 measured to be the binding constraint (+43 pts from
+    # 3 -> 4 values). Added for CLEVR task C2, where four heads spanning
+    # 8 x 3 x 2 x 2 = 96 attribute combinations must come off one readout.
+    "top_layer_multi_pauli": 3 * NUM_QUBITS,
 }
+
+
+def build_head(readout_dim, n_classes):
+    """Classification head(s) off the shared quantum readout.
+
+    `n_classes` is either an int -- one head, `forward` returns a [B, n_classes]
+    tensor, which is every Phase-1 run -- or a dict {name: k}, giving one linear
+    head per attribute off the SAME readout vector and a dict of logits.
+
+    The multi-head form is what CLEVR needs (colour x shape x material x size),
+    and sharing the readout is deliberate: whether four real numbers can carry
+    four simultaneous attributes is the question task C2 asks. Keeping the int
+    path returning a bare nn.Linear means `model.head.in_features` still works,
+    which the readout-width regression test relies on.
+    """
+    if isinstance(n_classes, int):
+        return nn.Linear(readout_dim, n_classes)
+    if not n_classes:
+        raise ValueError("n_classes as a dict must be non-empty")
+    return nn.ModuleDict({name: nn.Linear(readout_dim, k) for name, k in n_classes.items()})
+
+
+def apply_head(head, features):
+    return {name: h(features) for name, h in head.items()} if isinstance(head, nn.ModuleDict) else head(features)
 
 
 def _iqp_block(wires, weights):
@@ -281,6 +321,8 @@ class QuantumNode(nn.Module):
                 return [qml.expval(qml.PauliX(0)), qml.expval(qml.PauliY(0)), qml.expval(qml.PauliZ(0))]
             elif readout_ == "level1_survivors":
                 return [qml.expval(qml.PauliZ(w)) for w in sys_wires]
+            elif readout_ == "top_layer_multi_pauli":
+                return [qml.expval(P(w)) for w in sys_wires for P in (qml.PauliX, qml.PauliY, qml.PauliZ)]
             raise ValueError(f"Unknown readout: {readout_}")
 
         @qml.qnode(dev_clean, interface="torch")
@@ -421,7 +463,7 @@ class HierarchicalQTTNClassifier(nn.Module):
         self.level2 = QuantumNode(
             encoding="scalar_ry", ansatz=ansatz, readout=readout, is_root=True, mode=mode, use_ancilla=False
         )
-        self.head = nn.Linear(READOUT_DIM[readout], n_classes)
+        self.head = build_head(READOUT_DIM[readout], n_classes)
 
     @staticmethod
     def _group_2x2(grid):
@@ -447,7 +489,7 @@ class HierarchicalQTTNClassifier(nn.Module):
         x2 = n1.view(b, 1, 4, 1)  # 4 level-1 scalars become the 4 wire inputs of the root node
         n2 = self.level2(x2, p_noise=p_noise)  # [B, 1, READOUT_DIM[readout]]
 
-        return self.head(n2.squeeze(1))
+        return apply_head(self.head, n2.squeeze(1))
 
 
 # =====================================================================
@@ -517,6 +559,21 @@ class CoherentQTTNClassifier(nn.Module):
     doubles the state vector (20-21 wires => 16-32x cost). Re-confirming a
     rejection at that price is not worth it. Their node-level verdicts stand as
     node-level results.
+
+    `positional` is a SEPARATE axis from `mode`, added for CLEVR task C4
+    (Question C.2 -- does the implicit tree topology encode spatial relations, or
+    is an explicit position mechanism needed?). It is deliberately not a `mode`
+    value, so the guard that `mode` only ever accepts baseline/reupload keeps
+    holding.
+      "none"    -- current behaviour: position is implicit in the wire layout
+                   (wire w carries patch w) and in per-block level-1 weights.
+      "on_wire" -- a learned per-patch rotation pair on the patch's OWN wire.
+                   Zero extra wires, so cost is unchanged. NOTE: this is a
+                   per-patch positional *encoding*, NOT an ancilla -- a per-patch
+                   ancilla would be 16 extra wires (32 qubits), which statevector
+                   simulation cannot reach. Report it under that name; R3's
+                   -19.5 pts measured a per-quadrant ancilla and is a different
+                   mechanism again.
     """
 
     def __init__(
@@ -531,12 +588,21 @@ class CoherentQTTNClassifier(nn.Module):
         share_level1_weights=True,
         device_name="lightning.qubit",
         diff_method="adjoint",
+        positional="none",
     ):
         super().__init__()
         assert readout in READOUTS
         readout = READOUT_ALIASES.get(readout, readout)
         assert encoding in ENCODINGS
         assert ansatz in ANSATZE
+        if positional == "ancilla2":
+            raise NotImplementedError(
+                "positional='ancilla2' is not built yet, by decision: it is the escalation arm for "
+                "CLEVR task C4 and is only worth its ~4x cost (18 wires) if the free 'on_wire' arm "
+                "shows a RESOLVED effect. Run C4 with positional='on_wire' first."
+            )
+        if positional not in POSITIONALS:
+            raise ValueError(f"positional must be one of {POSITIONALS}, got {positional!r}")
         if mode not in ("baseline", "reupload"):
             raise NotImplementedError(
                 f"mode={mode!r} is not ported to the coherent tree. R3 rejected mixed_channel "
@@ -559,12 +625,17 @@ class CoherentQTTNClassifier(nn.Module):
         l1_shape = (NUM_LAYERS, NUM_QUBITS, 3) if share_level1_weights else (4, NUM_LAYERS, NUM_QUBITS, 3)
         self.weights_l1 = nn.Parameter(torch.randn(*l1_shape) * 0.1)
         self.weights_l2 = nn.Parameter(torch.randn(NUM_LAYERS, NUM_QUBITS, 3) * 0.1)
-        self.head = nn.Linear(READOUT_DIM[readout], n_classes)
+        self.head = build_head(READOUT_DIM[readout], n_classes)
+
+        # Per-patch position angles, shared across the batch (position is a
+        # property of the wire, not of the sample). 32 parameters at 16 patches.
+        self.positional = positional
+        self.pos_weights = nn.Parameter(torch.randn(self.n_patches, 2) * 0.1) if positional == "on_wire" else None
 
         self.l1_blocks = [[4 * b + i for i in range(NUM_QUBITS)] for b in range(4)]
         self.l2_wires = [4 * b for b in range(4)]
         blocks, l2w = self.l1_blocks, self.l2_wires
-        enc_, ans_, ro_, mode_ = encoding, ansatz, readout, mode
+        enc_, ans_, ro_, mode_, pos_ = encoding, ansatz, readout, mode, positional
         half = NUM_LAYERS // 2
 
         def _node(wires, weights, inputs):
@@ -575,8 +646,22 @@ class CoherentQTTNClassifier(nn.Module):
             else:
                 _apply_ansatz(ans_, wires, weights)
 
-        def _body(inputs, w1, w2):
+        def _prepare(inputs, pos):
+            """Data encoding, then (optionally) the explicit position imprint.
+
+            Position goes AFTER the data so it acts on an already-encoded qubit
+            rather than being overwritten by it -- with multi_axis the encoding
+            starts from |0> and fully determines the state, so a positional
+            rotation applied first would be erased.
+            """
             _encode_on(enc_, inputs, range(self.n_wires))
+            if pos_ == "on_wire":
+                for w in range(self.n_wires):
+                    qml.RX(pos[w, 0], wires=w)
+                    qml.RY(pos[w, 1], wires=w)
+
+        def _body(inputs, w1, w2, pos=None):
+            _prepare(inputs, pos)
             for bi, blk in enumerate(blocks):
                 _node(blk, w1 if share_level1_weights else w1[bi], inputs)
             _node(l2w, w2, inputs)
@@ -586,6 +671,8 @@ class CoherentQTTNClassifier(nn.Module):
                 return [qml.expval(qml.PauliX(0)), qml.expval(qml.PauliY(0)), qml.expval(qml.PauliZ(0))]
             if ro_ == "level1_survivors":
                 return [qml.expval(qml.PauliZ(w)) for w in l2w]
+            if ro_ == "top_layer_multi_pauli":
+                return [qml.expval(P(w)) for w in l2w for P in (qml.PauliX, qml.PauliY, qml.PauliZ)]
             raise ValueError(f"Unknown readout: {ro_}")
 
         dev = qml.device(device_name, wires=self.n_wires)
@@ -598,8 +685,8 @@ class CoherentQTTNClassifier(nn.Module):
         # qubits OOMs) and is equally decisive: in the hybrid the level-2 input
         # wires are freshly encoded from classical scalars, hence pure, hence
         # |r| = 1 exactly.
-        def _bloch_body(inputs, w1, w2, wire):
-            _encode_on(enc_, inputs, range(self.n_wires))
+        def _bloch_body(inputs, w1, w2, wire, pos=None):
+            _prepare(inputs, pos)
             for bi, blk in enumerate(blocks):
                 _node(blk, w1 if share_level1_weights else w1[bi], inputs)
             return [qml.expval(qml.PauliX(wire)), qml.expval(qml.PauliY(wire)), qml.expval(qml.PauliZ(wire))]
@@ -620,9 +707,9 @@ class CoherentQTTNClassifier(nn.Module):
                 "density-matrix simulation needs ~68GB. Noise work is Task R8, at single-node scale."
             )
         angles = self._patches(x)
-        out = self._circuit(angles, self.weights_l1, self.weights_l2)
+        out = self._circuit(angles, self.weights_l1, self.weights_l2, self.pos_weights)
         out = torch.stack([torch.as_tensor(o) for o in out], dim=-1).float()
-        return self.head(out)
+        return apply_head(self.head, out)
 
     def survivor_bloch_length(self, x, wire=0):
         """Bloch-vector length of a survivor qubit after level 1, averaged over
@@ -631,6 +718,6 @@ class CoherentQTTNClassifier(nn.Module):
         (there it is exactly 1). Used by the coherence regression test.
         """
         with torch.no_grad():
-            r = self._bloch(self._patches(x), self.weights_l1, self.weights_l2, wire)
+            r = self._bloch(self._patches(x), self.weights_l1, self.weights_l2, wire, self.pos_weights)
             r = torch.stack([torch.as_tensor(v) for v in r], dim=-1)
             return float(r.norm(dim=-1).mean())

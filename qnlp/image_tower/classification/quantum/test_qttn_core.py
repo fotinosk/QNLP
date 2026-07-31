@@ -49,6 +49,8 @@ from qnlp.image_tower.classification.quantum.qttn_core import (
     QuantumNode,
 )
 
+CLEVR_HEADS = {"color": 8, "shape": 3, "material": 2, "size": 2}
+
 CONFIGS = [(e, a) for e in ENCODINGS for a in ANSATZE]
 
 
@@ -166,6 +168,35 @@ def test_compare_reports_resolution_limit():
         assert abs(c["difference"]) <= c["min_detectable_effect"]
 
 
+def test_seeds_needed_converges_and_satisfies_its_own_criterion():
+    """`seeds_needed` decides whether to spend more compute, so a wrong answer is
+    expensive in both directions.
+
+    The original fixed-point iteration did not converge when the answer was
+    small: it oscillated (1 <-> 10 for std 1.49 / effect 8.9) because n_new = 1
+    made t_crit(2n-2) = t_crit(0) fall through the table to 12.706. It returned
+    whichever value the loop stopped on, and reported "~10 seeds/arm needed" for
+    effects already resolved at 3 -- pure over-spend.
+    """
+    for std, effect in [(1.49, 8.9), (5.0, 20.0), (2.0, 15.0), (8.2, 3.0), (8.2, 5.0), (4.94, 2.0)]:
+        n = pc.seeds_needed(std, effect)
+        assert n >= 2, f"std={std} effect={effect}: {n} seeds/arm is not a runnable design"
+        # It must actually satisfy the power criterion it claims to solve...
+        assert n >= 2.0 * (pc.t_crit(2 * n - 2) * std / effect) ** 2, f"std={std} effect={effect}: n={n} too small"
+        # ...and be the SMALLEST such n, not merely a sufficient one.
+        if n > 2:
+            m = n - 1
+            assert m < 2.0 * (pc.t_crit(2 * m - 2) * std / effect) ** 2, f"std={std} effect={effect}: n={n} not minimal"
+
+    # Bigger effects never need more seeds than smaller ones at the same variance.
+    needs = [pc.seeds_needed(8.2, e) for e in (2, 3, 5, 8, 15)]
+    assert needs == sorted(needs, reverse=True), f"not monotone in effect size: {needs}"
+
+    # The R1b power analysis logged on 2026-07-28 must still reproduce.
+    assert pc.seeds_needed(8.2, 2) == 130
+    assert pc.seeds_needed(4.94, 3) == 22
+
+
 def test_architecture_of_record_is_pinned():
     """R2 selected multi_axis+iqp; R1/R1b selected root_multi_pauli. If ARCH
     drifts from the logged decision, results stop being comparable."""
@@ -239,3 +270,105 @@ def test_coherent_tree_refuses_noise():
     model = CoherentQTTNClassifier()
     with pytest.raises(NotImplementedError, match="noiseless-only"):
         model(torch.rand(2, 3, 16, 16), p_noise=0.05)
+
+
+# ---------------------------------------------------------------------
+# CLEVR (Phase 2) additions: the 12-value readout, multi-head output,
+# explicit position, and non-4x4 patch sizes.
+# ---------------------------------------------------------------------
+
+
+def test_wide_readout_is_wider_than_the_one_it_replaces():
+    """C2's premise. `top_layer_multi_pauli` must actually carry more numbers
+    than `top_layer_qubits`, and must do it WITHOUT extra wires -- the point is
+    that widening the bond is free here, unlike raising the bond dimension."""
+    narrow = CoherentQTTNClassifier(readout="top_layer_qubits", encoding="multi_axis")
+    wide = CoherentQTTNClassifier(readout="top_layer_multi_pauli", encoding="multi_axis")
+    assert READOUT_DIM["top_layer_multi_pauli"] == 3 * READOUT_DIM["top_layer_qubits"] == 12
+    assert wide.head.in_features == 12
+    assert wide.n_wires == narrow.n_wires, "the wide readout must not cost extra wires"
+    out = wide(torch.rand(4, 3, 16, 16))
+    assert out.shape == (4, 4)
+
+
+@pytest.mark.parametrize("cls", [HierarchicalQTTNClassifier, CoherentQTTNClassifier])
+def test_multi_head_gives_one_head_per_attribute_off_a_shared_readout(cls):
+    """CLEVR needs four simultaneous attributes. They must come off the SAME
+    readout vector -- whether four numbers can carry all four is exactly what
+    task C2 measures, so the heads must not each get their own circuit."""
+    torch.manual_seed(0)
+    model = cls(readout="top_layer_qubits", encoding="multi_axis", n_classes=CLEVR_HEADS)
+    out = model(torch.rand(4, 3, 16, 16))
+    assert set(out) == set(CLEVR_HEADS)
+    for name, k in CLEVR_HEADS.items():
+        assert out[name].shape == (4, k), f"head {name!r}: {out[name].shape}"
+        assert model.head[name].in_features == READOUT_DIM["top_layer_qubits"]
+
+
+def test_multi_head_gradients_reach_every_parameter():
+    """A summed multi-head loss must not starve the shared circuit weights."""
+    torch.manual_seed(0)
+    model = CoherentQTTNClassifier(readout="top_layer_qubits", encoding="multi_axis", n_classes=CLEVR_HEADS)
+    sum(v.sum() for v in model(torch.rand(4, 3, 16, 16)).values()).backward()
+    dead = [n for n, p in model.named_parameters() if p.grad is None or p.grad.abs().sum() == 0]
+    assert not dead, f"no gradient reaches {dead}"
+
+
+def test_single_head_path_is_unchanged_by_the_multi_head_addition():
+    """int n_classes must keep returning a plain tensor off a plain nn.Linear,
+    so every R1-R7 script and the readout-width test keep working."""
+    model = CoherentQTTNClassifier(**pc.COHERENT_ARCH)
+    assert isinstance(model.head, torch.nn.Linear)
+    assert model(torch.rand(3, 3, 16, 16)).shape == (3, 4)
+
+
+def test_positional_encoding_changes_the_circuit_and_trains():
+    """C4's 'with position' arm. It must (a) add parameters, (b) add no wires,
+    (c) actually alter the output, and (d) receive gradient. A positional
+    mechanism that silently no-ops would make Question C.2 unanswerable, which
+    is the failure mode this whole test file exists to prevent."""
+    torch.manual_seed(0)
+    plain = CoherentQTTNClassifier(**pc.COHERENT_ARCH)
+    torch.manual_seed(0)
+    posed = CoherentQTTNClassifier(**pc.COHERENT_ARCH, positional="on_wire")
+
+    assert posed.n_wires == plain.n_wires, "on_wire position must not cost extra wires"
+    n_plain = sum(p.numel() for p in plain.parameters())
+    n_posed = sum(p.numel() for p in posed.parameters())
+    assert n_posed == n_plain + 2 * posed.n_patches, f"{n_plain} -> {n_posed}"
+
+    x = torch.rand(4, 3, 16, 16)
+    with torch.no_grad():
+        # Same seed, so every shared parameter matches; only the position imprint
+        # differs. Its weights are small but nonzero, so the outputs must differ.
+        assert not torch.allclose(plain(x), posed(x), atol=1e-6), "positional encoding is a no-op"
+
+    posed(x).sum().backward()
+    assert posed.pos_weights.grad is not None and posed.pos_weights.grad.abs().sum() > 0
+
+
+def test_ancilla2_refuses_rather_than_silently_falling_back():
+    """The C4 escalation arm is unbuilt by decision. It must say so loudly --
+    silently degrading to 'no position' would fabricate a null result for
+    Question C.2."""
+    with pytest.raises(NotImplementedError, match="on_wire"):
+        CoherentQTTNClassifier(positional="ancilla2")
+    with pytest.raises(ValueError, match="positional"):
+        CoherentQTTNClassifier(positional="nonsense")
+
+
+@pytest.mark.parametrize("img_size,patch_size", [(16, 4), (32, 8), (64, 16)])
+def test_bigger_patches_keep_the_tree_at_16_qubits(img_size, patch_size):
+    """C5 route (a): higher resolution at a constant qubit count. This is the
+    'works today' claim in the roadmap -- assert it rather than trusting it.
+
+    It also pins down what the route does and does not buy: the circuit width is
+    identical at all three resolutions, so the extra pixels are absorbed by the
+    classical patch encoder. That is resolution scaling, not quantum scaling,
+    and the thesis has to say so.
+    """
+    torch.manual_seed(0)
+    model = CoherentQTTNClassifier(**pc.COHERENT_ARCH, img_size=img_size, patch_size=patch_size)
+    assert model.n_wires == 16 and model.n_patches == 16
+    assert model.patch_embed.in_features == patch_size * patch_size * 3
+    assert model(torch.rand(3, 3, img_size, img_size)).shape == (3, 4)

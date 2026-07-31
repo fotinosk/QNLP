@@ -1,0 +1,13 @@
+{
+  "arm": "mlp_reference",
+  "partial": true,
+  "seeds_done": 1,
+  "curves": [
+    {
+      "relation": [
+        29.296875,
+        23.4375
+      ]
+    }
+  ]
+}

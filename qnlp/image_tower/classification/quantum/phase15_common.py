@@ -111,14 +111,31 @@ def mde_unpaired(std_a, std_b, n_a, n_b=None):
     return float(t_crit(df) * se)
 
 
-def seeds_needed(pooled_std, target_effect):
-    n = 4
-    for _ in range(100):
-        n_new = int(np.ceil(2.0 * (t_crit(2 * n - 2) * pooled_std / target_effect) ** 2))
-        if n_new == n:
-            break
-        n = n_new
-    return n
+def seeds_needed(pooled_std, target_effect, max_n=1000):
+    """Smallest n per arm that would resolve `target_effect` at 95%.
+
+    FIXED 2026-07-30. The previous fixed-point iteration did not converge when
+    the answer was small: it oscillated (e.g. 1 <-> 10 for std 1.49 / effect 8.9)
+    and returned whichever value the loop happened to stop on. The cause was
+    n_new landing on 1, so `t_crit(2n - 2) = t_crit(0)` fell through the table to
+    12.706 and blew the estimate straight back up.
+
+    It failed in the expensive direction -- reporting "~10 seeds/arm needed" for
+    an effect already resolved at 3 -- which is the opposite of what this
+    function is for. It is used to decide whether to spend more compute.
+
+    Now a direct upward search for the first n satisfying
+    n >= 2 (t_crit(2n-2) . std / effect)^2. The right-hand side falls with n and
+    the left rises, so the crossing is unique and the answer deterministic.
+    Values in the converged regime (large n) are unchanged, so the R1b power
+    analysis logged on 2026-07-28 still reproduces.
+    """
+    if target_effect <= 0:
+        return max_n
+    for n in range(2, max_n + 1):
+        if n >= 2.0 * (t_crit(2 * n - 2) * pooled_std / target_effect) ** 2:
+            return n
+    return max_n
 
 
 def is_chance_level(score, n_classes=4, margin=2.5):

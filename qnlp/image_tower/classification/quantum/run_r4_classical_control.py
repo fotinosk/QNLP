@@ -44,6 +44,8 @@ from qnlp.image_tower.classification.quantum import phase15_common as pc
 from qnlp.image_tower.classification.quantum.qttn_core import (
     CoherentQTTNClassifier,
     HierarchicalQTTNClassifier,
+    apply_head,
+    build_head,
 )
 
 
@@ -62,6 +64,8 @@ class ClassicalTTNClassifier(nn.Module):
     ):
         super().__init__()
         assert img_size // patch_size == 4, "level-1 grouping assumes a 4x4 patch grid"
+        self.grid_dim = img_size // patch_size
+        self.patch_size = patch_size
         # Same patch encoder as the quantum tower's I/O boundary.
         self.patch_embed = nn.Linear(patch_size * patch_size * 3, enc_dim)
         self.level1 = CPQuadRankLayer(
@@ -70,7 +74,7 @@ class ClassicalTTNClassifier(nn.Module):
         self.level2 = CPQuadRankLayer(
             num_nodes=1, in_dim=bond_dim, out_dim=bond_dim, rank=rank, use_residual=use_residual, dropout_p=dropout_p
         )
-        self.head = nn.Linear(bond_dim, n_classes)
+        self.head = build_head(bond_dim, n_classes)
 
     @staticmethod
     def _group_2x2(grid):
@@ -81,14 +85,18 @@ class ClassicalTTNClassifier(nn.Module):
 
     def forward(self, x, p_noise=0.0):  # p_noise ignored: no quantum channel here
         b = x.shape[0]
-        x = x.unfold(2, 4, 4).unfold(3, 4, 4)
-        x = x.permute(0, 2, 3, 1, 4, 5).contiguous().view(b, 16, 48)
+        # Patch size is derived from the image, matching CoherentQTTNClassifier._patches,
+        # so 32x32 at 8x8 patches and 64x64 at 16x16 patches give the same 4x4 grid.
+        # Previously hardcoded to 4, which silently ignored the constructor argument.
+        ps = x.shape[-1] // self.grid_dim
+        x = x.unfold(2, ps, ps).unfold(3, ps, ps)
+        x = x.permute(0, 2, 3, 1, 4, 5).contiguous().view(b, self.grid_dim**2, -1)
         feats = torch.tanh(self.patch_embed(x))
-        feats = feats.view(b, 4, 4, -1)
+        feats = feats.view(b, self.grid_dim, self.grid_dim, -1)
         x1 = self._group_2x2(feats)  # [B, 4, 4, enc_dim]
         n1 = self.level1(x1)  # [B, 4, bond_dim]
         n2 = self.level2(n1.unsqueeze(1))  # [B, 1, bond_dim]
-        return self.head(n2.squeeze(1))
+        return apply_head(self.head, n2.squeeze(1))
 
 
 class MLPReference(nn.Module):
@@ -104,16 +112,19 @@ class MLPReference(nn.Module):
     can be made from R4.
     """
 
-    def __init__(self, hidden=16, enc_dim=3, patch_size=4, n_classes=4):
+    def __init__(self, hidden=16, enc_dim=3, img_size=16, patch_size=4, n_classes=4):
         super().__init__()
+        self.grid_dim = img_size // patch_size
         self.patch_embed = nn.Linear(patch_size * patch_size * 3, enc_dim)
-        self.net = nn.Sequential(nn.Linear(16 * enc_dim, hidden), nn.ReLU(), nn.Linear(hidden, n_classes))
+        self.trunk = nn.Sequential(nn.Linear(self.grid_dim**2 * enc_dim, hidden), nn.ReLU())
+        self.head = build_head(hidden, n_classes)
 
     def forward(self, x, p_noise=0.0):
         b = x.shape[0]
-        x = x.unfold(2, 4, 4).unfold(3, 4, 4)
-        x = x.permute(0, 2, 3, 1, 4, 5).contiguous().view(b, 16, 48)
-        return self.net(torch.tanh(self.patch_embed(x)).flatten(1))
+        ps = x.shape[-1] // self.grid_dim
+        x = x.unfold(2, ps, ps).unfold(3, ps, ps)
+        x = x.permute(0, 2, 3, 1, 4, 5).contiguous().view(b, self.grid_dim**2, -1)
+        return apply_head(self.head, self.trunk(torch.tanh(self.patch_embed(x)).flatten(1)))
 
 
 def tune_classical(

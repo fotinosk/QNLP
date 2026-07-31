@@ -1,0 +1,13 @@
+{
+  "arm": "classical_bare",
+  "partial": true,
+  "seeds_done": 1,
+  "curves": [
+    {
+      "relation": [
+        26.171875,
+        29.296875
+      ]
+    }
+  ]
+}

@@ -76,7 +76,9 @@ Key design decisions:
 - **Bilinear patch embedding** separates color and spatial structure (Hadamard product)
 - ~~**Gated positional encoding** with learnable scale initialised near 0 (≈0.05)~~ — **REJECTED for this task class; re-validated 2026-07-28 (Task R3).** At the architecture of record, 30 seeds: `59.9% ± 6.9` with the ancilla vs `79.4% ± 8.0` without — `−19.5` pts against a `3.8`-pt resolution limit. (The original 2026-07-26 verdict, `52.8 ± 5.7` vs `55.0 ± 3.5` at n=5, was inside noise and did not actually support its conclusion.)
   **⚠️ Scope — do not generalise this to "positional encoding is harmful".** The synthetic-shapes task is translation-invariant single-object classification, where position barely affects the label, so an explicit position mechanism has nothing to contribute and a negative result is close to structurally guaranteed. It also tests a **per-quadrant** ancilla (4 positions), not the original **per-patch** design (16). **Question C.2 — whether implicit tree topology suffices for *relational* reasoning — is untested and is now a required part of CLEVR**: run the left/right/front/behind task with and without the ancilla, since that is the only place position is the label. See `quantum_investigation_roadmap.md` Question C.
-- **⚠️ CLEVR resolution warning (2026-07-27)**: CLEVR images are 480×320. Downsampled to 16×16, an object occupies a handful of pixels — `material` (rubber vs. metal, essentially specular-highlight detection) and `size` become close to unlearnable. **Step 2's pass criterion below (>80% on all 4 attribute heads) is not reachable at 16×16.** Either Task 1.5/R6 (SPSA) lands and CLEVR runs at 32×32, or the task must be explicitly re-scoped (e.g. drop `material`, and state in the thesis that resolution, not architecture, is the limiting factor). Do not silently run at 16×16 against a criterion that resolution cannot support. See `quantum_investigation_roadmap.md` Section 7, task R6 and the decision gate.
+- **✅ CLEVR resolution warning (2026-07-27) — RETRACTED 2026-07-30, measured false.** ~~Downsampled to 16×16, an object occupies a handful of pixels, so `material` and `size` become close to unlearnable and the >80%-on-4-heads criterion is not reachable at 16×16.~~
+  **Task C1 measured the opposite.** At 16×16 the classical MLP reference reaches **colour 95.2%, shape 69.9%, material 82.5%, size 99.0%** (3 seeds) against floors of 15.2 / 35.4 / 50.2 / 50.6. `material` — the attribute this warning singled out — is the *second*-best-learned head. `size` is essentially saturated.
+  **Why the prediction failed**: it assumed whole 480×320 scenes downsampled to 16×16. Task C0 instead **crops individual objects** (world-scaled by depth), so an object fills the frame and its specular highlight survives. The binding constraint was the data pipeline, not the qubit count. **16×16 is the resolution of record; no SPSA and no bond-dimension work is needed** (roadmap Task C5, closed).
 - **Image size**: 16×16 (16 patches → 16 qubits) is the validated size. Deeper trees need more qubits than statevector simulation allows — a depth-3 quad-tree is 64 qubits, and the practical ceiling on 18 GB is ~29 (~24 with batch broadcasting). **Three routes exist and the choice is deferred into CLEVR**, since they are one question best answered against real data: (a) **bigger patches** — 32×32 at 8×8 patches keeps 16 qubits and works today, but the extra pixels are absorbed by the classical encoder, so it is resolution scaling, not quantum scaling; (b) **SPSA** on `default.tensor`, which enables genuinely deeper trees; (c) **higher bond dimension** (χ=2^k), the principled fix for the readout bottleneck, affordable on hardware and under tensor-network simulation but not for statevector training.
 - **Triplet loss dominates** (weight 40000); hard negatives are curated ARO syntactic perturbations
 - **Three forward passes per sample:** image × 1, true caption × 1, false caption × 1
@@ -151,12 +153,12 @@ df = pl.read_parquet('hf://datasets/dpdl-benchmark/clevr/' + splits['train'])
 
 Each row has per-object attribute arrays (`color`, `shape`, `material`, `size`, `3d_coords`, `pixel_coords`, `rotation`) where index `i` corresponds to the i-th object in the scene.
 
-**Task:** Filter to scenes with exactly one object. Classify that object by its full attribute tuple: `color × shape × material × size`, as 4 independent prediction heads.  
+**Task:** ~~Filter to scenes with exactly one object.~~ **CORRECTED 2026-07-30: CLEVR has no 1-object scenes (3–10 per scene, always). Crop individual objects out of full scenes instead** — see `quantum_investigation_roadmap.md` Task C0 and `qnlp/utils/data/clevr_objects.py`. Classify the cropped object by its full attribute tuple: `color × shape × material × size`, as 4 prediction heads off one shared readout.  
 **Why:** Directly tests compositional attribute binding — the same capacity that ARO contrastive tasks require. A model that can discriminate "large red rubber cube" from "small red metal sphere" has the representational dimensions needed for VLM tasks. Synthetic images suit the TTN spatial hierarchy (geometric structure, no texture shortcuts). Coarse classification benchmarks like MNIST or CIFAR do not test this capacity.
 
-**Pass criteria:** All 4 attribute heads reach >80% accuracy in simulation.
+**Pass criteria — REVISED 2026-07-30.** ~~All 4 attribute heads reach >80% accuracy in simulation.~~ Replaced by: **per-attribute accuracy within a stated margin of the size-matched MLP reference, at fewer parameters.** Two reasons: parameter efficiency is the claim Phase 1 actually supports, and an absolute threshold silently conflates model quality with data difficulty. C1 makes the point concrete — even the *classical* ceiling at 16×16 is `95.2 / 69.9 / 82.5 / 99.0`, so a flat >80% bar would fail the quantum model on `shape` for reasons that have nothing to do with the architecture.
 
-- Simulation (noiseless): all 4 attribute heads converge; per-attribute accuracy >80%
+- Simulation (noiseless): all 4 attribute heads converge; each within a stated margin of the MLP reference (roadmap Task C3)
 - **Matched-parameter classical control alongside every head** (required, R4)
 - **Resolution limit reported** for every comparison (required, R1b)
 - ~~Stage 2 — Emulation~~ — **removed 2026-07-28**: CLEVR is run noiseless (scope decision). See `quantum_investigation_roadmap.md` Task R8.
@@ -165,12 +167,30 @@ Each row has per-object attribute arrays (`color`, `shape`, `material`, `size`, 
 
 ### Step 3: Image Tower — CLEVR Multi-Object (Relational)
 
-**Dataset:** Same as Step 2 (`dpdl-benchmark/clevr`). Filter to scenes with exactly two objects.
+**Dataset:** Same as Step 2 (`dpdl-benchmark/clevr`). ~~Filter to scenes with exactly two objects.~~ **CORRECTED 2026-07-30: no such scenes exist.** Crop object *pairs* out of full scenes, centred on the reference object so the label is well posed — see `quantum_investigation_roadmap.md` Task C0.
 
-Spatial relations are derived from `3d_coords` — no additional annotations needed:
+Spatial relations are derived from `3d_coords` — no additional annotations needed.
 
+> **⚠️ THE HELPER BELOW IS WRONG — corrected 2026-07-30.** It compares raw world-frame x and y. CLEVR's left/right/front/behind are defined against the **camera-rotated** basis, roughly 49° from the world axes, so this version mislabels a large fraction of pairs. The correct implementation is `qnlp/utils/data/clevr_objects.py:relation_label`, pinned by `test_clevr.py:test_relation_labels_use_clevrs_rotated_axes_not_world_axes`.
+>
+> ```python
+> DIR_RIGHT = np.array([0.6563112735748291,  0.7544902563095093, 0.0])
+> DIR_FRONT = np.array([0.7544902563095093, -0.6563112735748291, 0.0])
+>
+> def relation_label(coords_a, coords_b, margin=1.5):
+>     d = np.asarray(coords_b) - np.asarray(coords_a)
+>     u, v = float(d @ DIR_RIGHT), float(d @ DIR_FRONT)   # +right / +front
+>     hi, lo = max(abs(u), abs(v)), min(abs(u), abs(v))
+>     if lo > 0 and hi < margin * lo:
+>         return None                      # near-diagonal: no defensible label
+>     return ("right" if u > 0 else "left") if abs(u) >= abs(v) else ("front" if v > 0 else "behind")
+> ```
+>
+> The `margin` is not decoration: near-diagonal pairs have no defensible left-vs-front label, and keeping them would put a ceiling on accuracy that has nothing to do with the model.
+
+~~Superseded:~~
 ```python
-def get_spatial_relation(obj_a_coords, obj_b_coords):
+def get_spatial_relation(obj_a_coords, obj_b_coords):   # WRONG — world axes, not camera axes
     ax, ay = obj_a_coords[0], obj_a_coords[1]
     bx, by = obj_b_coords[0], obj_b_coords[1]
     if abs(ax - bx) > abs(ay - by):

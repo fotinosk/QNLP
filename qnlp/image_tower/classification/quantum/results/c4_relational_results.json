@@ -1,0 +1,154 @@
+{
+  "task": "relations",
+  "img_size": 16,
+  "readout": "top_layer_multi_pauli",
+  "protocol": {
+    "train_samples": 1024,
+    "test_samples": 512,
+    "epochs": 2,
+    "batch_size": 32,
+    "lr": 0.03
+  },
+  "seeds": [
+    0
+  ],
+  "majority_floors": {
+    "relation": 29.296875
+  },
+  "arms": {
+    "classical_bare": {
+      "relation": {
+        "config": "classical_bare",
+        "n_seeds": 1,
+        "score_per_seed": [
+          27.734375
+        ],
+        "score_mean": 27.734375,
+        "score_std": 0.0,
+        "final_val_acc_per_seed": [
+          29.296875
+        ],
+        "final_val_acc_mean": 29.296875,
+        "final_val_acc_std": 0.0,
+        "peak_val_acc_mean": 29.296875,
+        "val_acc_curves_per_seed": [
+          [
+            26.171875,
+            29.296875
+          ]
+        ],
+        "head": "relation",
+        "num_params": 296,
+        "img_size": 16,
+        "epochs": 2,
+        "lr": 0.01,
+        "tuned": {
+          "lr": 0.01,
+          "bond_dim": 2,
+          "rank": 2,
+          "params": 300,
+          "score": 30.0
+        }
+      }
+    },
+    "classical_full": {
+      "relation": {
+        "config": "classical_full",
+        "n_seeds": 1,
+        "score_per_seed": [
+          31.15234375
+        ],
+        "score_mean": 31.15234375,
+        "score_std": 0.0,
+        "final_val_acc_per_seed": [
+          33.0078125
+        ],
+        "final_val_acc_mean": 33.0078125,
+        "final_val_acc_std": 0.0,
+        "peak_val_acc_mean": 33.0078125,
+        "val_acc_curves_per_seed": [
+          [
+            29.296875,
+            33.0078125
+          ]
+        ],
+        "head": "relation",
+        "num_params": 302,
+        "img_size": 16,
+        "epochs": 2,
+        "lr": 0.01,
+        "tuned": {
+          "lr": 0.01,
+          "bond_dim": 2,
+          "rank": 2,
+          "params": 300,
+          "score": 30.0
+        }
+      }
+    },
+    "mlp_reference": {
+      "relation": {
+        "config": "mlp_reference",
+        "n_seeds": 1,
+        "score_per_seed": [
+          26.3671875
+        ],
+        "score_mean": 26.3671875,
+        "score_std": 0.0,
+        "final_val_acc_per_seed": [
+          23.4375
+        ],
+        "final_val_acc_mean": 23.4375,
+        "final_val_acc_std": 0.0,
+        "peak_val_acc_mean": 29.296875,
+        "val_acc_curves_per_seed": [
+          [
+            29.296875,
+            23.4375
+          ]
+        ],
+        "head": "relation",
+        "num_params": 999,
+        "img_size": 16,
+        "epochs": 2,
+        "lr": 0.01,
+        "tuned": null
+      }
+    },
+    "mlp_param_matched": {
+      "relation": {
+        "config": "mlp_param_matched",
+        "n_seeds": 1,
+        "score_per_seed": [
+          29.296875
+        ],
+        "score_mean": 29.296875,
+        "score_std": 0.0,
+        "final_val_acc_per_seed": [
+          29.296875
+        ],
+        "final_val_acc_mean": 29.296875,
+        "final_val_acc_std": 0.0,
+        "peak_val_acc_mean": 29.296875,
+        "val_acc_curves_per_seed": [
+          [
+            29.296875,
+            29.296875
+          ]
+        ],
+        "head": "relation",
+        "num_params": 257,
+        "img_size": 16,
+        "epochs": 2,
+        "lr": 0.01,
+        "tuned": null
+      }
+    }
+  },
+  "mechanism_tested": "per-patch positional ENCODING on existing wires (on_wire). NOT the per-quadrant ancilla R3 rejected at -19.5 pts, and NOT the per-patch ancilla of the original design, which would need 32 qubits.",
+  "above_chance": {
+    "margin": -1.5625,
+    "limit": Infinity,
+    "resolved": false
+  }
+}
