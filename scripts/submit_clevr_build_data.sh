@@ -52,22 +52,53 @@ echo "========================================="
 echo "--- dependency check ---"
 $PYTHON - <<'PYEOF' || exit 1
 import importlib, sys
-missing = []
-for m in ("torch", "pennylane", "numpy", "pyarrow", "PIL", "huggingface_hub", "matplotlib"):
+
+# Split by what each dependency actually blocks. pyarrow is needed ONLY to build
+# the crop caches from parquet; the C1-C4 runners read .npz through numpy and
+# never import it. Reporting them together once cost a run: a broken pyarrow
+# aborted the check before it ever tested lightning.qubit, which is the thing
+# that governs whether the quantum arms are affordable.
+TRAIN_DEPS = ("torch", "pennylane", "numpy")
+BUILD_DEPS = ("pyarrow", "PIL", "huggingface_hub", "matplotlib")
+
+def probe(mods):
+    bad = []
+    for m in mods:
+        try:
+            importlib.import_module(m)
+        except Exception as e:
+            bad.append(f"{m}: {e}")
+    return bad
+
+train_bad, build_bad = probe(TRAIN_DEPS), probe(BUILD_DEPS)
+
+for label, bad in (("TRAINING (C1-C4)", train_bad), ("DATA BUILD only", build_bad)):
+    print(f"  {label}: {'OK' if not bad else 'BROKEN'}")
+    for b in bad:
+        print(f"    - {b}")
+
+# Always report lightning, even if the build deps are broken -- it is what the
+# cost model assumes and it is independent of the parquet path.
+if not train_bad:
+    import pennylane as qml
     try:
-        importlib.import_module(m)
+        qml.device("lightning.qubit", wires=4)
+        print("  lightning.qubit: OK (quantum arms run at the costed ~3 h/seed)")
     except Exception as e:
-        missing.append(f"{m}: {e}")
-if missing:
-    print("MISSING DEPENDENCIES:\n  " + "\n  ".join(missing))
+        print(f"  lightning.qubit: UNAVAILABLE ({e})")
+        print("    default.qubit gives identical results but is ~4x slower -- re-budget h_rt.")
+
+if train_bad:
+    print("\nFATAL: training dependencies are broken. C3b/C4 cannot run.")
     sys.exit(1)
-import pennylane as qml
-try:
-    qml.device("lightning.qubit", wires=4)
-    print("lightning.qubit: OK")
-except Exception as e:
-    print(f"lightning.qubit UNAVAILABLE ({e}) -- the quantum arms need it; "
-          f"default.qubit works but is ~4x slower.")
+if build_bad:
+    print("\nCannot BUILD data here, but training deps are fine. Two options:")
+    print("  (a) rsync the .npz caches from the laptop (recommended -- no shared env changes):")
+    print("      rsync -av data/datasets/clevr_*.npz <cluster>:$PWD/data/datasets/")
+    print("      then re-run this script with -v VERIFY_ONLY=1")
+    print("  (b) repair the env, e.g. NumPy 2 vs a NumPy-1-compiled pyarrow:")
+    print("      pip install -U 'pyarrow>=17'   # NOT into a shared env without checking")
+    sys.exit(2)
 print("all imports OK")
 PYEOF
 

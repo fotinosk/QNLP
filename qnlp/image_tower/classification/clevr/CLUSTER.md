@@ -59,15 +59,43 @@ If it fails:
 `lightning.qubit` is not strictly required — `default.qubit` gives identical
 results — but it is **~4× faster**, and the cost model assumes it.
 
-### ☐ 3. Build the data
+### ☐ 3. Get the data there — two routes
+
+> **⚠️ KNOWN ISSUE (hit 2026-07-31): `qnlp311` has NumPy 2.4.6 but a
+> NumPy-1-compiled `pyarrow`**, so `import pyarrow` dies with
+> `_ARRAY_API not found` / `numpy.core.multiarray failed to import`.
+>
+> **This does not block C3b or C4.** `pyarrow` is used *only* to build the crop
+> caches from parquet; the runners read `.npz` through numpy and never import it.
+> `torch`, `pennylane`, `numpy`, `PIL`, `huggingface_hub` and `matplotlib` all
+> imported fine.
+
+**Route A — ship the caches (recommended).** Avoids touching a *shared* env
+(`/SAN/intelsys/discoviz/envs/` is not personal), and the caches are already
+built and verified locally:
 
 ```bash
+# from the laptop -- ~140 MB
+rsync -av data/datasets/clevr_objects_*.npz data/datasets/clevr_relations_*.npz \
+          data/datasets/clevr_*_manifest.json \
+  ucapfky@<login-node>:/SAN/intelsys/discoviz/fotinos/QNLP/data/datasets/
+```
+
+Step 4's verifier checks the shipped caches' `CROP_K` against the code, so drift
+between laptop and cluster cannot pass silently — which was the original reason
+for preferring an on-cluster rebuild.
+
+**Route B — repair the env, then build on the cluster:**
+
+```bash
+/SAN/intelsys/discoviz/envs/qnlp311/bin/pip install -U 'pyarrow>=17'
 qsub scripts/submit_clevr_build_data.sh
 ```
 
-Downloads ~0.9 GB (one train + one test parquet shard) into `HF_HOME`, then
-writes `data/datasets/clevr_{objects,relations}_{16,32,64}_{train,val}.npz` plus
-manifests. Runs its own dependency check first and fails fast.
+Downloads ~0.9 GB of parquet into `HF_HOME` and writes the caches. **Check with
+whoever else uses `qnlp311` first** — upgrading pyarrow there affects the COCO
+and ARO pipelines too. Downgrading *numpy* instead is the worse option: torch and
+pennylane are working against NumPy 2 right now.
 
 ### ☐ 4. Verify readiness — **do not skip**
 
@@ -160,6 +188,9 @@ the asymmetry rather than remove it.
 
 ## Gotchas
 
+* **`qnlp311` has NumPy 2 with a NumPy-1-compiled `pyarrow`** — see step 3.
+  Blocks the *data build* only, not training. The lesson generalises: check
+  which dependency a failure actually blocks before treating it as fatal.
 * **Node `arbuckle` lacks AVX** and crashes polars with SIGILL; the fix is
   `polars[rtcompat]`. The Phase-2 data path uses **pyarrow**, so it should be
   unaffected — but `load_clevr_to_atlas` does use polars.
