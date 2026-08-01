@@ -53,11 +53,12 @@ until later. `/SAN/intelsys/discoviz/envs/qnlp311` predates this work, so
 If it fails:
 
 ```bash
-/SAN/intelsys/discoviz/envs/qnlp311/bin/pip install pennylane pennylane-lightning
+/SAN/intelsys/discoviz/envs/qnlp311/bin/pip install --force-reinstall --no-cache-dir "pennylane-lightning==0.45.*"
 ```
 
-`lightning.qubit` is not strictly required — `default.qubit` gives identical
-results — but it is **~4× faster**, and the cost model assumes it.
+`lightning.qubit` is not strictly required -- `default.qubit` gives identical
+results -- but it is **~4x faster**. Without it, raise `h_rt` in both array
+scripts from 12h to 36h or tasks will be hard-killed.
 
 ### ☐ 3. Get the data there — two routes
 

@@ -83,7 +83,14 @@ ATTRIBUTES = {"color": 8, "shape": 3, "material": 2, "size": 2}
 RELATIONS = ("left", "right", "front", "behind")
 
 RESOLUTIONS = (16, 32, 64)
-CACHE_DIR = "data/datasets"
+
+# Anchored to the repo root, NOT the working directory. A relative "data/datasets"
+# resolves differently depending on where python was invoked from -- running the
+# verifier from inside data/datasets made it look for data/datasets/data/datasets
+# and report every cache as missing when all of them were present. Override with
+# CLEVR_CACHE_DIR if the caches live elsewhere (e.g. cluster scratch).
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+CACHE_DIR = os.environ.get("CLEVR_CACHE_DIR", os.path.join(_REPO_ROOT, "data", "datasets"))
 
 # An object is dropped if a NEARER object's centre falls within this fraction of
 # its crop side -- i.e. something is standing in front of it. CLEVR scenes are
