@@ -209,6 +209,10 @@ def main():
             "crop_k": co.CROP_K,
             "occlusion_frac": co.OCCLUSION_FRAC,
             "relation_margin": co.RELATION_MARGIN,
+            # Which object the label refers to. A cache missing this field predates
+            # 2026-08-01 and has an AMBIGUOUS referent -- it is the dataset C4 died
+            # on. See `clevr_objects.iter_relation_crops`.
+            "relation_partner_rule": co.RELATION_PARTNER_RULE,
             "max_out_of_frame": co.MAX_OUT_OF_FRAME,
             "max_relation_side": co.MAX_RELATION_SIDE,
             "max_out_of_frame_relation": co.MAX_OUT_OF_FRAME_RELATION,

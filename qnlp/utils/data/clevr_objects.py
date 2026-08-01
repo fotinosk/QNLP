@@ -100,6 +100,11 @@ OCCLUSION_FRAC = 0.5
 # Reject a crop whose box runs more than this fraction of its side outside the
 # frame; anything less is padded by edge replication.
 MAX_OUT_OF_FRAME = 0.10
+# Which of the other objects the relation label refers to. Recorded in the
+# manifest because it is a definition of the TASK, not a tuning knob: datasets
+# built before 2026-08-01 used "random" and were ambiguous (see
+# `iter_relation_crops`), so any cache without this field is the broken one.
+RELATION_PARTNER_RULE = "nearest"
 # A relation is kept only if the dominant axis beats the other by this factor.
 # Near-diagonal pairs have no defensible left-vs-front label, and including them
 # would put a ceiling on accuracy that has nothing to do with the model.
@@ -214,25 +219,52 @@ def iter_object_crops(row, resolutions=RESOLUTIONS):
         yield _crop_and_resize(img, box, resolutions), labels
 
 
-def iter_relation_crops(row, resolutions=RESOLUTIONS, rng=None, max_pairs=2):
+def iter_relation_crops(row, resolutions=RESOLUTIONS, rng=None, max_pairs=4):
     """Yield (crops_by_resolution, {"relation": idx}) for unambiguous pairs.
 
-    THE REFERENCE OBJECT IS THE CENTRED ONE. The label is "where is the other
-    object relative to the object in the middle of the frame", and the crop is
-    centred on the reference exactly as single-object crops are.
+    TWO CONVENTIONS MAKE THIS TASK WELL-POSED, AND BOTH ARE LOAD-BEARING.
 
-    This is not cosmetic, it is what makes the task well-posed. A crop that
-    merely contains two objects carries no information about which is the
-    reference, so "b is left of a" and "a is right of b" would be the same
-    picture with opposite labels -- an unlearnable 50% of the dataset. Centring
-    resolves it, and it lets the (a, b) order be chosen at random, which is what
-    keeps all four relations equally frequent. Any deterministic ordering rule
-    collapses the task instead: ordering by screen position makes left/right
-    almost fully predictable from the convention, and ordering by depth does the
-    same to front/behind.
+    1. THE REFERENCE OBJECT IS THE CENTRED ONE. A crop that merely contains two
+       objects carries no information about which is the reference, so "b is left
+       of a" and "a is right of b" would be the same picture with opposite
+       labels -- an unlearnable 50% of the dataset. Centring resolves it.
 
-    At most `max_pairs` per scene, sampled, so one dense scene cannot dominate
-    the dataset with its O(n^2) pairs.
+    2. THE PARTNER IS THE OBJECT NEAREST THE CENTRE. `relation` therefore means
+       "where is the object nearest the centred one".
+
+    Convention 2 was MISSING until 2026-08-01 and it is what killed Task C4.
+    The partner used to be sampled at random from all valid pairs, with nothing
+    checking what else was in the box. Measured over all 9,357 valid pairs of the
+    train shard:
+
+        distractor objects inside the crop      mean 3.70, median 4, >=1 in 96.8%
+        distractors FARTHER from the centre
+          than the labelled partner             mean 2.25,          >=1 in 87.9%
+        crops containing genuinely nothing else                            3.2%
+
+    So the label named one object out of ~5 in frame and NOTHING IN THE IMAGE
+    identified which one -- not even "the outermost", which fails in 88% of
+    crops. A model that understands spatial relations perfectly still scores
+    chance on that dataset, and C4 duly measured 28.4% against a 29.3% floor and
+    could not answer Question C.2. Exactly the ambiguity convention 1 fixes for
+    the reference, left unfixed for the partner.
+
+    Taking the NEAREST unoccluded object makes the referent recoverable with no
+    intervention on the pixels: since the crop is sized to just contain the
+    partner, every remaining in-frame distractor is farther from the centre than
+    it is, BY CONSTRUCTION. It also yields 4,688 balanced crops per shard against
+    the old rule's 1,996.
+
+    Rejected alternatives, for the record: keeping only crops that contain
+    nothing else is well-posed but yields ~830 balanced crops from the entire
+    85k-scene atlas, below the 1024/512 protocol; masking the distractors out
+    yields more still but edits the image and leaves CLEVR's cast shadows behind.
+
+    Note this must stay a NEAREST-NEIGHBOUR rule, not an ordering rule. Ordering
+    the pair by screen position would make left/right predictable from the
+    convention alone, and ordering by depth would do the same to front/behind.
+
+    At most `max_pairs` per scene, sampled, so one dense scene cannot dominate.
     """
     objects = row["objects"]
     pixel_coords = [tuple(map(float, p)) for p in objects["pixel_coords"]]
@@ -242,14 +274,15 @@ def iter_relation_crops(row, resolutions=RESOLUTIONS, rng=None, max_pairs=2):
     rng = rng or np.random.default_rng(0)
 
     candidates = []
-    for ai in range(len(keep)):
-        for bi in range(ai + 1, len(keep)):
-            a, b = keep[ai], keep[bi]
-            if rng.random() < 0.5:  # random reference, so all four labels occur
-                a, b = b, a
-            rel = relation_label(coords_3d[a], coords_3d[b])
-            if rel is not None:
-                candidates.append((a, b, rel))
+    for a in keep:
+        ax, ay, _ = pixel_coords[a]
+        others = [(np.hypot(pixel_coords[j][0] - ax, pixel_coords[j][1] - ay), j) for j in keep if j != a]
+        if not others:
+            continue
+        _, b = min(others)  # the partner is the NEAREST object -- see above
+        rel = relation_label(coords_3d[a], coords_3d[b])
+        if rel is not None:
+            candidates.append((a, b, rel))
     if not candidates:
         return
     idxs = rng.permutation(len(candidates))[:max_pairs]

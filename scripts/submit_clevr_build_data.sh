@@ -109,15 +109,31 @@ if [ "$VERIFY_ONLY" = "1" ]; then
     exit 0
 fi
 
-echo "--- building object + relation crops at 16/32/64 px ---"
-$PYTHON -m qnlp.image_tower.classification.clevr.build_clevr_crops \
-    --tasks objects --train-scenes 3000 --val-scenes 1500 || exit 1
+# TASKS selects what to rebuild; default both.
+#
+# ⚠️ REBUILD ONLY WHAT YOU NEED IF ANOTHER JOB IS RUNNING. These commands
+# OVERWRITE data/datasets/clevr_<task>_*.npz in place, and every C1-C4 task opens
+# those files when it starts. Rewriting the `objects` cache underneath a live C3/
+# C3b/C3c array job can hand a task a half-written .npz -- so when C3c is on the
+# queue and only the relation data changed, submit with:
+#
+#     qsub scripts/submit_clevr_build_data.sh -v TASKS=relations
+#
+TASKS=${TASKS:-both}
+echo "--- building crops at 16/32/64 px (TASKS=$TASKS) ---"
+
+if [ "$TASKS" = "both" ] || [ "$TASKS" = "objects" ]; then
+    $PYTHON -m qnlp.image_tower.classification.clevr.build_clevr_crops \
+        --tasks objects --train-scenes 3000 --val-scenes 1500 || exit 1
+fi
 
 # Relations need more source scenes: only ~1 pair per scene survives the
 # occlusion, ambiguity-margin and crop-size filters, and the set is then
 # subsampled to exactly balance the four classes.
-$PYTHON -m qnlp.image_tower.classification.clevr.build_clevr_crops \
-    --tasks relations --train-scenes 5000 --val-scenes 2500 || exit 1
+if [ "$TASKS" = "both" ] || [ "$TASKS" = "relations" ]; then
+    $PYTHON -m qnlp.image_tower.classification.clevr.build_clevr_crops \
+        --tasks relations --train-scenes 5000 --val-scenes 2500 || exit 1
+fi
 
 echo "--- verifying ---"
 $PYTHON -m qnlp.image_tower.classification.clevr.verify_cluster_data || exit 1

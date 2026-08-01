@@ -179,32 +179,71 @@ def main():
 
     # Does the task work at all? Above chance is necessary before the ancilla
     # question means anything -- a model at 25% cannot inform Question C.2.
-    baseline_name = "quantum_none" if "quantum_none" in arms_by_name else list(arms_by_name)[0]
-    base = arms_by_name[baseline_name]["relation"]
-    above_chance = base["score_mean"] - floors["relation"]
-    limit = cc.mde_unpaired(base["score_std"], base["score_std"], base["n_seeds"], base["n_seeds"])
-    print(
-        f"\nTask viability: {baseline_name} scores {base['score_mean']:.1f}% vs a "
-        f"{floors['relation']:.1f}% majority floor ({above_chance:+.1f}, resolves {limit:.1f})."
-    )
-    viable = bool(above_chance > limit)
-    result["above_chance"] = {"margin": float(above_chance), "limit": float(limit), "resolved": viable}
-    if not viable:
-        who = "the quantum tower" if baseline_name.startswith("quantum") else f"the {baseline_name} arm"
+    #
+    # VIABILITY IS A PROPERTY OF THE DATA, SO ONLY A CLASSICAL ARM MAY JUDGE IT.
+    # This block used to fall back to `quantum_none`, and on 2026-08-01 that is
+    # exactly what it did: the quantum arms scored 28.4/29.2% against a 29.3%
+    # floor and the run concluded "the relational task is NOT learnable at this
+    # resolution". It is learnable. Re-run with the classical arms present, the
+    # same data gives classical_bare 49.6%, classical_full 51.3% and
+    # mlp_reference 65.4% -- and the classical TTNs are the quantum tower's
+    # structural counterparts at 428/434 params against its 462. So C4 measured a
+    # MODEL failure and reported it as a DATA failure, which is the R4 error with
+    # the roles reversed: a quantum arm was used as its own control.
+    #
+    # A quantum arm at chance is now exactly as consistent with "the model cannot
+    # do this" as with "the task is impossible", and this script must not choose
+    # between those for you.
+    viability_arms = [a for a in ("mlp_reference", "classical_full", "classical_bare") if a in arms_by_name]
+    baseline_name = viability_arms[0] if viability_arms else None
+    if baseline_name is None:
+        # `viable` stays None = UNKNOWN, which is not the same as False. The
+        # quantum arms may still be compared to each other below -- that is a
+        # model-vs-model question and does not need viability -- but no claim
+        # about the TASK may be made from this run.
+        base, viable = None, None
         print(
-            f"  The relational task is NOT learnable by {who} at this resolution. "
-            "Question C.2 cannot be answered from this run -- report it as a resolution limit, "
-            "not as evidence about positional encoding."
+            "\nTask viability: NOT ASSESSED -- this run has no classical arm (--skip-classical). "
+            "A quantum arm at the floor is equally consistent with 'the model failed' and 'the task "
+            "is impossible'. Run submit_c4_classical.sh and read the two together."
         )
+        result["above_chance"] = {"assessed": False, "reason": "no classical arm in this run"}
+    else:
+        base = arms_by_name[baseline_name]["relation"]
+        above_chance = base["score_mean"] - floors["relation"]
+        limit = cc.mde_unpaired(base["score_std"], base["score_std"], base["n_seeds"], base["n_seeds"])
+        print(
+            f"\nTask viability ({baseline_name}, classical): {base['score_mean']:.1f}% vs a "
+            f"{floors['relation']:.1f}% majority floor ({above_chance:+.1f}, resolves {limit:.1f})."
+        )
+        viable = bool(above_chance > limit)
+        result["above_chance"] = {
+            "arm": baseline_name,
+            "margin": float(above_chance),
+            "limit": float(limit),
+            "resolved": viable,
+        }
+        if not viable:
+            print(
+                f"  The relational task is NOT learnable by the classical {baseline_name} arm at this "
+                "resolution, so it is the DATA that is the limit. Question C.2 cannot be answered "
+                "from this run -- report it as a resolution limit, not as evidence about positional "
+                "encoding."
+            )
+        else:
+            print(
+                "  The task is viable. A quantum arm at the floor here is a MODEL result, not a data "
+                "limit, and must be reported as one."
+            )
 
-    if not viable and "quantum_none" in arms_by_name and "quantum_on_wire" in arms_by_name:
-        # Comparing two arms that both sit at the floor measures nothing. Emitting a
-        # C.2 verdict here would manufacture a finding out of a dead task -- exactly
-        # the error the viability check exists to prevent, so it must also suppress
-        # the verdict, not merely print a caveat next to it.
+    if viable is False and "quantum_none" in arms_by_name and "quantum_on_wire" in arms_by_name:
+        # Comparing two arms on data that no classical model can learn measures
+        # nothing. Note the `is False`: an UNASSESSED task (no classical arm) must
+        # not take this branch, or a sharded quantum-only run would silently
+        # suppress its own verdict on a task that is perfectly fine.
         verdict = (
-            f"Question C.2: NO VERDICT. The task itself is not learnable here "
-            f"({baseline_name} {base['score_mean']:.1f}% vs a {floors['relation']:.1f}% floor), so the "
+            f"Question C.2: NO VERDICT. The task itself is not learnable here (classical "
+            f"{baseline_name} {base['score_mean']:.1f}% vs a {floors['relation']:.1f}% floor), so the "
             f"with-vs-without-position comparison is between two arms that are both at chance. Fix "
             f"viability first -- more seeds will not help. Check resolution, the epoch budget, and lr."
         )
@@ -245,11 +284,17 @@ def main():
         print(f"\nVERDICT: {verdict}")
         result["question_c2_verdict"] = verdict
 
+    # Standing requirement 1: never report a quantum accuracy without a size-matched
+    # classical reference beside it. So the quantum arm is the LEFT side whenever it
+    # is present -- `baseline_name` is now a classical arm and using it here printed
+    # `classical_bare -> classical_bare`, a self-comparison, which is no reference
+    # at all.
+    compare_from = "quantum_none" if "quantum_none" in arms_by_name else baseline_name
     for other in ("classical_bare", "classical_full", "mlp_reference", "mlp_param_matched"):
-        if other in arms_by_name and baseline_name in arms_by_name:
+        if other in arms_by_name and compare_from in arms_by_name and other != compare_from:
             cc.print_head_comparisons(
-                f"{baseline_name} -> {other}",
-                cc.compare_heads(arms_by_name[baseline_name], arms_by_name[other], heads),
+                f"{compare_from} -> {other}",
+                cc.compare_heads(arms_by_name[compare_from], arms_by_name[other], heads),
                 heads,
             )
 

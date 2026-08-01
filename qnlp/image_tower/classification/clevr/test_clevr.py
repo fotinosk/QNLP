@@ -14,6 +14,12 @@ shipped or came close to shipping:
       same picture with opposite labels, so half the relation dataset would be
       unlearnable noise and Question C.2 would get a fake null.
 
+  test_relation_partner_is_the_nearest_object_not_an_arbitrary_one
+      The same ambiguity for the OTHER object, which the test above does not
+      cover and which is what actually killed C4: a randomly chosen partner
+      among ~5 objects in frame is not identifiable from the image, so the task
+      returns chance however good the model is.
+
   test_per_head_chance_guard_uses_each_heads_own_classes
       pc.is_chance_level defaults to 4 classes. Applied to the binary `material`
       head it would wave through a completely dead 50% head. R4's 25.8% arm
@@ -29,12 +35,14 @@ Data-backed tests skip when the cache is absent; build it with
 Run: conda run -n qnlp python -m pytest qnlp/image_tower/classification/clevr/test_clevr.py -q
 """
 
+import io
 import json
 import os
 
 import numpy as np
 import pytest
 import torch
+from PIL import Image
 
 from qnlp.image_tower.classification.clevr import clevr_common as cc
 from qnlp.image_tower.classification.quantum.qttn_core import CoherentQTTNClassifier
@@ -160,6 +168,53 @@ def test_relation_reference_object_is_centred():
         f"crop centre (saturation {centre:.3f}) is not more object-like than the corners "
         f"({corner:.3f}) -- the reference object is not centred, so the relation labels are "
         f"ambiguous and half the dataset is unlearnable"
+    )
+
+
+def test_relation_partner_is_the_nearest_object_not_an_arbitrary_one():
+    """THE DEFECT THAT KILLED C4, pinned.
+
+    The partner used to be sampled at random from all valid pairs, with nothing
+    checking what else was in the box: 96.8% of crops held a distractor (median
+    4), and in 87.9% at least one distractor sat FARTHER from the centre than the
+    labelled object. So the label named one object out of ~5 and nothing in the
+    image said which -- a model that understands relations perfectly still scores
+    chance, and C4 duly measured 28.4% against a 29.3% floor.
+
+    Scene below: reference `a` centred, `b` near and to the RIGHT, `c` far and in
+    FRONT. Under the nearest rule `a`'s partner is always `b`, so "front" can
+    never be emitted. Under the old random rule it could be, half the time.
+    """
+    a_px, b_px, c_px = (240.0, 160.0, 10.0), (300.0, 160.0, 10.0), (240.0, 60.0, 10.0)
+    assert np.hypot(*(np.subtract(b_px[:2], a_px[:2]))) < np.hypot(*(np.subtract(c_px[:2], a_px[:2])))
+    buf = io.BytesIO()
+    Image.fromarray(np.zeros((co.IMG_H, co.IMG_W, 3), dtype=np.uint8)).save(buf, format="PNG")
+    row = {
+        "image": {"bytes": buf.getvalue()},
+        "objects": {
+            "color": [0, 1, 2],  # only its length is read
+            "pixel_coords": [a_px, b_px, c_px],
+            "3d_coords": [(0.0, 0.0, 0.35), tuple(2 * co.DIR_RIGHT), tuple(2 * co.DIR_FRONT)],
+        },
+    }
+    labels = {co.RELATIONS[lab["relation"]] for _, lab in co.iter_relation_crops(row, resolutions=(16,))}
+    assert "front" not in labels and "behind" not in labels, (
+        f"emitted {sorted(labels)} -- the label refers to an object that is NOT the nearest one, "
+        f"so nothing in the crop identifies which object it means. This is the C4 defect."
+    )
+    assert labels == {"right", "left"}, f"expected the a<->b pair in both directions, got {sorted(labels)}"
+
+
+@needs_relations
+def test_relation_cache_was_built_with_the_nearest_partner_rule():
+    """A cache built before 2026-08-01 has an ambiguous referent and will return a
+    null no matter what the model does. The manifest is the only way to tell the
+    two apart -- the .npz files look identical."""
+    manifest = json.load(open(os.path.join(co.CACHE_DIR, "clevr_relations_manifest.json")))
+    assert manifest.get("relation_partner_rule") == co.RELATION_PARTNER_RULE, (
+        f"relation cache at {co.CACHE_DIR} was built with partner rule "
+        f"{manifest.get('relation_partner_rule', 'random (pre-2026-08-01)')!r} -- rebuild it with "
+        f"build_clevr_crops before running C4, or the task is not learnable by construction"
     )
 
 
