@@ -122,6 +122,15 @@ def main():
         "a 60-config search while the quantum arm got a single lr, and that asymmetry is what makes "
         "the C3 colour result uninterpretable.",
     )
+    ap.add_argument(
+        "--tune-epochs",
+        type=int,
+        default=10,
+        help="Budget for the classical hyperparameter search. Default 10 keeps every pre-2026-08-03 "
+        "result reproducible. TASK C3D MUST RAISE IT TO --epochs: tuning at 10 and running at 90 "
+        "picks configs that are good at 10, which moves the budget asymmetry onto the "
+        "hyperparameter axis instead of removing it.",
+    )
     ap.add_argument("--skip-quantum", action="store_true", help="Classical arms only; combine later.")
     ap.add_argument("--only-quantum", action="store_true", help="Quantum arm only, for sharding.")
     ap.add_argument(
@@ -154,9 +163,9 @@ def main():
 
     if not args.only_quantum:
         print("\nTuning classical_bare (rank swept freely):", flush=True)
-        tuned_bare = tune_classical(False, 0.0, q_params, img_size, heads)
+        tuned_bare = tune_classical(False, 0.0, q_params, img_size, heads, epochs=args.tune_epochs)
         print("Tuning classical_full:", flush=True)
-        tuned_full = tune_classical(True, 0.1, q_params, img_size, heads)
+        tuned_full = tune_classical(True, 0.1, q_params, img_size, heads, epochs=args.tune_epochs)
         specs["classical_bare"] = (
             lambda: ClassicalTTNClassifier(
                 rank=tuned_bare["rank"],

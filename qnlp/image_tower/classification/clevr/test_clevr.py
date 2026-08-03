@@ -29,6 +29,12 @@ shipped or came close to shipping:
       Train and val are built from different CLEVR shards. If that ever breaks,
       every accuracy in Phase 2 is inflated.
 
+  test_binding_composites_contain_exactly_one_of_each_shape
+      C6's whole validity. Identical class-conditional marginals are what make a
+      bag-of-features shortcut provably worthless; lose that and the task
+      silently degrades into another perception task, which is the very thing
+      C6 exists to escape.
+
 Data-backed tests skip when the cache is absent; build it with
   conda run -n qnlp python -m qnlp.image_tower.classification.clevr.build_clevr_crops
 
@@ -46,6 +52,7 @@ from PIL import Image
 
 from qnlp.image_tower.classification.clevr import clevr_common as cc
 from qnlp.image_tower.classification.quantum.qttn_core import CoherentQTTNClassifier
+from qnlp.utils.data import clevr_binding as cb
 from qnlp.utils.data import clevr_objects as co
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
@@ -216,6 +223,70 @@ def test_relation_cache_was_built_with_the_nearest_partner_rule():
         f"{manifest.get('relation_partner_rule', 'random (pre-2026-08-01)')!r} -- rebuild it with "
         f"build_clevr_crops before running C4, or the task is not learnable by construction"
     )
+
+
+# ---------------------------------------------------------------------
+# Task C6 -- shape-binding composites
+# ---------------------------------------------------------------------
+
+
+def _fake_object_crops(n=40, res=32, seed=0):
+    """Three shape classes of solid-ish colour blobs, enough to compose from."""
+    rng = np.random.default_rng(seed)
+    imgs = rng.integers(0, 255, size=(n, res, res, 3), dtype=np.uint8)
+    shapes = np.tile([0, 1, 2], n // 3 + 1)[:n]
+    return imgs, shapes
+
+
+def test_binding_composites_contain_exactly_one_of_each_shape():
+    """THE PROPERTY THE WHOLE TASK RESTS ON.
+
+    Every composite holds exactly one object of each of the two shape classes,
+    so the class-conditional shape marginals are IDENTICAL and a bag-of-features
+    model is at chance provably, not merely empirically. If this ever breaks,
+    C6 stops being a compositional probe and silently becomes another perception
+    task -- which is the exact failure C6 was created to escape, since neither
+    C3 nor C4 turned out to test binding.
+    """
+    imgs, shapes = _fake_object_crops()
+    out, labels, meta = cb.build_composites(imgs, shapes, n=64, shape_pair=(0, 1), seed=0)
+    assert out.shape == (64, cb.CANVAS, cb.CANVAS, 3)
+    counts = np.bincount(labels, minlength=2)
+    assert counts[0] == counts[1] == 32, f"classes must be exactly balanced, got {counts.tolist()}"
+    assert meta["shape_pair"] == [0, 1]
+    with pytest.raises(ValueError):
+        cb.build_composites(imgs, shapes, n=8, shape_pair=(1, 1))  # must be distinct
+
+
+def test_binding_cells_never_overlap():
+    """Two objects bleeding into each other would make 'which is on the left'
+    ambiguous -- the same class of defect that invalidated the first C4, where
+    the label named one object out of ~5 with nothing identifying which."""
+    rng = np.random.default_rng(0)
+    for _ in range(500):
+        (lx, _), (rx, _) = cb._cell_origins(rng)
+        assert lx + cb.CELL <= rx, f"cells overlap: left ends at {lx + cb.CELL}, right starts at {rx}"
+        assert 0 <= lx and rx + cb.CELL <= cb.CANVAS
+
+
+def test_binding_placement_is_jittered_not_fixed():
+    """Aligned placement would hand each level-1 block exactly one object -- the
+    TTN's claimed inductive bias, handed to it for free. Jitter is what keeps the
+    comparison honest, so pin that it actually varies."""
+    rng = np.random.default_rng(0)
+    origins = {cb._cell_origins(rng)[0] for _ in range(200)}
+    assert len(origins) > 1, "left-cell placement is constant -- the jitter is not doing anything"
+
+
+def test_binding_patch_shuffle_is_a_permutation():
+    """The manipulation check must PERMUTE patches, not corrupt them: the pixel
+    multiset has to be preserved exactly, or a drop to chance would just mean the
+    image was destroyed rather than that the task needs position."""
+    x = torch.rand(4, 3, 32, 32)
+    y = cb.shuffle_patches(x, patch_size=8, generator=torch.Generator().manual_seed(0))
+    assert y.shape == x.shape
+    assert torch.allclose(x.flatten().sort().values, y.flatten().sort().values)
+    assert not torch.allclose(x, y), "shuffle changed nothing"
 
 
 @needs_objects

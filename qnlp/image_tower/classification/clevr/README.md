@@ -31,7 +31,7 @@ Read that section and the `research_log.md` Current Status block first.
 | **C2** readout width | ✅ done — **adopt `top_layer_multi_pauli`** (12 values), on stability |
 | **C3** attributes | ✅ done — quantum beats `classical_full` on shape/material at fewer params |
 | **C3b** quantum lr sweep | 🖥️ **ready to submit** — `qsub scripts/submit_c3b_lr_sweep.sh` (4 lrs × 3 seeds). Un-dropped: it was cut for *local* cost only |
-| **C3c** long-run one seed | 📌 **recommended, not blocking** — see below |
+| **C3c** epoch budget | ✅ done — **the budget was binding**: colour `27.1 → 63.0` at 90 epochs, but it trades heads |
 | **C4** relational | ← next, and required (Question C.2) |
 
 ### 📌 C3c — train one promising seed for longer
@@ -61,6 +61,12 @@ classical arms get the same extension.
 | **`quantum_coherent`** | **462** | 27.0 | **58.9** | **70.0** | 96.1 |
 | `classical_full` | 551 | 76.6 | 46.3 | 61.2 | 97.7 |
 | `mlp_reference` | 1186 | 90.4 | 64.5 | 81.8 | 99.1 |
+
+> ⚠️ **THE TABLE ABOVE IS AT 30 EPOCHS AND IS BUDGET-SUPERSEDED.** C3c showed the quantum
+> colour head had not converged at 30. At **90 epochs** colour goes `27.1 → 63.0` and the
+> verdicts change: quantum beats `classical_full` on shape, **ties** on colour and material,
+> loses on size. The classical arms were **not** re-run at 90, so neither budget is
+> privileged — **never quote one table without the other.**
 
 **Two things must accompany any quotation of these numbers:**
 

@@ -52,7 +52,24 @@ def main():
     )
     ap.add_argument("--seeds", type=int, nargs="+", default=list(range(10)))
     ap.add_argument("--epochs", type=int, default=cc.CLEVR_PROTOCOL["epochs"])
+    ap.add_argument(
+        "--lr",
+        type=float,
+        default=None,
+        help="Quantum-arm learning rate; defaults to PROTOCOL's 0.03. SWEEP THIS BEFORE ADDING "
+        "SEEDS. The 2026-08-02 re-run collapsed 12 of 20 seeds at lr=0.03, and 3 of those had "
+        "already reached 35-50%% before falling back to chance -- a learning-rate signature, not a "
+        "capability limit. Contaminated pooled std is 11.5 against ~3 on converged seeds, which is "
+        "the difference between ~40 and ~9 seeds per arm for Question C.2.",
+    )
     ap.add_argument("--positional", nargs="+", default=list(ARMS), choices=list(ARMS))
+    ap.add_argument(
+        "--tune-epochs",
+        type=int,
+        default=10,
+        help="Budget for the classical hyperparameter search. Raise it to --epochs for C3d, or "
+        "tuning at 10 while running at 90 moves the budget asymmetry onto the hyperparameter axis.",
+    )
     ap.add_argument("--skip-classical", action="store_true", help="Quantum arms only, for sharding.")
     ap.add_argument(
         "--skip-quantum",
@@ -75,22 +92,23 @@ def main():
         flush=True,
     )
 
+    q_lr = args.lr if args.lr is not None else pc.PROTOCOL["lr"]
     specs = {}
     for positional in args.positional:
         specs[f"quantum_{positional}"] = (
             lambda p=positional: CoherentQTTNClassifier(
                 **q_arch, img_size=img_size, patch_size=ps, n_classes=heads, share_level1_weights=False, positional=p
             ),
-            pc.PROTOCOL["lr"],
+            q_lr,
             None,
         )
 
     if not args.skip_classical:
         q_params = sum(p.numel() for p in specs[f"quantum_{args.positional[0]}"][0]().parameters())
         print("\nTuning classical_bare (rank swept freely):", flush=True)
-        tb = tune_classical(False, 0.0, q_params, img_size, heads, task="relations")
+        tb = tune_classical(False, 0.0, q_params, img_size, heads, task="relations", epochs=args.tune_epochs)
         print("Tuning classical_full:", flush=True)
-        tf = tune_classical(True, 0.1, q_params, img_size, heads, task="relations")
+        tf = tune_classical(True, 0.1, q_params, img_size, heads, task="relations", epochs=args.tune_epochs)
         specs["classical_bare"] = (
             lambda: ClassicalTTNClassifier(
                 rank=tb["rank"],
@@ -148,7 +166,16 @@ def main():
             curves.append(c)
             print(f"  seed {s:>2}: relation={cc.score_of(c['relation']):.1f}%", flush=True)
             cc.save(
-                {"arm": name, "partial": True, "seeds_done": len(curves), "curves": curves},
+                # num_params travels WITH the checkpoint. Without it a sharded run
+                # merges to a table reading `params 0`, which is an accuracy with no
+                # size beside it -- the one thing standing requirement 1 forbids.
+                {
+                    "arm": name,
+                    "partial": True,
+                    "seeds_done": len(curves),
+                    "curves": curves,
+                    "num_params": n_params,
+                },
                 f"{args.out}_{name}_partial.json",
             )
         arms_by_name[name] = cc.summarise_heads(
@@ -166,7 +193,7 @@ def main():
         "task": "relations",
         "img_size": img_size,
         "readout": args.readout,
-        "protocol": {**cc.CLEVR_PROTOCOL, "epochs": args.epochs},
+        "protocol": {**cc.CLEVR_PROTOCOL, "epochs": args.epochs, "quantum_lr": q_lr},
         "seeds": args.seeds,
         "majority_floors": floors,
         "arms": arms_by_name,

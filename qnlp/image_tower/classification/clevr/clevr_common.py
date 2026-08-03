@@ -28,6 +28,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 from qnlp.image_tower.classification.quantum import phase15_common as pc
+from qnlp.utils.data.clevr_binding import get_binding_loaders
 from qnlp.utils.data.clevr_objects import ATTRIBUTES, RELATIONS, get_clevr_loaders
 
 # Re-exported so runners import statistics from one place and cannot accidentally
@@ -44,6 +45,7 @@ SCORE_LAST_K = pc.SCORE_LAST_K
 
 HEADS = dict(ATTRIBUTES)  # {"color": 8, "shape": 3, "material": 2, "size": 2}
 RELATION_HEAD = {"relation": len(RELATIONS)}
+BINDING_HEAD = {"binding": 2}  # Task C6: which shape is on the left.
 
 # Phase-1 protocol, with ONE deliberate change: 512 test samples instead of 64.
 # 64 samples across an 8-way `color` head is ~8 per class, which makes the
@@ -53,7 +55,36 @@ RELATION_HEAD = {"relation": len(RELATIONS)}
 # unchanged, so CLEVR numbers stay methodologically comparable to Phase 1.
 CLEVR_PROTOCOL = {**pc.PROTOCOL, "test_samples": 512}
 
-TASK_HEADS = {"objects": HEADS, "relations": RELATION_HEAD}
+TASK_HEADS = {"objects": HEADS, "relations": RELATION_HEAD, "binding": BINDING_HEAD}
+
+
+def get_loaders(task, img_size, cfg, seed, shuffled=False, patch_size=None):
+    """One dispatch point for every task's loader.
+
+    Binding lives in its own module because its images are COMPOSED rather than
+    cropped, and because it carries the patch-shuffle manipulation check that no
+    other task needs. Routing here keeps `train_run_multihead` and
+    `majority_baselines` task-agnostic -- per-script data loading is the same
+    class of drift as per-script model classes, which caused both Phase-1 audits.
+    """
+    if task == "binding":
+        return get_binding_loaders(
+            img_size=img_size,
+            batch_size=cfg["batch_size"],
+            train_samples=cfg["train_samples"],
+            test_samples=cfg["test_samples"],
+            seed=seed,
+            shuffled=shuffled,
+            patch_size=patch_size or img_size // 4,
+        )
+    return get_clevr_loaders(
+        task=task,
+        img_size=img_size,
+        batch_size=cfg["batch_size"],
+        train_samples=cfg["train_samples"],
+        test_samples=cfg["test_samples"],
+        seed=seed,
+    )
 
 
 def chance_rate(n_classes):
@@ -87,14 +118,7 @@ def majority_baselines(task="objects", img_size=16, seed=0, **protocol):
     """
     cfg = {**CLEVR_PROTOCOL, **protocol}
     heads = TASK_HEADS[task]
-    _, test_loader = get_clevr_loaders(
-        task=task,
-        img_size=img_size,
-        batch_size=cfg["batch_size"],
-        train_samples=cfg["train_samples"],
-        test_samples=cfg["test_samples"],
-        seed=seed,
-    )
+    _, test_loader = get_loaders(task, img_size, cfg, seed, shuffled=cfg.get("shuffled", False))
     counts = {h: np.zeros(k, dtype=np.int64) for h, k in heads.items()}
     for _, labels in test_loader:
         for h in heads:
@@ -116,19 +140,23 @@ def train_run_multihead(model_factory, seed, task="objects", img_size=16, **prot
     """
     cfg = {**CLEVR_PROTOCOL, **protocol}
     heads = TASK_HEADS[task]
-    train_loader, test_loader = get_clevr_loaders(
-        task=task,
-        img_size=img_size,
-        batch_size=cfg["batch_size"],
-        train_samples=cfg["train_samples"],
-        test_samples=cfg["test_samples"],
-        seed=seed,
-    )
+    train_loader, test_loader = get_loaders(task, img_size, cfg, seed, shuffled=cfg.get("shuffled", False))
     torch.manual_seed(seed)
     np.random.seed(seed)
     model = model_factory()
     optimizer = optim.AdamW(model.parameters(), lr=cfg["lr"], weight_decay=1e-4)
     criterion = nn.CrossEntropyLoss()
+    # Cosine decay, OFF by default so every pre-2026-08-03 result stays exactly
+    # reproducible. It targets a specific measured failure mode rather than being
+    # general tidying: in C4, 3 of quantum_none's 7 collapsed seeds had ALREADY
+    # LEARNED the task -- one reached 50.2% at epoch 12, above the classical
+    # baseline's mean -- and then fell back to chance for the last ten epochs.
+    # That is a too-high-late-in-training signature. The other 4 never left
+    # chance, which decay cannot help; expect it to fix at most half the
+    # collapses.
+    scheduler = (
+        optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg["epochs"]) if cfg.get("cosine_decay") else None
+    )
 
     curves = {h: [] for h in heads}
     for _ in range(cfg["epochs"]):
@@ -139,6 +167,8 @@ def train_run_multihead(model_factory, seed, task="objects", img_size=16, **prot
             loss = torch.stack([criterion(out[h], labels[h]) for h in heads]).sum()
             loss.backward()
             optimizer.step()
+        if scheduler is not None:
+            scheduler.step()
 
         model.eval()
         correct = {h: 0 for h in heads}
