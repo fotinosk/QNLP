@@ -968,6 +968,35 @@ A CLEVR quantum seed costs **~62 min**, against the ~17.5 min R7 measured on syn
 * **Operational note**: tasks took **14–27 h** each, not the ~9 h estimated, confirming `lightning.qubit` is still unavailable and the runs fell back to `default.qubit`. The `h_rt=48:0:0` budget was necessary — at the 12 h used for C3b/C4 all nine tasks would have been hard-killed.
 * **Reproduce**: `qsub scripts/submit_c3c_long_run.sh` (array 1–9), then `combine_clevr --prefix c3c_lr$LR --seeds 0 1 2 --arms quantum_coherent --params 462` per lr.
 
+### [2026-08-03] Task C6 (shape) ABANDONED AS CONFOUNDED — a Binding Task Must Bind an Attribute Every Arm Can SEE
+
+* **What ran**: C6 classical arms on shape-binding composites, 10 seeds, 90 epochs, plus the patch-shuffle manipulation check. ~5 h.
+* **✅ THE TASK CONSTRUCTION IS VALIDATED — that part transfers to the rebuild.** The manipulation check passed cleanly: on patch-shuffled input every arm sits at chance (`classical_bare` `50.2 ± 2.1`, `classical_full` `49.2 ± 2.5`, `mlp_reference` `50.7 ± 2.4`, `mlp_param_matched` `50.8 ± 2.2`, chance 50.0). So the composites leak **no** non-positional cue — no lighting artifact, no intensity gradient, no pasting seam correlated with the class. The marginal control works exactly as designed.
+* **❌ THE ATTRIBUTE CHOICE WAS WRONG, AND IT INVALIDATES THE RESULT.** Unshuffled, against a 51.2% majority floor (10 seeds):
+
+  | arm | params | binding | vs floor | C3 single-object **shape** (floor 35.4) |
+  |---|---|---|---|---|
+  | `classical_bare` | 762 | `50.2 ± 2.7` | −1.0 (limit 2.5) — **at floor** | **36.5 — AT THE SHAPE FLOOR** |
+  | `classical_full` | 860 | `53.8 ± 5.4` | +2.6 (limit 5.0) — **at floor** | 46.3 |
+  | `mlp_param_matched` | 683 | `57.5 ± 7.7` | +6.3 (limit 7.2) — **at floor** | **36.9 — AT THE SHAPE FLOOR** |
+  | `mlp_reference` | 1397 | `60.3 ± 7.7` | +9.1 (limit 7.2) — above | 64.5 |
+
+  **Two of the four arms cannot perceive shape at all.** A model that cannot tell a cube from a sphere cannot answer "which is on the left" however good its compositional machinery is, so `classical_bare`'s 50.2% measures *perception*, not binding. **This is the C4 error repeated**: a perceptual limit read as an architectural one, on a task built to avoid exactly that.
+* **And the confound ran in the direction that would have flattered the thesis.** `quantum_coherent` is the **best TTN at shape perception** (58.9, against `classical_full`'s 46.3). Had the quantum arms run, a quantum win on shape-binding would have been largely a perception win — a compositional headline manufactured out of a perceptual difference. The 5 h spent here is cheap against that.
+* **A binding task is a CONJUNCTION of perception and binding, so bind only what every arm already sees.** C3's single-object table is the one to consult, and it was on disk the whole time:
+
+  | attribute | quantum | cls_full | cls_bare | mlp_ref | mlp_pm | floor | |
+  |---|---|---|---|---|---|---|---|
+  | **size** | 96.1 | 97.7 | 88.9 | 99.1 | 84.8 | 50.6 | ✅ **every arm perceives it** |
+  | material | 70.0 | 61.2 | 56.8 | 81.8 | 53.5 | 50.2 | fallback |
+  | colour | 27.0 | 76.6 | 52.5 | 90.4 | 26.2 | 15.2 | two arms near floor |
+  | shape | 58.9 | 46.3 | **36.5** | 64.5 | **36.9** | 35.4 | ❌ used, and this is why it failed |
+
+  **C6 is rebuilt on `size`**, where the spread across arms is 84.8–99.1. Perception is equalised, so any failure is a binding failure — which is the only thing C6 was ever meant to measure. Secondary benefit: shape discriminability at a 14 px cell capped the task's ceiling around 65–70%, giving ~15 points of range against 5–7 pt MDEs; size removes that squeeze too.
+* **Code changes**: the builder and loaders are now generic over the bound attribute (`--attribute`, default `size`), caches and manifests are **attribute-scoped** (`clevr_binding_<attr>_<res>_<split>.npz`) so the shape dataset stays reachable as a footnote rather than being overwritten, and a test pins the default to `size` with the reason. `--reuse-tuning` added: the shuffled check was re-running the whole ~36-config grid on data that is at chance by construction, which is most of why "minutes" became 5 h. Tuning epochs set to 30 — enough to *rank* configs, against 90 which scales the grid 9× for no better ranking.
+* **⚠️ Estimate error to carry forward**: I called this job "minutes". It was 5 h. The cost is `~36 configs × 3 seeds × tune_epochs`, run once per arm per invocation — four full grids at 90 epochs. Budget classical tuning explicitly rather than assuming classical means free.
+* **The shape run is kept, not deleted.** It is a legitimate result about *shape* binding, reportable as a footnote with its confound stated, and its manipulation check is the validation of the composite construction that the size rebuild inherits.
+
 ### [2026-08-03] PLAN: Tasks C3d + C6 — the Closing Experiments, and Why the MLP's Wins Were Never Evidence Against the Premise
 
 * **Scope decision, agreed this session**: this is the **final experiment line** of the investigation. What it does not close becomes a stated limitation rather than an open thread.

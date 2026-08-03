@@ -50,6 +50,7 @@ Run:
 """
 
 import argparse
+import json
 
 from qnlp.image_tower.classification.clevr import clevr_common as cc
 from qnlp.image_tower.classification.clevr.run_c3_attributes import tune_classical
@@ -87,7 +88,29 @@ def main():
     )
     ap.add_argument("--skip-quantum", action="store_true", help="Cheap arms only (minutes).")
     ap.add_argument("--only-quantum", action="store_true", help="Quantum arms only, for sharding.")
-    ap.add_argument("--tune-epochs", type=int, default=10, help="Budget for the classical hyperparameter search.")
+    ap.add_argument(
+        "--attribute",
+        default=cb.DEFAULT_ATTRIBUTE,
+        help="Which attribute is bound. `size` because EVERY arm perceives it (C3: 84.8-99.1%%), so a "
+        "failure is a BINDING failure. NOT `shape`: classical_bare (36.5) and mlp_param_matched "
+        "(36.9) sit at its 35.4 floor, so their scores there measured perception, not composition.",
+    )
+    ap.add_argument(
+        "--tune-epochs",
+        type=int,
+        default=30,
+        help="Budget for the classical hyperparameter search. 30, not the run's 90: the grid is ~36 "
+        "configs x 3 seeds and scales linearly, so tuning at 90 cost 5 h of the first C6 run for a "
+        "config RANKING that 30 epochs already gives. Not 10 either -- tuning at 10 while running at "
+        "90 selects configs good at 10, which moves the budget asymmetry rather than removing it.",
+    )
+    ap.add_argument(
+        "--reuse-tuning",
+        default=None,
+        help="Path to a previous results JSON whose tuned classical configs should be reused. Use it "
+        "for the --shuffled manipulation check: re-running the grid there costs another full sweep "
+        "to rank configs on data where every arm is at chance by construction.",
+    )
     ap.add_argument("--out", default="c6")
     ap.add_argument("--out-suffix", default="")
     args = ap.parse_args()
@@ -96,13 +119,19 @@ def main():
     # 32px canvas with 8px patches keeps the 4x4 patch grid, so the tree is still
     # 16 qubits (C5 route (a)). This is resolution scaling, NOT quantum scaling.
     ps = img_size // 4
-    protocol = {"epochs": args.epochs, "cosine_decay": not args.no_cosine, "shuffled": args.shuffled}
+    protocol = {
+        "epochs": args.epochs,
+        "cosine_decay": not args.no_cosine,
+        "shuffled": args.shuffled,
+        "attribute": args.attribute,
+    }
     floors = cc.majority_baselines(task="binding", img_size=img_size, seed=args.seeds[0], **protocol)
     q_arch = {**pc.COHERENT_ARCH, "readout": args.readout}
     q_lr = args.lr if args.lr is not None else pc.PROTOCOL["lr"]
 
     print(
-        f"C6 shape binding | {img_size}x{img_size} (patch {ps}, 16 qubits) | readout={args.readout}\n"
+        f"C6 binding on `{args.attribute}` | {img_size}x{img_size} (patch {ps}, 16 qubits) | "
+        f"readout={args.readout}\n"
         f"seeds={args.seeds} | epochs={args.epochs} | cosine={not args.no_cosine} | "
         f"SHUFFLED={args.shuffled} | chance=50.0% | majority floor={floors['binding']:.1f}%",
         flush=True,
@@ -140,10 +169,17 @@ def main():
             ).parameters()
         )
         print(f"\nquantum reference: {q_params} params (classical budget = 1.5x)", flush=True)
-        print("Tuning classical_bare (rank swept freely):", flush=True)
-        tb = tune_classical(False, 0.0, q_params, img_size, heads, task="binding", epochs=args.tune_epochs)
-        print("Tuning classical_full:", flush=True)
-        tf = tune_classical(True, 0.1, q_params, img_size, heads, task="binding", epochs=args.tune_epochs)
+        if args.reuse_tuning:
+            with open(args.reuse_tuning) as f:
+                prev = json.load(f)["arms"]
+            tb = prev["classical_bare"]["binding"]["tuned"]
+            tf = prev["classical_full"]["binding"]["tuned"]
+            print(f"Reusing tuned configs from {args.reuse_tuning}: bare={tb} full={tf}", flush=True)
+        else:
+            print("Tuning classical_bare (rank swept freely):", flush=True)
+            tb = tune_classical(False, 0.0, q_params, img_size, heads, task="binding", epochs=args.tune_epochs)
+            print("Tuning classical_full:", flush=True)
+            tf = tune_classical(True, 0.1, q_params, img_size, heads, task="binding", epochs=args.tune_epochs)
         for name, tuned, resid, drop in (("classical_bare", tb, False, 0.0), ("classical_full", tf, True, 0.1)):
             specs[name] = (
                 lambda t=tuned, r=resid, d=drop: ClassicalTTNClassifier(
@@ -196,7 +232,7 @@ def main():
         )
 
     cc.print_head_table(
-        f"C6: CLEVR shape binding, {img_size}x{img_size}, {len(args.seeds)} seeds"
+        f"C6: CLEVR {args.attribute} binding, {img_size}x{img_size}, {len(args.seeds)} seeds"
         + (" [PATCH-SHUFFLED MANIPULATION CHECK]" if args.shuffled else ""),
         arms_by_name,
         heads,
@@ -213,7 +249,8 @@ def main():
         "majority_floors": floors,
         "shuffled": args.shuffled,
         "arms": arms_by_name,
-        "binding_manifest": cb.load_binding_manifest(),
+        "attribute": args.attribute,
+        "binding_manifest": cb.load_binding_manifest(args.attribute),
         "confound": (
             "quantum_on_wire carries 32 more parameters than quantum_none (+7%), so a win is not "
             "cleanly separable from the extra capacity. This is why ancilla2 was gated behind a "

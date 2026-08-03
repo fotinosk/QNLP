@@ -5,6 +5,14 @@
 #
 #   1. C6 CLASSICAL ARMS -- classical_bare, classical_full, mlp_reference,
 #      mlp_param_matched on the binding composites, 10 seeds, 90 epochs.
+#      BINDING ON `size`, NOT `shape`. The first run bound on shape and is
+#      confounded: C3 single-object shape accuracy is classical_bare 36.5 and
+#      mlp_param_matched 36.9 against a 35.4 floor -- two of four arms cannot
+#      perceive the attribute at all, so their binding scores measured
+#      perception. Worse, quantum_coherent is the BEST TTN at shape (58.9 vs
+#      classical_full's 46.3), so a quantum win there would have looked
+#      compositional while being perceptual. On `size` every arm scores
+#      84.8-99.1, so perception is equalised and a failure is a BINDING failure.
 #      These carry the experiment's actual comparison: the MLP beats every TTN
 #      arm on PERCEPTION (C3, C4), and the question is whether that advantage
 #      narrows or reverses on BINDING.
@@ -69,21 +77,26 @@ SEEDS="0 1 2 3 4 5 6 7 8 9"
 
 echo "===== 1/3  C6 classical arms, binding, 90 epochs ====="
 $PYTHON -m qnlp.image_tower.classification.clevr.run_c6_binding \
-    --img-size 32 --seeds $SEEDS --epochs 90 --tune-epochs 90 \
-    --skip-quantum --out c6_cheap --out-suffix _classical || exit 1
+    --img-size 32 --seeds $SEEDS --epochs 90 --tune-epochs 30 \
+    --attribute size --skip-quantum --out c6_cheap --out-suffix _classical || exit 1
 
 echo "===== 2/3  C6 MANIPULATION CHECK (patch-shuffled) -- GATES THE QUANTUM ARRAY ====="
+# --reuse-tuning: the shuffled data is at chance by construction, so re-running
+# the ~36-config grid on it would rank configs on noise. Reusing the unshuffled
+# tuning is both cheaper and more correct. Repeating it is most of why the first
+# run took 5 h rather than the "minutes" estimated.
 $PYTHON -m qnlp.image_tower.classification.clevr.run_c6_binding \
-    --img-size 32 --seeds $SEEDS --epochs 90 --tune-epochs 90 \
+    --img-size 32 --seeds $SEEDS --epochs 90 --attribute size \
+    --reuse-tuning qnlp/image_tower/classification/quantum/results/c6_binding_classical_results.json \
     --skip-quantum --shuffled --out c6_shuf --out-suffix _shuffled || exit 1
 
 echo "===== 3/3  C3d classical arms at 90 epochs ====="
 $PYTHON -m qnlp.image_tower.classification.clevr.run_c3_attributes \
-    --img-size 16 --seeds $SEEDS --epochs 90 --tune-epochs 90 \
+    --img-size 16 --seeds $SEEDS --epochs 90 --tune-epochs 30 \
     --skip-quantum --out c3d_obj --out-suffix _c3d_90ep || exit 1
 
 $PYTHON -m qnlp.image_tower.classification.clevr.run_c4_relational \
-    --img-size 16 --seeds $SEEDS --epochs 90 --tune-epochs 90 \
+    --img-size 16 --seeds $SEEDS --epochs 90 --tune-epochs 30 \
     --skip-quantum --out c3d_rel --out-suffix _c3d_90ep || exit 1
 
 echo "Job finished at $(date)"

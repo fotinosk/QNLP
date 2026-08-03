@@ -231,31 +231,54 @@ def test_relation_cache_was_built_with_the_nearest_partner_rule():
 
 
 def _fake_object_crops(n=40, res=32, seed=0):
-    """Three shape classes of solid-ish colour blobs, enough to compose from."""
+    """Three attribute classes of noise blobs, enough to compose from."""
     rng = np.random.default_rng(seed)
     imgs = rng.integers(0, 255, size=(n, res, res, 3), dtype=np.uint8)
-    shapes = np.tile([0, 1, 2], n // 3 + 1)[:n]
-    return imgs, shapes
+    attrs = np.tile([0, 1, 2], n // 3 + 1)[:n]
+    return imgs, attrs
 
 
-def test_binding_composites_contain_exactly_one_of_each_shape():
+def test_binding_composites_contain_exactly_one_of_each_class():
     """THE PROPERTY THE WHOLE TASK RESTS ON.
 
-    Every composite holds exactly one object of each of the two shape classes,
-    so the class-conditional shape marginals are IDENTICAL and a bag-of-features
+    Every composite holds exactly one object of each of the two attribute
+    classes, so the class-conditional marginals are IDENTICAL and a bag-of-features
     model is at chance provably, not merely empirically. If this ever breaks,
     C6 stops being a compositional probe and silently becomes another perception
     task -- which is the exact failure C6 was created to escape, since neither
     C3 nor C4 turned out to test binding.
     """
-    imgs, shapes = _fake_object_crops()
-    out, labels, meta = cb.build_composites(imgs, shapes, n=64, shape_pair=(0, 1), seed=0)
+    imgs, attrs = _fake_object_crops()
+    out, labels, meta = cb.build_composites(imgs, attrs, n=64, attr_pair=(0, 1), seed=0)
     assert out.shape == (64, cb.CANVAS, cb.CANVAS, 3)
     counts = np.bincount(labels, minlength=2)
     assert counts[0] == counts[1] == 32, f"classes must be exactly balanced, got {counts.tolist()}"
-    assert meta["shape_pair"] == [0, 1]
+    assert meta["attr_pair"] == [0, 1]
     with pytest.raises(ValueError):
-        cb.build_composites(imgs, shapes, n=8, shape_pair=(1, 1))  # must be distinct
+        cb.build_composites(imgs, attrs, n=8, attr_pair=(1, 1))  # must be distinct
+
+
+def test_binding_cache_paths_are_scoped_per_attribute():
+    """The size and shape datasets must not collide.
+
+    The first C6 build bound on `shape` and is confounded -- two of four arms sit
+    at the shape floor in C3, so their binding scores measured perception. It is
+    kept as a footnote, which requires it to stay reachable rather than be
+    silently overwritten by the size rebuild.
+    """
+    a = cb.binding_cache_path(32, "train", "size")
+    b = cb.binding_cache_path(32, "train", "shape")
+    assert a != b and "size" in a and "shape" in b
+    assert cb.binding_manifest_path("size") != cb.binding_manifest_path("shape")
+
+
+def test_binding_default_attribute_is_one_every_arm_can_perceive():
+    """A binding task is perception AND binding. If an arm cannot see the
+    attribute on a single object, its failure says nothing about binding -- the
+    C4 error, repeated. C3 single-object accuracy is the table that matters:
+    size 84.8-99.1 across all arms, shape 36.5-64.5 with two arms at the 35.4
+    floor. So the default must be `size`, and this pins it."""
+    assert cb.DEFAULT_ATTRIBUTE == "size"
 
 
 def test_binding_cells_never_overlap():

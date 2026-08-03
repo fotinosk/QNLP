@@ -27,10 +27,10 @@ import os
 import numpy as np
 
 from qnlp.utils.data import clevr_binding as cb
-from qnlp.utils.data.clevr_objects import CACHE_DIR
+from qnlp.utils.data.clevr_objects import ATTRIBUTES
 
 
-def montage(shape_pair, n_show=8, out="figures/clevr_binding_examples.png", **geom):
+def montage(attribute, attr_pair, n_show=8, out=None, **geom):
     """Render composites with their labels, plus the source crops of each shape.
 
     The bottom two rows show single-object crops of each shape class on its own,
@@ -41,12 +41,13 @@ def montage(shape_pair, n_show=8, out="figures/clevr_binding_examples.png", **ge
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    imgs, labels, meta = cb.build_split("train", 2 * n_show, shape_pair=shape_pair, **geom)
+    out = out or f"figures/clevr_binding_{attribute}_examples.png"
+    imgs, labels, meta = cb.build_split("train", 2 * n_show, attribute=attribute, attr_pair=attr_pair, **geom)
 
     from qnlp.utils.data.clevr_objects import cache_path
 
     with np.load(cache_path("objects", geom.get("source_res", cb.SOURCE_RES), "train")) as z:
-        src, src_shape = z["images"], z["shape"]
+        src, src_attr = z["images"], z[attribute]
 
     fig, axes = plt.subplots(4, n_show, figsize=(1.7 * n_show, 7.6))
     for cls in (0, 1):
@@ -58,20 +59,20 @@ def montage(shape_pair, n_show=8, out="figures/clevr_binding_examples.png", **ge
             ax.set_yticks([])
             if c == 0:
                 ax.set_ylabel(f"class {cls}\n{cb.BINDING_CLASSES[cls]}", fontsize=8)
-    for r, sh in enumerate(shape_pair):
-        picks = np.flatnonzero(src_shape == sh)[:n_show]
+    for r, val in enumerate(attr_pair):
+        picks = np.flatnonzero(src_attr == val)[:n_show]
         for c, i in enumerate(picks):
             ax = axes[2 + r, c]
             ax.imshow(src[i])
             ax.set_xticks([])
             ax.set_yticks([])
             if c == 0:
-                ax.set_ylabel(f"source\nshape={sh}", fontsize=8)
+                ax.set_ylabel(f"source\n{attribute}={val}", fontsize=8)
 
     fig.suptitle(
-        f"C6 binding composites: shape {shape_pair[0]} vs {shape_pair[1]}.\n"
-        f"Row 0 = shape {shape_pair[0]} on the LEFT; row 1 = shape {shape_pair[1]} on the LEFT. "
-        f"Rows 2-3 show each shape alone -- use them to name the classes.",
+        f"C6 binding composites: {attribute} {attr_pair[0]} vs {attr_pair[1]}.\n"
+        f"Row 0 = {attribute}={attr_pair[0]} on the LEFT; row 1 = {attribute}={attr_pair[1]} on the LEFT. "
+        f"Rows 2-3 show each class alone -- use them to name the classes.",
         fontsize=10,
     )
     os.makedirs(os.path.dirname(out), exist_ok=True)
@@ -80,19 +81,28 @@ def montage(shape_pair, n_show=8, out="figures/clevr_binding_examples.png", **ge
     print(f"Saved {out}")
     print("LOOK AT IT before building. Check three things:")
     print("  1. every image has exactly two objects, side by side, not overlapping;")
-    print("  2. row 0 really does have shape", shape_pair[0], "on the left, and row 1 the other way;")
-    print("  3. which integer is the cube -- record it in research_log.md.")
+    print(f"  2. row 0 really does have {attribute}={attr_pair[0]} on the left, and row 1 the other way;")
+    print(f"  3. which integer of `{attribute}` is which -- record it in research_log.md.")
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--montage", action="store_true", help="Render examples and stop. DO THIS FIRST.")
     ap.add_argument(
-        "--shapes",
+        "--attribute",
+        default=cb.DEFAULT_ATTRIBUTE,
+        choices=sorted(ATTRIBUTES),
+        help="Which attribute to bind. DEFAULT `size` BECAUSE EVERY ARM PERCEIVES IT (84.8-99.1%% on "
+        "single objects in C3), so a failure here is a BINDING failure. Do not use `shape`: "
+        "classical_bare (36.5) and mlp_param_matched (36.9) sit at its 35.4 floor, so their scores "
+        "would measure perception. `material` is the fallback if size saturates.",
+    )
+    ap.add_argument(
+        "--classes",
         type=int,
         nargs=2,
-        default=list(cb.DEFAULT_SHAPE_PAIR),
-        help="The two DISTINCT shape classes to bind. Integers, not names -- see --montage.",
+        default=list(cb.DEFAULT_ATTR_PAIR),
+        help="The two DISTINCT attribute values to bind. Integers, not names -- see --montage.",
     )
     ap.add_argument("--train-samples", type=int, default=4096)
     ap.add_argument("--val-samples", type=int, default=2048)
@@ -111,17 +121,20 @@ def main():
         jitter_y=args.jitter_y,
         source_res=args.source_res,
     )
-    pair = tuple(args.shapes)
+    pair, attribute = tuple(args.classes), args.attribute
 
     if args.montage:
-        montage(pair, **geom)
+        montage(attribute, pair, **geom)
         return
 
-    print(f"=== C6 binding composites | shapes {pair} | canvas {args.canvas} | cell {args.cell} ===", flush=True)
+    print(
+        f"=== C6 binding composites | {attribute} {pair} | canvas {args.canvas} | cell {args.cell} ===",
+        flush=True,
+    )
     splits = []
     for split, n, seed in (("train", args.train_samples, args.seed), ("val", args.val_samples, args.seed + 1)):
-        imgs, labels, meta = cb.build_split(split, n, shape_pair=pair, seed=seed, **geom)
-        path = cb.save_split(split, imgs, labels, canvas=args.canvas)
+        imgs, labels, meta = cb.build_split(split, n, attribute=attribute, attr_pair=pair, seed=seed, **geom)
+        path = cb.save_split(split, imgs, labels, canvas=args.canvas, attribute=attribute)
         counts = np.bincount(labels, minlength=2)
         rate = counts.max() / counts.sum()
         print(f"  {split}: {len(labels)} composites  counts={counts.tolist()}  majority={rate:.3f}  -> {path}")
@@ -132,8 +145,15 @@ def main():
 
     manifest = {
         "task": "binding",
-        "shape_pair": list(pair),
-        "shape_names": None,  # Fill in from the montage. Do NOT guess.
+        "attribute": attribute,
+        "attr_pair": list(pair),
+        "class_names": None,  # Fill in from the montage. Do NOT guess.
+        "perception_rationale": (
+            "size is bound because every arm perceives it on single objects (C3: 84.8-99.1%), so a "
+            "failure here is a BINDING failure. The first C6 build used `shape`, where "
+            "classical_bare (36.5) and mlp_param_matched (36.9) sit at the 35.4 floor -- that run is "
+            "confounded by perception and is kept only as a footnote."
+        ),
         "canvas": args.canvas,
         "cell": args.cell,
         "jitter_x": args.jitter_x,
@@ -142,11 +162,11 @@ def main():
         "source": "clevr_objects_<source_res>_<split>.npz (train/val from different CLEVR shards)",
         "splits": splits,
     }
-    mpath = os.path.join(CACHE_DIR, "clevr_binding_manifest.json")
+    mpath = cb.binding_manifest_path(attribute)
     with open(mpath, "w") as f:
         json.dump(manifest, f, indent=2)
     print(f"Saved {mpath}")
-    print("\n⚠️  `shape_names` in the manifest is null. Fill it in from the montage before writing anything up.")
+    print("\n⚠️  `class_names` in the manifest is null. Fill it in from the montage before writing anything up.")
 
 
 if __name__ == "__main__":

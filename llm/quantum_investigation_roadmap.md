@@ -304,7 +304,19 @@ The MLPs converge early and gain nothing from a longer budget — that part of t
 
 `MLPReference` flattens *positioned* patch embeddings into a fully-connected trunk, so it is position-aware and near-ideal for both. Neither task has the property that breaks CLIP: **the same bag of features arranged two ways, yielding two different labels.** The MLP's wins are therefore uninformative about the premise, and C6 is the first experiment in the phase that can discriminate it.
 
-**Task.** Two-object composites built from the existing single-object crops. One **cube** and one **sphere** per image; label = **which is on the left**. 2-way, chance 50%.
+**Task.** Two-object composites built from the existing single-object crops. One **large** and one **small** object per image; label = **which is on the left**. 2-way, chance 50%.
+
+> **⚠️ BIND ONLY AN ATTRIBUTE EVERY ARM CAN ALREADY PERCEIVE. The first build used `shape` and was abandoned as confounded (2026-08-03, ~5 h).** A binding task is a *conjunction* of perception and binding: if an arm cannot see the attribute on a single object, its failure says nothing about binding. C3's single-object accuracies —
+>
+> | attribute | quantum | cls_full | cls_bare | mlp_ref | mlp_pm | floor |
+> |---|---|---|---|---|---|---|
+> | **size** | 96.1 | 97.7 | 88.9 | 99.1 | 84.8 | 50.6 |
+> | material | 70.0 | 61.2 | 56.8 | 81.8 | 53.5 | 50.2 |
+> | shape | 58.9 | 46.3 | **36.5** | 64.5 | **36.9** | 35.4 |
+>
+> — show `classical_bare` and `mlp_param_matched` sitting *at the shape floor*. On shape-binding they duly landed at the task floor (50.2, 57.5 against 51.2), measuring perception rather than composition: the C4 error repeated. Worse, the quantum arm is the **best** TTN at shape perception, so a quantum win there would have looked compositional while being perceptual. **`size` equalises perception across every arm**; `material` is the fallback if size saturates.
+>
+> **The construction itself was validated by that run** and carries over: the patch-shuffle check passed cleanly (49.2–50.8 across all arms), so the composites leak no non-positional cue.
 
 * **Marginals are identical across classes by construction** — every image contains exactly one cube and one sphere, so global shape content carries zero information and only the *binding of shape to side* separates the classes. A bag-of-features model is at chance provably, not just empirically.
 * **Composites, not natural crops, and this is forced.** Natural relation crops are **centred on the reference object**, which would collapse the task to "what shape is in the middle?" — perception again, in a new costume. And natural two-object crops are only **3.2%** of valid pairs (~830 balanced from the whole 85k atlas), far below the protocol. Composition also removes distractors and referent ambiguity outright — the defect that killed the first C4.

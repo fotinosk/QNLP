@@ -58,7 +58,7 @@ CLEVR_PROTOCOL = {**pc.PROTOCOL, "test_samples": 512}
 TASK_HEADS = {"objects": HEADS, "relations": RELATION_HEAD, "binding": BINDING_HEAD}
 
 
-def get_loaders(task, img_size, cfg, seed, shuffled=False, patch_size=None):
+def get_loaders(task, img_size, cfg, seed, shuffled=False, patch_size=None, attribute=None):
     """One dispatch point for every task's loader.
 
     Binding lives in its own module because its images are COMPOSED rather than
@@ -76,6 +76,7 @@ def get_loaders(task, img_size, cfg, seed, shuffled=False, patch_size=None):
             seed=seed,
             shuffled=shuffled,
             patch_size=patch_size or img_size // 4,
+            **({"attribute": attribute} if attribute else {}),
         )
     return get_clevr_loaders(
         task=task,
@@ -118,7 +119,9 @@ def majority_baselines(task="objects", img_size=16, seed=0, **protocol):
     """
     cfg = {**CLEVR_PROTOCOL, **protocol}
     heads = TASK_HEADS[task]
-    _, test_loader = get_loaders(task, img_size, cfg, seed, shuffled=cfg.get("shuffled", False))
+    _, test_loader = get_loaders(
+        task, img_size, cfg, seed, shuffled=cfg.get("shuffled", False), attribute=cfg.get("attribute")
+    )
     counts = {h: np.zeros(k, dtype=np.int64) for h, k in heads.items()}
     for _, labels in test_loader:
         for h in heads:
@@ -140,7 +143,9 @@ def train_run_multihead(model_factory, seed, task="objects", img_size=16, **prot
     """
     cfg = {**CLEVR_PROTOCOL, **protocol}
     heads = TASK_HEADS[task]
-    train_loader, test_loader = get_loaders(task, img_size, cfg, seed, shuffled=cfg.get("shuffled", False))
+    train_loader, test_loader = get_loaders(
+        task, img_size, cfg, seed, shuffled=cfg.get("shuffled", False), attribute=cfg.get("attribute")
+    )
     torch.manual_seed(seed)
     np.random.seed(seed)
     model = model_factory()

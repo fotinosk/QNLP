@@ -73,11 +73,38 @@ DESIGN CHOICES THAT CARRY THE TASK
 * **Source crops keep their own CLEVR floor background**, so the composite reads
   as one scene rather than two cut-outs on a synthetic field.
 
-WHICH TWO SHAPES?
------------------
-`shape` is stored as an integer and this module does NOT hardcode which integer
-is a cube. Two distinct classes is all the task needs -- the names matter only
-for the write-up. Build the montage, look at it, and record the mapping in
+WHICH ATTRIBUTE TO BIND ON -- THE RULE THAT COST A 5-HOUR RUN
+-------------------------------------------------------------
+**Bind only on an attribute EVERY arm can already perceive.** A binding task is a
+conjunction of perception and binding; if an arm cannot see the attribute on a
+single object, its failure on the binding task says nothing about binding, and
+reading it as an architectural result is precisely the error C4 made.
+
+Single-object accuracy from C3, which is the table to consult before choosing:
+
+    attribute   quantum  cls_full  cls_bare  mlp_ref  mlp_pm   floor
+    size           96.1      97.7      88.9     99.1    84.8    50.6   <- USE THIS
+    material       70.0      61.2      56.8     81.8    53.5    50.2
+    colour         27.0      76.6      52.5     90.4    26.2    15.2
+    shape          58.9      46.3    **36.5**   64.5  **36.9**   35.4   <- DO NOT
+
+**The first C6 run was built on `shape` and is confounded.** `classical_bare`
+(36.5) and `mlp_param_matched` (36.9) sit at the shape floor of 35.4 -- they
+cannot perceive shape at all -- so their binding scores (50.2, 57.5, against a
+51.2 floor) measure perception, not composition. Worse for the write-up, the
+quantum arm is the BEST TTN at shape perception (58.9 vs classical_full's 46.3),
+so a quantum win there would have looked like a compositional result while being
+a perceptual one.
+
+`size` is the right choice: every arm scores 84.8-99.1, so perception is
+equalised and any failure is a binding failure. `material` is the fallback if
+size saturates.
+
+WHICH TWO CLASSES?
+------------------
+Attribute values are stored as integers and this module does NOT hardcode which
+integer means "large". Two distinct classes is all the task needs -- names matter
+only for the write-up. Build the montage, look at it, and record the mapping in
 `research_log.md` rather than assuming it. Assuming a label mapping is exactly
 the kind of silent error that yields a balanced, plausible-looking dataset and a
 meaningless result -- the same class of mistake as the relation-axis error C0
@@ -94,11 +121,16 @@ import torch
 from PIL import Image
 from torch.utils.data import DataLoader, TensorDataset
 
-from qnlp.utils.data.clevr_objects import CACHE_DIR
+from qnlp.utils.data.clevr_objects import ATTRIBUTES, CACHE_DIR
 from qnlp.utils.data.clevr_objects import cache_path as objects_cache_path
 
-# Two DISTINCT shape classes. Not named here on purpose -- see the docstring.
-DEFAULT_SHAPE_PAIR = (0, 1)
+# `size` because every arm perceives it at 84.8-99.1% on single objects, so the
+# binding task isolates binding from perception. NOT `shape`: two of the four
+# arms sit at the shape floor. See the docstring table -- this default is a
+# result, not a preference.
+DEFAULT_ATTRIBUTE = "size"
+# Two DISTINCT classes of that attribute. Not named here on purpose.
+DEFAULT_ATTR_PAIR = (0, 1)
 
 # Composite geometry. Defaults chosen so the two cells tile the canvas with a
 # little slack for jitter and can never overlap; see `_cell_origins`.
@@ -136,9 +168,9 @@ def _resize(crop, cell):
 
 def build_composites(
     images,
-    shapes,
+    attrs,
     n,
-    shape_pair=DEFAULT_SHAPE_PAIR,
+    attr_pair=DEFAULT_ATTR_PAIR,
     seed=0,
     canvas=CANVAS,
     cell=CELL,
@@ -149,19 +181,19 @@ def build_composites(
 
     Returns (images [n, canvas, canvas, 3] uint8, labels [n] int64, meta).
 
-    Every composite holds exactly one object of each shape in `shape_pair`, so
-    the class-conditional shape marginals are identical BY CONSTRUCTION. That is
-    the whole point: it makes the bag-of-features shortcut provably worthless
-    rather than merely unlikely, so a model scoring above chance must be using
-    the binding of shape to side.
+    Every composite holds exactly one object of each class in `attr_pair`, so the
+    class-conditional marginals are identical BY CONSTRUCTION. That is the whole
+    point: it makes the bag-of-features shortcut provably worthless rather than
+    merely unlikely, so a model scoring above chance must be using the binding of
+    the attribute to the side.
     """
-    a, b = shape_pair
+    a, b = attr_pair
     if a == b:
-        raise ValueError(f"shape_pair must be two DISTINCT classes, got {shape_pair}")
-    idx_a = np.flatnonzero(np.asarray(shapes) == a)
-    idx_b = np.flatnonzero(np.asarray(shapes) == b)
+        raise ValueError(f"attr_pair must be two DISTINCT classes, got {attr_pair}")
+    idx_a = np.flatnonzero(np.asarray(attrs) == a)
+    idx_b = np.flatnonzero(np.asarray(attrs) == b)
     if len(idx_a) == 0 or len(idx_b) == 0:
-        raise ValueError(f"shape classes {shape_pair} are not both present (found {len(idx_a)}, {len(idx_b)})")
+        raise ValueError(f"attribute classes {attr_pair} are not both present (found {len(idx_a)}, {len(idx_b)})")
 
     rng = np.random.default_rng(seed)
     # Exactly balanced: alternate the classes rather than sampling them, so the
@@ -179,7 +211,7 @@ def build_composites(
         out[i, ry : ry + cell, rx : rx + cell] = _resize(images[right], cell)
 
     meta = {
-        "shape_pair": [int(a), int(b)],
+        "attr_pair": [int(a), int(b)],
         "canvas": canvas,
         "cell": cell,
         "jitter_x": jitter_x,
@@ -191,17 +223,25 @@ def build_composites(
     return out, labels.astype(np.int64), meta
 
 
-def binding_cache_path(img_size, split):
-    return os.path.join(CACHE_DIR, f"clevr_binding_{img_size}_{split}.npz")
+def binding_cache_path(img_size, split, attribute=DEFAULT_ATTRIBUTE):
+    """Attribute-scoped, so the size and shape datasets coexist rather than one
+    silently overwriting the other. The first C6 run was built on `shape` and is
+    kept as a confounded footnote -- it must stay reachable and distinguishable.
+    """
+    return os.path.join(CACHE_DIR, f"clevr_binding_{attribute}_{img_size}_{split}.npz")
 
 
-def build_split(split, n, shape_pair=DEFAULT_SHAPE_PAIR, seed=0, source_res=SOURCE_RES, **geom):
+def build_split(
+    split, n, attribute=DEFAULT_ATTRIBUTE, attr_pair=DEFAULT_ATTR_PAIR, seed=0, source_res=SOURCE_RES, **geom
+):
     """Build one split from the cached single-object crops.
 
     Source crops come from `clevr_objects_<source_res>_<split>.npz`, so train and
     val inherit their DIFFERENT CLEVR shards and no scene is shared -- the
     property `test_train_and_val_come_from_different_scenes` guards for objects.
     """
+    if attribute not in ATTRIBUTES:
+        raise ValueError(f"attribute must be one of {sorted(ATTRIBUTES)}, got {attribute!r}")
     path = objects_cache_path("objects", source_res, split)
     if not os.path.exists(path):
         raise FileNotFoundError(
@@ -210,13 +250,14 @@ def build_split(split, n, shape_pair=DEFAULT_SHAPE_PAIR, seed=0, source_res=SOUR
             f"--tasks objects"
         )
     with np.load(path) as z:
-        images, shapes = z["images"], z["shape"]
-    return build_composites(images, shapes, n, shape_pair=shape_pair, seed=seed, **geom)
+        images, attrs = z["images"], z[attribute]
+    imgs, labels, meta = build_composites(images, attrs, n, attr_pair=attr_pair, seed=seed, **geom)
+    return imgs, labels, {**meta, "attribute": attribute}
 
 
-def save_split(split, images, labels, canvas=CANVAS):
+def save_split(split, images, labels, canvas=CANVAS, attribute=DEFAULT_ATTRIBUTE):
     os.makedirs(CACHE_DIR, exist_ok=True)
-    p = binding_cache_path(canvas, split)
+    p = binding_cache_path(canvas, split, attribute)
     np.savez_compressed(p, images=images, binding=labels)
     return p
 
@@ -259,6 +300,7 @@ def get_binding_loaders(
     seed=42,
     shuffled=False,
     patch_size=8,
+    attribute=DEFAULT_ATTRIBUTE,
 ):
     """Mirrors `clevr_objects.get_clevr_loaders`, one head named `binding`.
 
@@ -266,11 +308,12 @@ def get_binding_loaders(
     """
     loaders = []
     for split, n in (("train", train_samples), ("val", test_samples)):
-        path = binding_cache_path(img_size, split)
+        path = binding_cache_path(img_size, split, attribute)
         if not os.path.exists(path):
             raise FileNotFoundError(
                 f"{path} not found. Build it first:\n"
                 f"  conda run -n qnlp python -m qnlp.image_tower.classification.clevr.build_clevr_binding"
+                f" --attribute {attribute}"
             )
         with np.load(path) as z:
             images, labels = z["images"], z["binding"]
@@ -304,6 +347,10 @@ class _Wrapped:
         return len(self._loader)
 
 
-def load_binding_manifest():
-    with open(os.path.join(CACHE_DIR, "clevr_binding_manifest.json")) as f:
+def binding_manifest_path(attribute=DEFAULT_ATTRIBUTE):
+    return os.path.join(CACHE_DIR, f"clevr_binding_{attribute}_manifest.json")
+
+
+def load_binding_manifest(attribute=DEFAULT_ATTRIBUTE):
+    with open(binding_manifest_path(attribute)) as f:
         return json.load(f)

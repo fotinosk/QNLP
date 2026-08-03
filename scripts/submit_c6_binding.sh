@@ -9,8 +9,8 @@
 # of those tasks is compositional (one is pure perception, the other a
 # single-referent directional readout), so those wins say nothing about whether
 # the TTN captures compositional structure. C6 builds a task where the
-# class-conditional marginals are IDENTICAL BY CONSTRUCTION -- one cube and one
-# sphere in every image, label = which is on the left -- so a bag-of-features
+# class-conditional marginals are IDENTICAL BY CONSTRUCTION -- one large and one
+# small object in every image, label = which is on the left -- so a bag-of-features
 # model is at chance provably.
 #
 # THE HEADLINE IS AN INTERACTION, AND BOTH DIRECTIONS ARE PRE-REGISTERED:
@@ -20,7 +20,7 @@
 # written up. Do not decide which reading applies after seeing the numbers.
 #
 # It also gives Question C.2(ii) its sharpest test: binding requires position to
-# be CONJOINED WITH CONTENT ("cube AND left"), not merely read out ("something is
+# be CONJOINED WITH CONTENT ("large AND left"), not merely read out ("something is
 # left"), so C4's +1.8 (limit 5.4) may have reflected the low positional demand
 # of a directional readout rather than the encoding.
 #
@@ -42,10 +42,10 @@
 # help the 4 that never left chance, so expect at best half the collapses to go.
 #
 # PREREQUISITES:
-#   1. data/datasets/clevr_binding_32_{train,val}.npz  (build_clevr_binding)
+#   1. data/datasets/clevr_binding_size_32_{train,val}.npz  (build_clevr_binding --attribute size)
 #   2. THE MONTAGE HAS BEEN LOOKED AT. A left/right swap would still produce a
 #      perfectly balanced dataset and a plausible 50% result.
-#   3. submit_c6_shuffled.sh has PASSED. If any arm beats chance on shuffled
+#   3. The manipulation check in submit_c6_cheap.sh has PASSED. If any arm beats chance on shuffled
 #      input the composites leak a non-positional cue and every number from this
 #      job is uninterpretable.
 #
@@ -105,6 +105,7 @@ $PYTHON -m qnlp.image_tower.classification.clevr.run_c6_binding \
     --img-size 32 \
     --readout top_layer_multi_pauli \
     --positional $ARM \
+    --attribute size \
     --seeds $SEED \
     --epochs 90 \
     --only-quantum \
