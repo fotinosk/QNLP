@@ -93,14 +93,25 @@ def main():
     ap.add_argument("--prefix", required=True, help="e.g. c2 -- workers wrote c2_s0_*, c2_s1_*, ...")
     ap.add_argument("--seeds", type=int, nargs="+", required=True)
     ap.add_argument("--arms", nargs="+", required=True, help="Arm names, baseline FIRST.")
-    ap.add_argument("--task", default="objects", choices=["objects", "relations"])
+    ap.add_argument("--task", default="objects", choices=sorted(cc.TASK_HEADS))
+    ap.add_argument(
+        "--attribute",
+        default=None,
+        help="For --task binding: which attribute was bound (default `size`). Only affects which "
+        "cache the majority floor is read from.",
+    )
     ap.add_argument("--img-size", type=int, default=16)
     ap.add_argument("--params", type=int, nargs="+", default=None, help="Parameter count per arm, in --arms order.")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
     heads = cc.TASK_HEADS[args.task]
-    floors = cc.majority_baselines(task=args.task, img_size=args.img_size, seed=args.seeds[0])
+    floors = cc.majority_baselines(
+        task=args.task,
+        img_size=args.img_size,
+        seed=args.seeds[0],
+        **({"attribute": args.attribute} if args.attribute else {}),
+    )
     params = dict(zip(args.arms, args.params)) if args.params else {}
 
     arms_by_name, collapse = {}, {}
