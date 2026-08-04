@@ -51,7 +51,18 @@
 #
 # Submit:  qsub scripts/submit_c6_binding.sh
 #$ -l tmem=16G
-#$ -l h_rt=24:0:0
+# 48h, not 24. MEASURED, not guessed: the tasks that completed took 22-23 h EACH
+# on a node carrying only four of them. 24 h was set from a ~9 h estimate that
+# was wrong by 2.5x -- the 32x32 canvas pushes 4x the pixels through the
+# classical patch encoder, on top of 90 epochs and 12 observables.
+#$ -l h_rt=48:0:0
+# -tc 8: CAP CONCURRENT TASKS. Without it SGE packed 22 of the 30 tasks onto a
+# single node (saunders-608-9); all 22 were killed mid-epoch with no traceback,
+# while the 8 spread across two other nodes finished. That is the failure mode
+# already in the cost model -- "run at most 4-5 concurrent workers; ten
+# concurrent 16-qubit processes exhausted 18 GB and six were killed silently" --
+# and it cost a full day and the entire quantum_none arm.
+#$ -tc 8
 #$ -S /bin/bash
 #$ -j y
 #$ -N c6_binding

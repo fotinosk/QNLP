@@ -355,6 +355,18 @@ The MLPs converge early and gain nothing from a longer budget — that part of t
 
 ---
 
+#### ✅ CONCLUSION OF THE INVESTIGATION — 2026-08-04
+
+**What C6 established.** The binding task is a valid compositional probe: identical class marginals by construction, and every arm at *exactly chance* under patch shuffling against 91–96% unshuffled. On it, **tensor networks perform compositional binding** (`classical_bare` `91.5 ± 3.1`, `classical_full` `93.2 ± 1.4`), and **the quantum tree demonstrates the same capability but reaches it in a minority of initialisations** (`on_wire` seed 7 at `73.8` vs a 51.0 floor — ~10 sd, a valid existence claim on one seed; 5 of 8 seeds at floor).
+
+**⚠️ THE PRE-REGISTERED NULL IS WHAT FIRED, AND IT MUST BE REPORTED AS SUCH.** `mlp_reference` scores `96.0 ± 1.3` and `mlp_param_matched` `94.6 ± 2.9` at **683 parameters — fewer than every TTN arm** — beating `classical_bare` by `+3.1` (resolved). **There is no compositional advantage for tensor networks over a plain MLP in the vision tower.** The task-viability control proves a *bag-of-features* model is at chance; `MLPReference` is not one (it flattens **positioned** patch embeddings), so nothing here shows the MLP failing to bind. Writing "the MLP cannot capture these relations" would contradict the project's own data.
+
+**Consequence for the thesis.** C6 was designed to supply the *mechanism* behind "frozen CLIP fails on compositional tasks where the TTN succeeds" — that the TTN's edge is binding rather than perception. **It does not supply it.** That headline rests entirely on the COCO/ARO/SugarCrepe line; CLIP was never run in the vision tower. The four defensible sentences are in `research_log.md` under the 2026-08-04 conclusion entry.
+
+**Declared limitations**: the task saturates (4.5 pt spread vs 1.3–2.3 MDEs — `material` is the attribute with both perception coverage and headroom); `on_wire` carries +32 params, confounding any positional win with capacity; composites are synthetic; collapse is characterised, not fixed; and **C.2(ii) is likely to end with no verdict**, since two arms mostly at floor cannot be compared.
+
+---
+
 #### Phase 2 progress checklist
 - [x] **C0** — data pipeline. DONE 2026-07-30. Two plan errors corrected (no 1-/2-object scenes; wrong relation axes). Code: 12-value readout, multi-head, `positional` axis, classical controls generalised. 65 tests pass.
 - [x] **C1** — learnability gate. DONE 2026-07-30. **All four heads learnable at every resolution; none dropped.** Decision: **run at 16×16** (16×16 and 32×32 are statistically tied on every head; the smaller wins on cost, Phase-1 validation, and avoiding the C5 caveat). ⚠️ The first run reported 64×64 as unlearnable on all four heads — an artifact of one hardcoded learning rate, now swept. See `research_log.md`.
