@@ -223,6 +223,103 @@ def build_composites(
     return out, labels.astype(np.int64), meta
 
 
+def build_matched_quads(
+    images,
+    attrs,
+    n,
+    attr_pair=DEFAULT_ATTR_PAIR,
+    seed=0,
+    canvas=CANVAS,
+    cell=CELL,
+    jitter_x=JITTER_X,
+    jitter_y=JITTER_Y,
+    background="black",
+):
+    """Four composites per item, for Task C7's cosine-similarity geometry probe.
+
+    WHY MATCHED, AND NOT JUST TWO CLASSES. A class-0 and a class-1 composite from
+    `build_composites` are built from INDEPENDENTLY SAMPLED source objects, so
+    they differ in both content and arrangement. Comparing their embeddings
+    measures the sum of the two effects and cannot isolate binding. Here the swap
+    reuses THE SAME TWO CROPS, so the only thing that changes is which side each
+    one is on.
+
+    COSINE SIMILARITY HAS NO SCALE, so the swap is useless on its own -- CLIP
+    embeddings are strongly anisotropic and unrelated images routinely sit at
+    0.5-0.8. Each item therefore carries its own ceiling and floor:
+
+        base     a-left,  b-right          the reference
+        swap     b-left,  a-right          SAME objects, positions exchanged
+        jitter   a-left,  b-right          same objects, same sides, re-placed
+                                           -> CEILING: "CLIP calls these the same"
+        content  a'-left, b'-right         DIFFERENT objects, same arrangement
+                                           -> FLOOR: "CLIP calls these different"
+
+    The reported statistic is then scale-free:
+
+        swap_invariance = (cos_swap - cos_content) / (cos_jitter - cos_content)
+
+    near 1  -> a compositional swap is treated almost like the same image;
+    near 0  -> the swap is as separable as a change of content.
+
+    Returns (images [n, 4, canvas, canvas, 3] uint8, meta) with the second axis
+    ordered (base, swap, jitter, content).
+    """
+    a, b = attr_pair
+    if a == b:
+        raise ValueError(f"attr_pair must be two DISTINCT classes, got {attr_pair}")
+    idx_a = np.flatnonzero(np.asarray(attrs) == a)
+    idx_b = np.flatnonzero(np.asarray(attrs) == b)
+    if len(idx_a) < 2 or len(idx_b) < 2:
+        raise ValueError(f"need >=2 crops of each class, found {len(idx_a)}, {len(idx_b)}")
+
+    rng = np.random.default_rng(seed)
+    out = np.zeros((n, 4, canvas, canvas, 3), dtype=np.uint8)
+    geom = (canvas, cell, jitter_x, jitter_y)
+
+    # Background matters more than it looks. At canvas 224 / cell 96 about 60% of
+    # each image is padding, and BLACK padding makes every composite read as "two
+    # small photos on black" -- which compresses all cosine similarities upward
+    # (the content floor landed at 0.908, against the 0.5-0.8 typical of
+    # unrelated images) and invites the objection that the border, not the
+    # architecture, is suppressing CLIP's sensitivity. Filling with the CLEVR
+    # floor grey instead makes the composite read as one scene. The ratio
+    # statistic normalises this away in principle; running both settles it in
+    # practice.
+    if background == "floor":
+        edges = np.concatenate([images[:64, 0, :, :], images[:64, -1, :, :]], axis=1)
+        fill = np.median(edges.reshape(-1, 3), axis=0).astype(np.uint8)
+    else:
+        fill = np.zeros(3, dtype=np.uint8)
+
+    def place(left_img, right_img):
+        (lx, ly), (rx, ry) = _cell_origins(rng, *geom)
+        frame = np.broadcast_to(fill, (canvas, canvas, 3)).copy()
+        frame[ly : ly + cell, lx : lx + cell] = _resize(left_img, cell)
+        frame[ry : ry + cell, rx : rx + cell] = _resize(right_img, cell)
+        return frame
+
+    for i in range(n):
+        ia, ib = int(rng.choice(idx_a)), int(rng.choice(idx_b))
+        # Distinct source objects for the content reference, so it really is a
+        # change of content and not the same crop drawn twice.
+        ja = int(rng.choice(idx_a[idx_a != ia]))
+        jb = int(rng.choice(idx_b[idx_b != ib]))
+        out[i, 0] = place(images[ia], images[ib])  # base
+        out[i, 1] = place(images[ib], images[ia])  # swap  <- same two crops
+        out[i, 2] = place(images[ia], images[ib])  # jitter (fresh placement draw)
+        out[i, 3] = place(images[ja], images[jb])  # content
+    meta = {
+        "attr_pair": [int(a), int(b)],
+        "canvas": canvas,
+        "cell": cell,
+        "jitter_x": jitter_x,
+        "jitter_y": jitter_y,
+        "order": ["base", "swap", "jitter", "content"],
+    }
+    return out, meta
+
+
 def binding_cache_path(img_size, split, attribute=DEFAULT_ATTRIBUTE):
     """Attribute-scoped, so the size and shape datasets coexist rather than one
     silently overwriting the other. The first C6 run was built on `shape` and is

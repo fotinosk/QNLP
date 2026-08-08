@@ -20,6 +20,31 @@ dominates". They also use `scalar_ry` encoding, which R2 later measured as costi
 | 15, 16 | `spatial_ancilla_comparison_*.png` | 5 seeds; the reported 2.2-pt difference is well inside a ~10-pt resolution limit. |
 | 19 | `noise_scheduling_training.png` | Question F's premise is now attributed to a readout-calibration artifact. |
 
+## Added 2026-08-08 — the two ansatz figures (different defect: wrong architecture)
+
+These do **not** share the scalar-readout defect above. They are superseded because they
+benchmark **an ansatz family that is not in the codebase**. `qttn_core.ANSATZE` is
+`("strongly_entangling", "iqp")`; HEA and ALT were dropped before the architecture of
+record existed. Regenerated replacements: `results/figures/encoding_ansatz.png` and
+`results/figures/ansatz_comparison.png`, both from `r2_ansatz_results.json` (21 seeds,
+16x16, protocol of record).
+
+| figure | file | why superseded |
+|---|---|---|
+| 4 | `encoding_ansatz_sweep.png` | Sweeps 4 encodings x **HEA/IQP/ALT** at 8x8 with **one seed per config**. Two of the three ansatze do not exist in the shipped model, and one seed cannot support a 12-way ranking. Its conclusion (multi_axis+IQP) happens to be right, but R2 is what established it. |
+| — | `ansatz_comparison_noise.png` | **Untriaged in the original audit.** Three defects: (a) benchmarks HEA/IQP/ALT; (b) single seed at 8x8, i.e. a single 4-qubit node; (c) **contradicts the Experiment & Metrics Record** — the table logs `MULTI_AXIS + IQP` at `p_crit > 0.200` (never below 50% in range) while the figure shows IQP crossing 50% near p=0.12 and reaching ~20% by p=0.2. The discrepancy is unresolved; do not cite either number without reconciling them. |
+
+⚠️ **Do not reuse the flat HEA curve as evidence of noise robustness.** Depolarizing noise
+contracts expectation values multiplicatively, `<Z> -> (1-p)^d <Z>`, preserving sign and
+order, so an argmax decision can be perfectly noise-invariant while the representation is
+being destroyed. A curve that is flat across the whole sweep is more likely measuring that
+than robustness.
+
+**The ansatz decision itself is unaffected** — it was settled noiselessly by R2 (`iqp`
+`80.9 +/- 4.9` vs `strongly_entangling` `79.3 +/- 9.7`, `+1.6` against a 4.8-pt limit ->
+**not resolved**). IQP is adopted for shallower gate depth, not for accuracy and not for
+noise tolerance.
+
 ## Retained in `results/` (unaffected — no classifier head involved)
 
 `fidelity_distributions.png`, `barren_plateau_scaling.png`, `topology_barren_plateaus.png`,

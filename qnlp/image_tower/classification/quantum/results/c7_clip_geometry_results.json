@@ -1,0 +1,57 @@
+{
+  "task": "clip_geometry",
+  "model": "openai/clip-vit-base-patch32",
+  "n_quads": 500,
+  "geometry": {
+    "attr_pair": [
+      0,
+      1
+    ],
+    "canvas": 224,
+    "cell": 96,
+    "jitter_x": 14,
+    "jitter_y": 42,
+    "order": [
+      "base",
+      "swap",
+      "jitter",
+      "content"
+    ]
+  },
+  "source": "/Users/fotinoskyriakides/Desktop/Dev/qnlp/data/datasets/clevr_objects_64_val.npz",
+  "cosine": {
+    "jitter": {
+      "name": "jitter",
+      "mean": 0.9771406918764114,
+      "std": 0.009902397248964648,
+      "n": 500,
+      "ci95": 0.000867983388844561
+    },
+    "swap": {
+      "name": "swap",
+      "mean": 0.9721751092672348,
+      "std": 0.011731104254376453,
+      "n": 500,
+      "ci95": 0.0010282766253057712
+    },
+    "content": {
+      "name": "content",
+      "mean": 0.9081600090265274,
+      "std": 0.02864530150168754,
+      "n": 500,
+      "ci95": 0.0025108713826350057
+    }
+  },
+  "ceiling_minus_floor": 0.06898068284988401,
+  "swap_invariance": 0.9280148817896935,
+  "swap_invariance_per_item": {
+    "name": "swap_invariance",
+    "mean": 0.9372749467790127,
+    "std": 0.2322590916669984,
+    "n": 500,
+    "ci95": 0.02035840700050272
+  },
+  "void": false,
+  "verdict": "CLIP'S GEOMETRY IS NEARLY BLIND TO BINDING. A compositional swap moves the embedding only 7% of the way toward a genuine content change (0.928 of the ceiling-floor span), while content changes move it fully. Since cosine similarity is the operation CLIP performs at retrieval time, this is the mechanism behind its bag-of-words behaviour. NOTE: this is salience in the geometry, NOT recoverability -- a probe might still extract the binding from a low-variance direction.",
+  "limitation": "Measures salience in the embedding geometry (what cosine retrieval sees), not recoverability by a trained probe. Frozen image tower only; the full image-text contrastive setting that ARO/SugarCrepe probe is not tested here."
+}
