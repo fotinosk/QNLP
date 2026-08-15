@@ -65,13 +65,27 @@ All three come from `make_figures.py`, with provenance stated in every caption. 
 
 ⚠️ F10 was **overwritten rather than superseded** when the relation data was rebuilt; the pre-change version is in commit `e980b18` if the old dataset ever needs illustrating.
 
+### The survey figure — main text, not appendix
+
+| # | file | shows | section |
+|---|---|---|---|
+| **F15** | `results/encoding_ansatz_sweep.png` | **4 encodings × 3 ansätze under a noise sweep — the record of the space that was searched.** This is the evidence for the thesis's opening claim that a *family* of quantum image encoders was investigated, and **nothing replaces it**: R2 (F19/F20) ran only the two survivors. Includes AMPLITUDE, which classified at **two qubits and four parameters**, and ZZ feature maps. | §II.2.1 |
+
+**Cite it for what was explored, never for ranking** — the ranking is F19/F20. Three scope facts belong in the caption, none of which invalidate it:
+1. **One seed per configuration.** Enough to show what was tried; not enough to separate configurations that land close together.
+2. **8×8, four qubits — a single node, not the tower.** It surveys node-level circuits; the shipped tower is 16 qubits at depth 2. *(This is a larger caveat than the seed count and the easier one to forget.)*
+3. **The x-axis is depolarizing noise**, which the project later closed as out of scope, so the survey content is the p=0 column and everything right of it characterises a single node.
+
+⚠️ **The caption must reconcile the scale gap or a reader will see a regression**: `MULTI_AXIS + IQP` is `95.3%` here (8×8, one node, one seed) and `80.9%` in F19 (16×16, full tree, 21 seeds). Different tasks, not a decline.
+
+✅ **Note this figure agrees with the Metrics Record** — its `MULTI_AXIS + IQP` curve stays above 50% across the whole sweep, matching the logged `p_crit > 0.200`. The `p_crit` contradiction is specific to the retired F18.
+
 ### Usable with a stated caveat — prefer the appendix
 
 | # | file | caveat |
 |---|---|---|
 | F13 | `results/training_metrics.png` | Valid as "gradients flow and it converges"; **not** valid for accuracy claims (superseded protocol). |
 | F14 | `results/noise_tolerance_curve.png` | Computes no `p_crit`; under the formal <50% criterion this model's value is 0.10, not the 0.05 quoted in early text. |
-| ~~F15~~ | ~~`results/encoding_ansatz_sweep.png`~~ | ✅ **RESOLVED 2026-08-08 — superseded by F19.** Moved to `results/superseded/`. |
 | ~~F18~~ | ~~`results/ansatz_comparison_noise.png`~~ | ✅ **RESOLVED 2026-08-08 — superseded by F20.** Moved to `results/superseded/`. ⚠️ Its `p_crit` disagreement with the Metrics Record is **recorded but not reconciled** — see the note under R1 below. |
 | F16 | `results/representation_bias_results.png` | Data sound, but the "proves the model learns spatial representations" claim needs the classical control alongside. |
 | F17 | `figures/clevr_binding_examples.png` | The abandoned shape-binding build — use only in the §II.5.4 footnote. |
@@ -86,9 +100,17 @@ All three come from `make_figures.py`, with provenance stated in every caption. 
 | N4 | CLEVR per-head accuracy at 30 vs 90 epochs, quantum and classical | §II.4.3 | The head-trading result. Grouped bars, four heads × two budgets. |
 | N5 | Score vs parameter count scatter, CLEVR arms | §II.4.3 | The CLEVR analogue of F6. Optional if space is tight. |
 
-### ✅ R1 — DONE 2026-08-08: the two ansatz figures are regenerated
+### ✅ R1 — DONE 2026-08-08: the ansatz figures are regenerated (scope corrected the same day)
 
-**F15 and F18 are superseded by F19 and F20**, both produced by `make_figures.py` from `r2_ansatz_results.json`. The originals are archived in `results/superseded/` with their defects documented in that directory's README.
+**F19 and F20 are new**, produced by `make_figures.py` from `r2_ansatz_results.json`.
+
+> **⚠️ SCOPE CORRECTION.** R1 initially retired *both* originals. That was right for **F18** (`ansatz_comparison_noise.png`, archived in `results/superseded/`) and **wrong for F15**, which has been returned to `results/`. Two roles were conflated:
+> * **As evidence for the ansatz decision** — F15 is superseded. One seed cannot rank twelve configurations, and R2 settled the decision at 21 seeds.
+> * **As documentation of the search space** — F15 is the only such record, and **R2 does not replace it because R2 ran only the two survivors.** Retire it and the thesis's opening claim ("we investigate a family of quantum image encoders — four encodings, several ansätze") loses its evidence.
+>
+> Two of the original objections do not survive scrutiny: **"HEA and ALT are not in the codebase" is not an objection to a survey figure** — surveying options you then drop is the point — and **the `p_crit` contradiction is specific to F18**. F15 actually *agrees* with the Metrics Record: its `MULTI_AXIS + IQP` curve stays above 50% across the sweep, matching the logged `p_crit > 0.200`.
+>
+> What remains is scope, handled in the caption, not by retirement: one seed, 8×8 single node, and a noise axis the project later closed.
 
 **No retraining was needed** — R2 had already run the correct comparison (`{scalar_ry, multi_axis} × {strongly_entangling, iqp}`, 21 seeds per arm, 16×16, protocol of record) and its results were on disk unplotted. The old figures were not measuring something newer; they were measuring something that no longer existed.
 
@@ -100,7 +122,7 @@ What the replacements fix:
 
 ⚠️ **One thread deliberately left open**: the `p_crit` disagreement between the retired `ansatz_comparison_noise.png` and the Metrics Record (`MULTI_AXIS + IQP` logged at `p_crit > 0.200`, figure showing it cross 50% near p ≈ 0.12) is **recorded but not reconciled**. It no longer blocks anything, since neither artifact is cited and the noise line is closed — but if any `p_crit` number is quoted in the thesis, resolve this first.
 
-**Realistic figure count for 39 pages: 12–14.** F1–F12 plus N1 and N2 is exactly that, with N3–N5 and F13–F17 in appendices.
+**Realistic figure count for 39 pages: 13–16.** Main text: **F1–F12** (theory, architecture, CLEVR data), **F15** (the survey), **F19–F20** (the ansatz decision), **N1–N2** (the two missing headliners) — 17 if all are used, so expect to cut two or three. Appendices: **N3–N5**, **F13–F14**, **F16–F17**, and the retired set.
 
 ---
 
@@ -120,7 +142,7 @@ What the replacements fix:
 0.4 **Contributions**, with numbers:
    - A coherent quantum TTN image tower, entangled across levels, 287 params (Part I).
    - Question A.3 answered: the unitarity-constrained node beats the unconstrained CP node by `+9.7` pts at 33% fewer parameters (§II.2).
-   - Empirical barren-plateau immunity to N=20 (§II.1).
+   - Verification that the architecture is trainable at the widths used, consistent with known results for isometric tensor networks (§II.1). ⚠️ **Phrase it this way, not as "barren-plateau immunity."** MPS and MERA are equally well-behaved, so this is an *enabling* result, not a differentiator — and four points at N ≤ 20 cannot separate polynomial from exponential.
    - Question C.2(i) answered: implicit tree topology alone encodes spatial relations at classical parity (§II.4).
    - A compositional binding probe with identical class marginals and a passing manipulation check (§II.5).
    - A direct geometric measurement of frozen CLIP's binding invariance, in the metric CLIP uses at inference (§II.6).
@@ -177,14 +199,23 @@ Open with the protocol, once: 1024 train / 30 epochs (90 where stated), last-5-e
 
 ## II.1 Trainability and topology (2 pp)
 
-1.1 **Barren plateaus.** Gradient variance `5.94e-2` to `1.51e-1` across N ∈ {4, 9, 16, 20} — >62,000× the `2^-N` prediction at N=20; log-log slope consistent with `O(1/poly(N))`.
+1.1 **Trainability.** Gradient variance `5.94e-2` to `1.51e-1` across N ∈ {4, 9, 16, 20} — >62,000× the `2^-N` prediction at N=20; log-log slope consistent with `O(1/poly(N))` over the range measured.
+   **Method, stated so the claim can be sized**: 100 trials per width; each draws random weights *and* random inputs, runs the circuit forward, measures a **local** observable, and records the gradient of **one** leaf-level parameter. The variance is over those 100 values. It characterises the *initialisation landscape*, not training.
+   ⚠️ **Write "consistent with", not "proof of immunity."** Four points at N ≤ 20 against an extrapolated strawman cannot separate polynomial from exponential; the `62,000×` figure is a statement about N=20 specifically. A 100-sample variance carries ~14% relative error and the figure has no error bars, so the curve's wiggles are noise.
    → **F3**, with the rescoped caption (§Figure Inventory).
-1.2 **Topology comparison** — QTTN vs MPS vs MERA. All trainable at N=20; MERA's disentanglers buy accuracy; QTTN is the most noise-tolerant, MPS the least.
-   → **F4**, same caption fix. ⚠️ The accuracy half of this comparison came from a retired figure whose QTTN arm scored below the single-attribute ceiling — **the QTTN-vs-MERA choice rests on contraction complexity, a scaling argument independent of accuracy.** Say so; do not reinstate the retired accuracy claim.
+1.2 **Topology comparison** — QTTN vs MPS vs MERA, all well-behaved at N=20.
+   ⚠️ **This is an enabling result, not a differentiator — frame it that way explicitly.** Theory predicts all three should be fine: the relevant results cover shallow and hierarchical circuits with local observables, and all three qualify. **Finding the alternatives immune too is confirmation the measurement works**; the outcome that should have raised concern is the opposite one. The experiment's job is to license the rest of the project — had it failed there would be no CLEVR phase.
+   Two further limits: the MPS tested is a **shallow** chain, so it says nothing about the deep chains theory actually warns about; and its accuracy half came from a retired figure whose QTTN arm scored below the single-attribute ceiling. **The QTTN-vs-MERA choice rests on contraction complexity, a scaling argument independent of both accuracy and trainability.**
+   → **F4**, same caption fix.
 
 ## II.2 Encoding, ansatz, and the parameter-efficiency result (3 pp)
 
-2.1 **Encoding resolved, ansatz not.** `multi_axis` beats single-axis by `+12.6` (limit 3.6, **resolved**). IQP vs strongly-entangling is `+1.6` against a 4.8 limit — write "**not resolved**", never "IQP is better".
+2.1 **The search, then the decision — in that order.**
+   *First, what was surveyed*: 4 encodings × 3 ansätze, including AMPLITUDE (classifying at **two qubits and four parameters**) and ZZ feature maps. This is what licenses calling the investigation a survey rather than a single-architecture study.
+   → **F15** (`encoding_ansatz_sweep.png`), with the three scope caveats from the inventory in its caption. Present it as *the space searched*, and say plainly that the ranking comes later and from a different run — otherwise a reader will try to read the decision off it.
+   *Then the decision*: `multi_axis` beats single-axis by `+12.6` (limit 3.6, **resolved**). IQP vs strongly-entangling is `+1.6` against a 4.8 limit — write "**not resolved**", never "IQP is better". IQP is adopted for **shallower gate depth**; do not attach an accuracy or a noise-tolerance justification to it.
+   → **F19** (`encoding_ansatz.png`) and **F20** (`ansatz_comparison.png`). F19's right panel plots each effect against its resolution band, so "resolved" and "not resolved" are visible rather than asserted — use it rather than restating the numbers in prose.
+   ⚠️ **Do not repeat the July claim that IQP uses fewer parameters.** In `qttn_core` both ansätze allocate the same `[layers, qubits, 3]` tensor and `_iqp_block` leaves the third rotation column unread, so the counts are identical and roughly a third of the IQP arm's ansatz weights are **dead** — zero gradient, frozen at initialisation. The 287-parameter figure counts them, which makes the efficiency claim conservative rather than wrong. State the convention in §2.2's table caption; a reader who opens the code will find this.
 2.2 **The headline table** (16×16 synthetic shapes, 4 seeds):
 
    | model | score | params |
@@ -202,7 +233,8 @@ Open with the protocol, once: 1024 train / 30 epochs (90 where stated), last-5-e
 
 ## II.3 Properties investigated and closed (3 pp)
 
-3.1 **Mechanisms rejected** (30 seeds):
+3.1 **Mechanisms rejected** (30 seeds each).
+   ⚠️ **These ran on the hybrid, one day before the port to the coherent tree** — "architecture of record" meant something different at the time. `mixed_channel` and the ancilla were never ported; `reupload` exists in `qttn_core`'s `MODES` but was not re-run. **Write it as: the rejections stand at node scale and were not re-validated at the final architecture** — not that these mechanisms were shown to fail on the coherent tree. "We tested and rejected five residual mechanisms" reads as if it happened on the shipped model, and it did not.
 
    | mechanism | result | verdict |
    |---|---|---|
@@ -271,11 +303,14 @@ Open with the protocol, once: 1024 train / 30 epochs (90 where stated), last-5-e
 5.5 **The four statements the data supports:**
    1. Tensor networks — classical and quantum — perform compositional binding where a bag-of-features model is provably at chance.
    2. They do **not** do so better than a parameter-matched MLP; the MLP leads by 1.4–3.1 points at **fewer parameters than any TTN arm**.
-   3. The quantum tree demonstrates the capability — one seed at `73.8` against a `51.0` floor, ~10 binomial sd — but reaches it in a **minority of initialisations** (5 of 8 at floor). An *existence* claim, which survives post-hoc seed selection.
-   4. The task **saturates** (spread 4.5 pts against MDEs of 1.3–2.3): it shows *whether* an architecture binds, not *how well*.
+   3. **The quantum tree binds using only its topology** — updated 2026-08-13, array complete 30/30. `quantum_none` (**725 params, no positional parameters at all**) puts **5 of 15 seeds >3 binomial sd above the floor**, peaking at `69.0` (8.1 sd). An *existence* claim, now resting on five seeds rather than one, so it no longer depends on post-hoc selection.
+   4. **Explicit positional encoding adds nothing detectable**: `on_wire − none = −0.6` against an MDE of 5.5, at n=15 per arm with **both arms carrying signal**. A genuine bounded null — report it as support for omitting positional encoding.
+   5. The task **saturates** (spread 4.5 pts against MDEs of 1.3–2.3): it shows *whether* an architecture binds, not *how well*.
 
    ⚠️ **Never write that the MLP cannot capture these relations.** The shuffle control proves a *bag-of-features* model is at chance; `MLPReference` carries position and can bind. The control validates the **task**, never an architecture's inability.
-   ⚠️ The demonstrated quantum seed is `on_wire`, with **+32 parameters** over the implicit-only arm, so any positional win is confounded with capacity. The implicit-only arm has **no data**; **one clearly-above-floor seed is the only thing the pending re-run can change.**
+   ⚠️ **Capability, not reliability, and say both.** 10/15 and 12/15 seeds sit at or near floor, and on an all-seeds basis both quantum arms are **resolvably worse** than `classical_bare` (`−36.6`, limit 3.9; `−37.2`, limit 4.9). The existence claim is strong; there is no performance claim.
+   ⚠️ `none` has *more* above-floor seeds than `on_wire` (5 vs 3) — **not resolvable**, do not report as a direction.
+   → **F22** (`clevr_binding.png`). Quantum arms are plotted **per seed**, not as means: the distribution is bimodal, so a mean with an error bar would describe neither the capability nor the failure.
 
 ## II.6 Why the frozen baseline fails: CLIP's binding geometry (2 pp) — NEW
 

@@ -20,30 +20,61 @@ dominates". They also use `scalar_ry` encoding, which R2 later measured as costi
 | 15, 16 | `spatial_ancilla_comparison_*.png` | 5 seeds; the reported 2.2-pt difference is well inside a ~10-pt resolution limit. |
 | 19 | `noise_scheduling_training.png` | Question F's premise is now attributed to a readout-calibration artifact. |
 
-## Added 2026-08-08 — the two ansatz figures (different defect: wrong architecture)
+## Added 2026-08-08 — ONE ansatz figure retired (corrected 2026-08-08, see note)
 
-These do **not** share the scalar-readout defect above. They are superseded because they
-benchmark **an ansatz family that is not in the codebase**. `qttn_core.ANSATZE` is
-`("strongly_entangling", "iqp")`; HEA and ALT were dropped before the architecture of
-record existed. Regenerated replacements: `results/figures/encoding_ansatz.png` and
-`results/figures/ansatz_comparison.png`, both from `r2_ansatz_results.json` (21 seeds,
-16x16, protocol of record).
+> **CORRECTION.** Both ansatz figures were moved here on 2026-08-08 and that was wrong for
+> one of them. `encoding_ansatz_sweep.png` has been **returned to `results/`**: it is
+> superseded as *evidence for the ansatz decision*, but it is the project's only record of
+> the *search space explored*, and nothing replaces that. R2 ran only the two survivors.
+> The two roles were conflated; they are separated below.
 
-| figure | file | why superseded |
+| figure | file | status |
 |---|---|---|
-| 4 | `encoding_ansatz_sweep.png` | Sweeps 4 encodings x **HEA/IQP/ALT** at 8x8 with **one seed per config**. Two of the three ansatze do not exist in the shipped model, and one seed cannot support a 12-way ranking. Its conclusion (multi_axis+IQP) happens to be right, but R2 is what established it. |
-| — | `ansatz_comparison_noise.png` | **Untriaged in the original audit.** Three defects: (a) benchmarks HEA/IQP/ALT; (b) single seed at 8x8, i.e. a single 4-qubit node; (c) **contradicts the Experiment & Metrics Record** — the table logs `MULTI_AXIS + IQP` at `p_crit > 0.200` (never below 50% in range) while the figure shows IQP crossing 50% near p=0.12 and reaching ~20% by p=0.2. The discrepancy is unresolved; do not cite either number without reconciling them. |
+| — | `ansatz_comparison_noise.png` | **RETIRED — do not use.** |
+| 4 | `encoding_ansatz_sweep.png` | **RETURNED to `results/`** — see "Retained as a survey figure" below. |
 
-⚠️ **Do not reuse the flat HEA curve as evidence of noise robustness.** Depolarizing noise
+### `ansatz_comparison_noise.png` — retired
+
+**Untriaged in the original audit.** Three defects, and the third is disqualifying:
+(a) benchmarks HEA/IQP/ALT; (b) single seed at 8x8, i.e. a single 4-qubit node;
+(c) **contradicts the Experiment & Metrics Record** — the table logs `MULTI_AXIS + IQP`
+at `p_crit > 0.200` (never below 50% in range) while the figure shows IQP crossing 50%
+near p=0.12 and reaching ~20% by p=0.2. Unresolved; do not cite either number until
+reconciled.
+
+⚠️ **Do not reuse its flat HEA curve as evidence of noise robustness.** Depolarizing noise
 contracts expectation values multiplicatively, `<Z> -> (1-p)^d <Z>`, preserving sign and
-order, so an argmax decision can be perfectly noise-invariant while the representation is
-being destroyed. A curve that is flat across the whole sweep is more likely measuring that
-than robustness.
+order, so an argmax decision can be noise-invariant while the representation is destroyed.
+A curve flat across the whole sweep is more likely measuring that than robustness.
 
-**The ansatz decision itself is unaffected** — it was settled noiselessly by R2 (`iqp`
-`80.9 +/- 4.9` vs `strongly_entangling` `79.3 +/- 9.7`, `+1.6` against a 4.8-pt limit ->
-**not resolved**). IQP is adopted for shallower gate depth, not for accuracy and not for
-noise tolerance.
+Replacement: `results/figures/ansatz_comparison.png` (R2, 21 seeds, 16x16, noiseless).
+
+### `encoding_ansatz_sweep.png` — retained as a survey figure
+
+**Note that this figure does NOT share the p_crit defect above — it AGREES with the
+Metrics Record.** Its `MULTI_AXIS + IQP` curve stays above 50% across the whole sweep
+(~92% at p=0.15, ~65% at p=0.2), which is exactly the logged `p_crit > 0.200`. The
+contradiction is specific to `ansatz_comparison_noise.png`.
+
+Nor is "HEA and ALT are not in the codebase" an objection to a survey figure — surveying
+options you then drop is the point of a survey.
+
+**What it may be cited for**: documenting the space searched — 4 encodings x 3 ansatze,
+including AMPLITUDE (which classified at two qubits and four parameters) and ZZ feature
+maps. **What it may not be cited for**: ranking configurations, or the ansatz decision,
+which R2 settled at 21 seeds.
+
+Three scope facts belong in its caption, none of which invalidate it:
+1. **One seed per configuration.** Adequate to show what was explored, not to separate
+   configurations that land close together.
+2. **8x8, four qubits — a single node, not the tower.** It surveys node-level circuits.
+   The tower is 16 qubits at depth 2.
+3. **The x-axis is depolarizing noise, which the project later closed as out of scope.**
+   The survey content is the p=0 column; the rest characterises a single node.
+
+⚠️ **Caption must reconcile the scale difference or it reads as a regression**: this figure
+puts `MULTI_AXIS + IQP` at 95.3% (8x8, one node, one seed) while R2 puts it at 80.9%
+(16x16, full tree, 21 seeds). Different tasks, not a decline.
 
 ## Retained in `results/` (unaffected — no classifier head involved)
 

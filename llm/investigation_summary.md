@@ -1,6 +1,6 @@
 # Quantum Image Tower — Investigation Summary
 
-**A settled account of the investigation, 2026-07-17 to 2026-08-04.**
+**A settled account of the investigation, 2026-07-17 to 2026-08-13.** *(Updated 2026-08-08: added the CLIP binding-geometry result (§6.4), corrected the trainability and ablation framings, recorded the dead-parameter convention behind the 287-parameter figure. Updated 2026-08-13: the binding probe's quantum seed array completed 30/30 — the binding claim now rests on the implicit-topology arm and five seeds, and Question C.2(ii) closes as a bounded null. **Experimentation is now fully closed.**)*
 
 This document states the investigation's findings at their final confidence, in the order that makes them comprehensible rather than the order they were discovered in. Superseded results, retractions, and the sequence of corrections are **not** reproduced here — they are in `research_log.md`, which remains the record of what happened and when.
 
@@ -59,13 +59,15 @@ Code: `qttn_core.CoherentQTTNClassifier`, config `phase15_common.COHERENT_ARCH`,
 
 ### 2.3 Why these components
 
-Each element of the ansatz follows from a measurement, not a preference:
+The architecture was selected from a surveyed space, not assumed. An initial sweep covered **4 data encodings × 3 ansätze** — angle, multi-axis, amplitude and ZZ feature maps against HEA, IQP and ALT — at node scale; amplitude encoding is worth noting as the extreme, classifying at **two qubits and four parameters**. That survey is one seed per configuration on a single 4-qubit node, so it establishes *what was explored*, not a ranking; the ranking comes from the properly-powered runs below.
+
+Each element of the final ansatz then follows from a measurement, not a preference:
 
 | choice | evidence |
 |---|---|
 | 3 CNOTs per node ("all children to parent") | Entropy transfer saturates: 0→6 CNOTs moves root entropy `0.0000 → 0.5139` against the `ln 2 ≈ 0.693` ceiling; 3 CNOTs capture 73%, with clear diminishing returns after. |
 | `multi_axis` encoding (RX/RY/RZ) | `+12.6` pts over single-axis `scalar_ry`, against a 3.6-pt resolution limit — resolved. |
-| IQP ansatz | `+1.6` over strongly-entangling against a 4.8-pt limit — **not resolved**. IQP is chosen for being cheaper, not better. |
+| IQP ansatz | `+1.6` over strongly-entangling against a 4.8-pt limit — **not resolved**. Adopted for **shallower gate depth** (one rotation layer plus a ring of two-qubit gates, against three rotations plus a CNOT ring), not for accuracy and **not for noise tolerance**. ⚠️ Do not repeat the July justification that IQP uses fewer parameters: in `qttn_core` both ansätze allocate the same `[layers, qubits, 3]` tensor, and `_iqp_block` simply leaves the third rotation column unread — so the parameter counts are identical and roughly a third of the IQP arm's ansatz weights are **dead** (zero gradient, frozen at initialisation). The 287-parameter figure counts them. This makes the parameter-efficiency claim *conservative* rather than wrong, but state the convention rather than letting a reader find it in the code. |
 | `top_layer_multi_pauli` readout on CLEVR (12 values) | Chosen on **stability**: 0/3 seed collapses vs the narrow readout's 1/3, and per-head standard deviation 5–35× tighter. Costs ~3× under adjoint differentiation (one backward pass per observable) — free on hardware, not in simulation. |
 
 ---
@@ -82,7 +84,11 @@ Each element of the ansatz follows from a measurement, not a preference:
 
 Gradient variance across N ∈ {4, 9, 16, 20} qubits stays between `5.94e-2` and `1.51e-1`. Under an exponential barren plateau, variance at N=20 would be ≈`9.5e-7` — the measured value is **more than 62,000× larger**, and the log-log trend is consistent with `O(1/poly(N))`. Hierarchical topology with local observables is trainable at these widths.
 
-MPS and MERA show the same immunity at N=20. MERA reaches higher accuracy (`51.6` vs QTTN `42.2` and MPS `43.0`) because its disentanglers capture correlations across block boundaries that a tree misses; QTTN is the most noise-tolerant of the three and MPS the least, consistent with MPS's linear depth accumulation. *(Measured under an early, underpowered protocol — see §7.1.)*
+⚠️ **This is an enabling result, not a differentiator, and it must not be written as one.** MPS and MERA are equally well-behaved at N=20 — which is what theory predicts, since the relevant results cover shallow and hierarchical circuits measured with *local* observables, and all three architectures qualify. Finding the alternatives immune too is **confirmation the measurement works**; the outcome that should have raised concern is the opposite one. The experiment's role is to establish that the tower is trainable at the widths actually used, which licenses everything downstream — had it failed, there would be no CLEVR phase. **The topology choice rests on contraction complexity, a scaling argument independent of trainability.**
+
+⚠️ **Do not call this a "proof of barren-plateau immunity."** Four points at N ≤ 20, 100 trials each, against an extrapolated `2^-N` strawman cannot separate polynomial from exponential asymptotically. The defensible claim is *consistent with `O(1/poly(N))` over the range measured*. The `62,000×` figure is a statement about N=20 specifically. Note also that the sweep tracks **one** parameter (a leaf-level weight in the first block), re-randomises inputs as well as weights each trial, and has no error bars — the ~14% relative error on a 100-sample variance estimate is about the size of the between-architecture differences, so the curves' wiggles should not be interpreted.
+
+On accuracy, MERA edges the others (`51.6` vs QTTN `42.2` and MPS `43.0`) because its disentanglers capture correlations across block boundaries that a tree misses. *(Measured under an early, underpowered protocol — see §7.1 — and the QTTN arm there scored below the single-attribute ceiling, so this comparison is weak evidence at best.)* MPS's real weakness in this project was never gradients but noise, consistent with its linear depth accumulation; and the MPS tested is a **shallow** chain, so it says nothing about the deep chains the theory actually warns about.
 
 ### 3.3 Simulation limits, and what they fix
 
@@ -101,7 +107,9 @@ These determine every experimental scale in the project:
 
 ### 4.1 No residual or skip connections
 
-Five quantum-native mechanisms were tested at the architecture of record over 30 seeds:
+Five quantum-native mechanisms were tested over 30 seeds each.
+
+⚠️ **These are node-level results measured on the measure-and-re-encode HYBRID, not on the coherent tree.** They ran on 2026-07-28, one day before the port to the coherent architecture, so "the architecture of record" meant something different at the time. `mixed_channel` and the spatial ancilla were deliberately never ported (each ancilla doubles the statevector, and both were rejected decisively); `reupload` is implemented in `qttn_core`'s `MODES` but was not re-run either. **The honest statement is that the rejections stand at node scale and were not re-validated at the final architecture** — not that these mechanisms were shown to fail on the coherent tree.
 
 | mechanism | result | verdict |
 |---|---|---|
@@ -207,7 +215,7 @@ Converged `quantum_none` vs `classical_bare` is `−3.4` against a 5.2-pt limit;
 
 **Question C.2(i) is answered: yes.** `quantum_none` has *no* positional parameters at all — position enters only through the fixed patch→wire assignment — and it does a relational task at classical parity. The implicit tree topology carries enough spatial information. This discharges the scope condition attached to §4.2.
 
-**Question C.2(ii) is not answered.** Explicit position adds `+5.3` against a 10.7-pt limit across all seeds, `+1.8` against 5.4 on converged seeds — resolving that would need 27–38 seeds per arm. Report it as a **bounded null quoted at its MDE**, which is a legitimate finding supporting the omission of explicit positional encoding.
+**Question C.2(ii) is not answered on this task.** Explicit position adds `+5.3` against a 10.7-pt limit across all seeds, `+1.8` against 5.4 on converged seeds — resolving that here would need 27–38 seeds per arm. **It is answered on the binding probe instead** (§6.3, statement 4): `−0.6` against an MDE of 5.5 at 15 seeds per arm, a bounded null supporting the omission of explicit positional encoding.
 
 ⚠️ **Read the converged subgroup as a diagnostic, not an arm** — it is post-hoc conditioning. ⚠️ These runs used 30 epochs where §6.1 shows ~90 are needed, and several converged seeds were still climbing at the cutoff, so **these numbers are a floor on capability, not a ceiling**.
 
@@ -235,18 +243,50 @@ A **+40.5 to +45.8** point gap that cannot come from unbound features, since the
 
 1. **Tensor networks perform compositional binding** — classical and quantum — on a task where a bag-of-features model is provably at chance. `classical_bare` `91.5 ± 3.1`, `classical_full` `93.2 ± 1.4`, over 10 seeds.
 2. **They do not do so better than a parameter-matched MLP.** A **683-parameter** MLP — fewer parameters than any tensor-network arm — beats `classical_bare` by `+3.1` (limit 2.8, resolved) and ties `classical_full`.
-3. **The quantum tree demonstrates the capability but reaches it unreliably.** One seed reaches `73.8` against a `51.0` floor — about **10 binomial standard deviations** on 512 validation samples, so not luck, and on a marginal-controlled task it cannot be anything but binding. This is an *existence* claim about architectural capacity, which is the kind that survives post-hoc seed selection. But 5 of 8 seeds sat at floor: **capability, not reliability.**
+3. **The quantum tree binds using only its tree structure, but reaches that state unreliably.** *(Updated 2026-08-13: the seed array completed 30/30, and this is the statement it upgraded.)* `quantum_none` — **725 parameters and no positional parameters at all**, position entering only through the fixed patch→wire assignment — puts **5 of 15 seeds more than 3 binomial standard deviations above the floor**, peaking at `69.0` (8.1 sd on 512 validation samples). On a marginal-controlled task that cannot be anything but binding. This is an *existence* claim about architectural capacity, and it now rests on five seeds rather than one, so it no longer depends on selecting a single run post hoc. But 10 of 15 seeds sat at or near floor: **capability, not reliability.** On an all-seeds basis both quantum arms are **resolvably worse** than `classical_bare` (`−36.6`, limit 3.9; `−37.2`, limit 4.9) — there is no performance claim here.
+
+4. **Explicit positional encoding adds nothing detectable, and this closes Question C.2(ii).** `on_wire − none = −0.6` against a minimum detectable effect of `5.5`, at 15 seeds per arm with **both arms carrying signal**. A genuine bounded null, and it *supports* omitting positional encoding rather than leaving a gap. ⚠️ `none` in fact has more above-floor seeds than `on_wire` (5 vs 3), but that is **not resolvable** and must not be reported as a direction.
 4. **The task saturates.** Total spread across arms is 4.5 points against MDEs of 1.3–2.3, so it can show *whether* an architecture binds, not *how well*. It cannot rank architectures finely in either direction.
 
 ⚠️ **Never write that the MLP cannot capture these relations.** The shuffle control proves that a *bag-of-features* model is at chance. `MLPReference` is not one — it flattens **positioned** patch embeddings into a fully-connected trunk, so it carries position and can bind. The control validates the **task**; it never validates an architecture's inability.
 
 ⚠️ The demonstrated quantum seed is the `on_wire` variant, *with* explicit positional parameters and **+32 parameters** over the implicit-only arm, so any positional advantage is confounded with capacity. The implicit-only arm has **no data** — its full seed array was lost to a cluster failure and is being re-run. **This is the only conclusion the re-run can change**: one clearly-above-floor implicit seed would extend the capability claim to the architecturally interesting variant.
 
-### 6.4 What this says about the premise
+### 6.4 Frozen CLIP's binding geometry
 
-The project's premise is that a frozen contrastive baseline fails on compositional tasks where the tensor network succeeds. **The binding probe neither supports nor contradicts that headline** — the frozen baseline was never run in the vision tower, and the headline rests entirely on the language-side ARO evaluation.
+The binding probe could not explain why frozen CLIP fails on compositional benchmarks, because it never tested CLIP. This does, on the same composites.
 
-The probe was designed to supply the headline's *mechanism* — "the tensor network's advantage is binding, not perception" — and it **does not**. Within the vision tower there is no compositional advantage for tensor networks over a plain MLP. Both outcomes were pre-registered before the numbers came in; this is the branch that fired.
+**Why cosine similarity rather than a trained probe.** Cosine similarity *is* the operation CLIP performs at inference — retrieval, zero-shot classification and the contrastive objective all reduce to it. "Swapped images sit at near-identical cosine similarity" is therefore a statement about what the model does, not about what could in principle be recovered.
+
+**What makes the number interpretable**, since a bare cosine similarity is meaningless on strongly anisotropic embeddings: **matched quads** — the swap reuses the *same two crops*, so the only difference between the two images is which side each object is on — and **every item carries its own ceiling and floor**, making the statistic scale-free.
+
+**Result** — `openai/clip-vit-base-patch32`, 500 matched quads at 224×224:
+
+| comparison | cos sim (95% CI) | role |
+|---|---|---|
+| `jitter` — same objects, re-placed | `0.9777 ± 0.0009` | ceiling |
+| **`swap` — same objects, sides exchanged** | **`0.9727 ± 0.0011`** | **the effect** |
+| `content` — different objects, same arrangement | `0.9123 ± 0.0022` | floor |
+
+A compositional swap moves the embedding `0.0050`; a content change moves it `0.0654` — **13.1× further**. The swap accounts for **7.6%** of a content change. **`swap_invariance = 0.924`.**
+
+**Two controls, both passed.** The **void guard**: ceiling − floor is `0.0654`, 3.3× the `0.02` threshold, so CLIP *is* discriminating these images — the invariance is specific to the swap, not a general failure to see anything. Without this the result would be indistinguishable from "the inputs are out of distribution". **Padding robustness**: at canvas 224 / cell 96, ~60% of each image is padding, and with black padding every composite reads as "two small photos on black", compressing all similarities upward. Re-run with CLEVR floor-grey padding, `swap_invariance` moves `0.928 → 0.924` — nothing changes, exactly as the ratio construction predicts.
+
+**The contrast that makes it a result.** On the same construction a **683-parameter MLP classifies the swap at `94.6%`** (§6.3). An **88M-parameter frozen CLIP encoder discards binding information that a 683-parameter model reads off the pixels.** That is the mechanism behind bag-of-words behaviour, stated in the metric CLIP actually uses.
+
+⚠️ **CLIP is not blind — it is 13× less sensitive.** `swap` and `jitter` differ by `0.0050` against CIs of ~`0.001`, so the swap *is* detected. The honest phrasing is "a compositional swap produces 7.6% of the embedding movement of a content change", **not** "CLIP cannot see it".
+
+**Limitations, declared.** This measures **salience in the geometry, not recoverability by a probe** — a linear probe might still extract binding from a low-variance direction; for a contrastive retrieval model the geometric claim is the relevant one, but they are different claims and must not be conflated. **Frozen image tower only**; the full image–text setting the benchmarks probe is not tested here. The `content` floor changes *both* objects, so `0.924` is the conservative choice. Composites are synthetic and CLEVR renders are somewhat out of distribution for CLIP — which is what the void guard exists to catch, and it passed.
+
+### 6.5 What this says about the premise
+
+The project's premise is that a frozen contrastive baseline fails on compositional tasks where the tensor network succeeds. **The two closing experiments answer different halves of it, and they point in opposite directions.**
+
+**The binding probe was designed to supply the mechanism** — "the tensor network's advantage is binding, not perception" — and it **does not**. Within the vision tower there is no compositional advantage for tensor networks over a plain MLP. Both outcomes were pre-registered; this is the branch that fired.
+
+**The CLIP geometry measurement supplies a different mechanism, from the baseline's side.** The advantage over CLIP is real and now measured directly: CLIP's embedding is 13× less responsive to compositional rearrangement than to content change, on images a 683-parameter MLP classifies at 94.6%. Downstream, substituting a tensor-network vision tower for frozen CLIP lifts ARO attribution from 70% to 77.65% and ARO relation from 55.81% to 59.78%.
+
+**So the defensible form of the claim is: the advantage over CLIP is real, but it does not come from the tensor network's compositional inductive bias.** What the vision-side evidence supports is that *frozen CLIP discards binding information*, not that *hierarchical contraction captures it better than any alternative*. Anything stronger is not in the data.
 
 ---
 
@@ -292,7 +332,9 @@ Long and multi-seed runs go to the SGE cluster as array jobs; seed sharding maps
 
 ### 8.1 Status
 
-**Experimentation is closed** except one quantum seed array for the binding probe's implicit-positional arm, which is being re-run after a cluster wall-clock failure. Everything else is complete; the remaining gaps below are declared limitations, not open threads.
+**Experimentation is closed.** The final outstanding item — the binding probe's quantum seed array, re-run after a cluster contention failure — completed 30/30 on 2026-08-13, upgrading the binding claim to the implicit-topology arm and closing Question C.2(ii). Every remaining gap below is a declared limitation, not an open thread.
+
+⚠️ The 30 result files remain on the cluster (`c6_binding_{none,on_wire}_s*_results.json`) and have not been pulled into the repo, so the binding figure is generated from transcribed per-seed scores rather than from data.
 
 ### 8.2 Limitations, all declared rather than discovered
 
@@ -301,7 +343,7 @@ Long and multi-seed runs go to the SGE cluster as array jobs; seed sharding maps
 - **Optimisation stability is the binding constraint, not capacity.** Collapse rates reach 12/20 on relations and 5/8 on binding, in two modes needing different fixes: *learned-then-diverged* (a learning-rate/schedule failure — one seed peaked above the classical mean at epoch 12 before falling to chance) and *never-left-chance* (an initialisation failure). **Collapse is characterised, not fixed**; the rate is reported beside every converged-seed figure so the conditioning stays visible.
 - **The binding probe saturates**, and its composites are synthetic. The natural relational task is the ecological-validity companion.
 - **The `on_wire` arm carries +32 parameters**, so any positional advantage is confounded with capacity.
-- **Question C.2(ii) will likely end without a verdict**, since a comparison between two arms that both sit at floor measures nothing.
+- ~~Question C.2(ii) will likely end without a verdict.~~ **Answered 2026-08-13** as a bounded null (`−0.6`, MDE 5.5). The prediction assumed both arms would sit at floor, making the comparison meaningless; both in fact carried signal.
 - **Two epoch budgets, neither privileged.** Both tables must be quoted.
 
 ### 8.3 Next steps, in priority order
@@ -311,6 +353,8 @@ Long and multi-seed runs go to the SGE cluster as array jobs; seed sharding maps
 3. **Higher bond dimension**, the principled fix for the readout bottleneck — affordable on hardware and under tensor-network simulation, not under statevector training.
 4. **Rebuild the binding probe on `material`**, the one attribute with both adequate perception coverage across arms and remaining headroom. `size` equalised perception at the cost of most of the dynamic range.
 5. **Integrate the quantum tower with the language model.** Never attempted; the design is specified and the blocker is cost — three forward passes per sample against ~62 min per seed, on a task needing far more than 1024 samples, at a multi-seed budget forced by the collapse rate.
+6. **Extend the CLIP geometry measurement (§6.4) from the frozen image tower to the full image–text setting**, which is what the benchmarks actually probe. The current result is the strongest positive finding in the vision phase and it is one control away from covering the case the thesis argues about.
+7. **Reconcile the `p_crit` discrepancy** between the retired `ansatz_comparison_noise.png` and the Experiment & Metrics Record — both report `MULTI_AXIS + IQP` and they disagree. Blocks nothing while the noise line stays closed, but must be resolved before any `p_crit` number is quoted.
 
 ---
 

@@ -429,9 +429,351 @@ def fig_ansatz_comparison():
     )
 
 
+def fig_synthetic_examples(img_size=16, seed=7):
+    """One example per class from the 16x16 synthetic shapes dataset.
+
+    Overlapping mode is a 2x2 design -- {red, green} x {circle, square} -- so
+    colour alone and shape alone each cap at 50%. That is what makes the 50%
+    line on every Phase-1 figure a *single-attribute ceiling* rather than an
+    arbitrary threshold, and why scoring above it is evidence of binding.
+    """
+    from qnlp.utils.data.synthetic_shapes import SyntheticShapesDataset
+
+    names = {0: "red circle", 1: "red square", 2: "green circle", 3: "green square"}
+    ds = SyntheticShapesDataset(num_samples=400, img_size=img_size, mode="overlapping", seed=seed)
+    picked, i = {}, 0
+    while len(picked) < 4 and i < len(ds):
+        img, lab = ds[i]
+        picked.setdefault(int(lab), img)
+        i += 1
+
+    fig, axes = plt.subplots(1, 4, figsize=(9.2, 2.9))
+    for ax, lab in zip(axes, sorted(picked)):
+        # permute CHW -> HWC; nearest so the 16x16 pixel grid stays legible.
+        ax.imshow(picked[lab].permute(1, 2, 0).numpy(), interpolation="nearest")
+        ax.set_title(f"class {lab}: {names[lab]}", fontsize=9)
+        ax.set_xticks([])
+        ax.set_yticks([])
+    _save(
+        fig,
+        "synthetic_examples.png",
+        f"The Phase-1 dataset: {img_size}x{img_size} RGB, four classes formed as a 2x2 design of "
+        "{red, green} x {circle, square} ('overlapping' mode). Shapes are jittered in position and size "
+        "and carry low Gaussian channel noise. The design is why 50% is a SINGLE-ATTRIBUTE CEILING and not "
+        "an arbitrary line: colour alone separates {0,1} from {2,3} and shape alone separates {0,2} from "
+        "{1,3}, so either attribute in isolation caps at 50% and any score materially above it requires "
+        "binding colour to shape. Chance is 25%.",
+    )
+
+
+HEADS = ("color", "shape", "material", "size")
+SHORT = {
+    "quantum_coherent": "quantum",
+    "classical_full": "cls_full",
+    "classical_bare": "cls_bare",
+    "mlp_reference": "mlp_ref",
+    "mlp_param_matched": "mlp_pm",
+}
+# Majority-class floors per head (Task C1, 16x16 CLEVR object crops).
+C3_FLOORS = {"color": 15.2, "shape": 35.4, "material": 50.2, "size": 50.6}
+
+# 90-epoch results. Transcribed from research_log.md (C3c for the quantum arm,
+# C3d for the classical arms) because the `c3d_obj_*_partial.json` checkpoints
+# live on the cluster, not locally. TODO: repoint at the checkpoints once
+# retrieved, so this figure is generated end-to-end from data like the others.
+# mlp_param_matched has no 90-epoch row -- that stage crashed (see 2026-08-04).
+C3_90EP = {
+    "quantum_coherent": {"color": (63.0, 13.5), "shape": (52.7, 2.7), "material": (61.0, 2.6), "size": (94.1, 0.4)},
+    "classical_bare": {"color": (73.4, 26.2), "shape": (43.0, 11.7), "material": (56.5, 9.8), "size": (91.8, 14.8)},
+    "classical_full": {"color": (75.8, 20.3), "shape": (52.2, 13.0), "material": (65.0, 10.5), "size": (97.7, 1.0)},
+    "mlp_reference": {"color": (93.1, 2.3), "shape": (74.1, 9.6), "material": (84.0, 6.6), "size": (98.6, 0.6)},
+}
+
+
+def fig_clevr_attributes():
+    """CLEVR single-object attribute classification, both epoch budgets.
+
+    The standing rule is to quote BOTH budgets or neither: at 30 epochs the
+    quantum arm beats classical_full on shape and material, and at 90 the
+    picture trades -- colour improves while material and size get resolvably
+    worse, because four heads share one summed loss and converge at different
+    rates. A single-budget figure would misrepresent that.
+    """
+    c3 = _load("c3_combined_results.json")
+    if not c3:
+        print("  SKIP clevr_attributes (missing c3_combined_results.json)")
+        return
+    arms = ["quantum_coherent", "classical_full", "classical_bare", "mlp_reference", "mlp_param_matched"]
+    params = c3["params"]
+
+    fig, axes = plt.subplots(1, 4, figsize=(15.5, 4.3), sharey=True)
+    width = 0.38
+    for ax, head in zip(axes, HEADS):
+        for i, arm in enumerate(arms):
+            v = c3["arms"][arm][head]
+            ax.bar(
+                i - width / 2, v["score_mean"], width, yerr=v["score_std"], color=C[arm], capsize=2, label="_nolegend_"
+            )
+            nine = C3_90EP.get(arm, {}).get(head)
+            if nine:
+                ax.bar(
+                    i + width / 2,
+                    nine[0],
+                    width,
+                    yerr=nine[1],
+                    color=C[arm],
+                    alpha=0.45,
+                    hatch="///",
+                    capsize=2,
+                    label="_nolegend_",
+                )
+        ax.axhline(C3_FLOORS[head], color="grey", ls=":", lw=1.2)
+        ax.annotate(
+            f"floor {C3_FLOORS[head]:.1f}%",
+            (0.02, C3_FLOORS[head] + 1.5),
+            xycoords=("axes fraction", "data"),
+            fontsize=7,
+            color="grey",
+        )
+        ax.set_title(head, fontsize=11)
+        ax.set_xticks(range(len(arms)))
+        # Short names on two lines: rotated full names collided with the caption.
+        ax.set_xticklabels([f"{SHORT[a]}\n{params[a]}p" for a in arms], fontsize=7.5)
+        ax.set_ylim(0, 105)
+    axes[0].set_ylabel("accuracy % (mean of last 5 epochs)")
+    solid = plt.Rectangle((0, 0), 1, 1, fc="#666666")
+    hatched = plt.Rectangle((0, 0), 1, 1, fc="#666666", alpha=0.45, hatch="///")
+    fig.legend(
+        [solid, hatched], ["30 epochs", "90 epochs"], fontsize=8, loc="upper right", bbox_to_anchor=(0.995, 0.965)
+    )
+    fig.suptitle("CLEVR single-object attribute classification, 16x16 object crops", fontsize=12, y=0.99)
+    _save(
+        fig,
+        "clevr_attributes.png",
+        "Per head, never averaged. Solid = 30 epochs, hatched = 90. Dotted line is the majority-class floor. "
+        "At 30 epochs the quantum tower (462p) beats classical_full (551p) on shape +12.7 and material +8.8, "
+        "both resolved -- parameter efficiency reproducing on real data. At 90 epochs it TRADES rather than "
+        "improves: colour 27.1 -> 63.0 (resolved) while material -9.7 and size -2.0 get resolvably worse, "
+        "because four heads share one summed loss and converge at different rates. Classical arms at 90 "
+        "epochs have very large seed variance (classical_bare colour +/-26.2), so the quantum arm's colour "
+        "sits INSIDE that spread rather than below it. NEITHER BUDGET IS PRIVILEGED -- quote both or "
+        "neither. mlp_reference beats every tensor-network arm on every head; the claim here is about the "
+        "quantum node vs the classical CP node, not about beating classical vision. mlp_param_matched has "
+        "no 90-epoch row (that stage crashed). Quantum n=3, classical n=10.",
+    )
+
+
+# C4 quantum arms. Transcribed from research_log.md (2026-08-02 re-run) because
+# these ran on the cluster and only merged summaries are local. Seed outcomes are
+# from the same entry: `none` 3 converged / 3 diverged-after-learning / 4 never
+# left chance; `on_wire` 5 converged / 1 transient spike / 4 never left chance.
+# TODO: repoint at the cluster checkpoints so per-seed curves can be drawn too.
+C4_QUANTUM = {
+    "quantum_none": {"params": 462, "all": (31.2, 10.5), "converged": (46.2, 2.5, 3), "outcomes": (3, 3, 4)},
+    "quantum_on_wire": {"params": 494, "all": (36.4, 12.4), "converged": (48.0, 3.8, 5), "outcomes": (5, 1, 4)},
+}
+C4_FLOOR = 26.6
+
+
+def fig_clevr_relations():
+    """CLEVR left/right/front/behind, and the collapse structure behind it.
+
+    Two panels because the arm means alone are actively misleading: the quantum
+    distribution is bimodal, so its mean is neither the capability nor the
+    failure. Panel 1 shows both readings; panel 2 shows why there are two.
+    """
+    c4 = _load("c4_relational_classical_results.json")
+    if not c4:
+        print("  SKIP clevr_relations (missing c4_relational_classical_results.json)")
+        return
+    cls = {k: v["relation"] for k, v in c4["arms"].items()}
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12.5, 4.5), gridspec_kw={"width_ratios": [2.1, 1]})
+    rows = [
+        ("mlp_reference", cls["mlp_reference"]["score_mean"], cls["mlp_reference"]["score_std"], 999, "solid"),
+        ("classical_full", cls["classical_full"]["score_mean"], cls["classical_full"]["score_std"], 434, "solid"),
+        ("classical_bare", cls["classical_bare"]["score_mean"], cls["classical_bare"]["score_std"], 428, "solid"),
+        (
+            "mlp_param_matched",
+            cls["mlp_param_matched"]["score_mean"],
+            cls["mlp_param_matched"]["score_std"],
+            257,
+            "solid",
+        ),
+        ("quantum_on_wire\n(converged, n=5)", *C4_QUANTUM["quantum_on_wire"]["converged"][:2], 494, "hatch"),
+        ("quantum_on_wire\n(all seeds)", *C4_QUANTUM["quantum_on_wire"]["all"], 494, "solid"),
+        ("quantum_none\n(converged, n=3)", *C4_QUANTUM["quantum_none"]["converged"][:2], 462, "hatch"),
+        ("quantum_none\n(all seeds)", *C4_QUANTUM["quantum_none"]["all"], 462, "solid"),
+    ]
+    colours = {
+        "mlp_reference": C["mlp_reference"],
+        "classical_full": C["classical_full"],
+        "classical_bare": C["classical_bare"],
+        "mlp_param_matched": C["mlp_param_matched"],
+        "quantum_on_wire": C["quantum_hybrid"],
+        "quantum_none": C["quantum_coherent"],
+    }
+    for i, (name, mu, sd, p, style) in enumerate(rows):
+        key = name.split("\n")[0]
+        ax1.barh(
+            i,
+            mu,
+            xerr=sd,
+            color=colours[key],
+            alpha=0.45 if style == "hatch" else 1.0,
+            hatch="///" if style == "hatch" else None,
+            capsize=3,
+        )
+        ax1.annotate(f"{mu:.1f}  ({p}p)", (mu + sd + 1.5, i), va="center", fontsize=7.5)
+    ax1.set_yticks(range(len(rows)))
+    ax1.set_yticklabels([r[0] for r in rows], fontsize=8)
+    ax1.axvline(C4_FLOOR, color="grey", ls=":", lw=1.2)
+    ax1.annotate("majority floor 26.6%", (C4_FLOOR + 1, -0.62), fontsize=7, color="grey")
+    ax1.set_xlim(0, 95)
+    ax1.set_xlabel("relation accuracy % (mean of last 5 epochs)")
+    ax1.set_title("Left / right / front / behind, 30 epochs", fontsize=10)
+
+    labels = ["trained", "collapsed to chance"]
+    bar_c = ["#0072B2", "#999999"]
+    for i, arm in enumerate(("quantum_none", "quantum_on_wire")):
+        conv = C4_QUANTUM[arm]["outcomes"][0]
+        for j, n in enumerate((conv, 10 - conv)):
+            ax2.barh(i, n, left=0 if j == 0 else conv, color=bar_c[j], label=labels[j] if i == 0 else "_nolegend_")
+            ax2.annotate(
+                str(n), ((0 if j == 0 else conv) + n / 2, i), ha="center", va="center", fontsize=9, color="white"
+            )
+    ax2.set_yticks([0, 1])
+    ax2.set_yticklabels(["quantum_none", "quantum_on_wire"], fontsize=8)
+    ax2.set_xlabel("seeds (of 10)")
+    ax2.set_xlim(0, 10)
+    ax2.legend(fontsize=7.5, loc="lower right")
+    ax2.set_title("Training frequently collapses", fontsize=10)
+
+    _save(
+        fig,
+        "clevr_relations.png",
+        "Training the quantum tower on this task frequently collapses to chance; the hatched bars report "
+        "the runs that trained, and the solid quantum bars include the collapsed runs. On the runs that "
+        "train, the quantum tower is statistically tied with classical_bare -- its direct structural "
+        "counterpart, a CP tree at a comparable parameter count. quantum_none carries NO positional "
+        "parameters, position entering only through the fixed patch-to-wire assignment, so its parity "
+        "shows the tree topology encodes spatial position implicitly. Whether explicit position helps on "
+        "top is unresolved, and on_wire carries +32 parameters, so any advantage there is confounded with "
+        "capacity. The binding constraint is optimisation stability, not representational capacity.",
+    )
+
+
+# C6 size-binding, 10 seeds, 90 epochs, floor 51.2. Transcribed from
+# research_log.md (2026-08-04) -- c6_binding_{classical,shuffled}_results.json
+# are on the cluster. TODO: repoint at those once retrieved.
+C6 = {
+    "mlp_reference": {"params": 1397, "bind": (96.0, 1.3), "shuf": (50.2, 2.1)},
+    "mlp_param_matched": {"params": 683, "bind": (94.6, 2.9), "shuf": (49.3, 2.7)},
+    "classical_full": {"params": 942, "bind": (93.2, 1.4), "shuf": (49.3, 2.7)},
+    "classical_bare": {"params": 930, "bind": (91.5, 3.1), "shuf": (51.0, 1.4)},
+}
+C6_FLOOR = 51.17
+# Quantum arms, 15 seeds each, array 7135153 complete 2026-08-13. Per-seed
+# scores transcribed from the cluster (c6_binding_{arm}_s*_results.json).
+# Binomial s.d. on 512 val samples is 2.21 pts, so ">3 sd" = above 57.8.
+C6_QUANTUM = {
+    "quantum_none": {
+        "params": 725,
+        "seeds": [49.0, 49.1, 61.8, 52.2, 55.0, 45.9, 69.0, 55.1, 50.0, 49.6, 59.7, 52.0, 62.5, 58.0, 54.8],
+    },
+    "quantum_on_wire": {
+        "params": 757,
+        "seeds": [72.1, 48.1, 59.4, 47.5, 52.2, 48.2, 49.1, 73.8, 49.8, 55.3, 55.9, 48.9, 50.9, 53.4, 50.0],
+    },
+}
+
+
+def fig_clevr_binding():
+    """The compositional binding probe and its manipulation check.
+
+    The paired bars ARE the argument: class-conditional marginals are identical
+    by construction, so the ~43-point drop to exactly chance under patch
+    shuffling proves the task cannot be solved without binding an attribute to
+    a position. Everything else in the figure is read against that.
+    """
+    arms = ["mlp_reference", "mlp_param_matched", "classical_full", "classical_bare"]
+    fig, ax = plt.subplots(figsize=(12.0, 4.8))
+    width = 0.38
+    for i, arm in enumerate(arms):
+        d = C6[arm]
+        ax.bar(i - width / 2, d["bind"][0], width, yerr=d["bind"][1], color=C[arm], capsize=3)
+        ax.bar(i + width / 2, d["shuf"][0], width, yerr=d["shuf"][1], color=C[arm], alpha=0.35, hatch="///", capsize=3)
+        ax.annotate(
+            f"{d['bind'][0] - d['shuf'][0]:+.1f}",
+            (i, max(d["bind"][0], 0) + d["bind"][1] + 2.5),
+            ha="center",
+            fontsize=9,
+            fontweight="bold",
+        )
+    # Quantum arms as per-seed strips: the distribution is bimodal, so a mean
+    # with an error bar would describe neither the capability nor the failure.
+    import numpy as np
+
+    rng = np.random.default_rng(0)
+    q_names = {"quantum_none": "quantum\n(implicit)", "quantum_on_wire": "quantum\n(+explicit pos.)"}
+    for k, (arm, d) in enumerate(C6_QUANTUM.items()):
+        x = len(arms) + k
+        pts = d["seeds"]
+        col = C["quantum_coherent"] if arm == "quantum_none" else C["quantum_hybrid"]
+        ax.scatter(rng.normal(x, 0.07, len(pts)), pts, s=30, color=col, alpha=0.85, zorder=3)
+        ax.annotate(
+            f"{sum(1 for p in pts if p > C6_FLOOR + 6.6)}/15\n>3 s.d.",
+            (x, max(pts) + 3),
+            ha="center",
+            fontsize=8,
+            color=col,
+            fontweight="bold",
+        )
+    ax.axhline(C6_FLOOR, color="grey", ls=":", lw=1.4)
+    ax.annotate("chance (51.2%)", (0.015, C6_FLOOR + 1.4), xycoords=("axes fraction", "data"), fontsize=8, color="grey")
+    ax.set_xticks(range(len(arms) + len(C6_QUANTUM)))
+    ax.set_xticklabels(
+        [f"{SHORT[a]}\n{C6[a]['params']}p" for a in arms]
+        + [f"{q_names[a]}\n{d['params']}p" for a, d in C6_QUANTUM.items()],
+        fontsize=8.5,
+    )
+    ax.axvline(len(arms) - 0.5, color="#cccccc", lw=1)
+    ax.set_ylabel("binding accuracy %")
+    ax.set_ylim(0, 108)
+    solid = plt.Rectangle((0, 0), 1, 1, fc="#666666")
+    hatched = plt.Rectangle((0, 0), 1, 1, fc="#666666", alpha=0.35, hatch="///")
+    ax.legend([solid, hatched], ["composites", "patch-shuffled"], fontsize=8.5, loc="lower right")
+    ax.set_title("Compositional binding: attribute bound to position", fontsize=11)
+    _save(
+        fig,
+        "clevr_binding.png",
+        "Each composite contains the SAME two objects; only their arrangement differs, so the "
+        "class-conditional marginals are identical by construction and global feature content carries zero "
+        "information. Under patch shuffling every architecture falls to EXACTLY chance -- a 40 to 46 point "
+        "gap that cannot come from unbound features. The task therefore provably requires binding an "
+        "attribute to a position, and any score above chance is evidence of binding. Tensor networks bind "
+        "(classical_bare 91.5, classical_full 93.2). THEY DO NOT BIND BETTER: a 683-parameter MLP reaches "
+        "94.6 with fewer parameters than any tensor-network arm. The shuffle control proves a "
+        "BAG-OF-FEATURES model is at chance; MLPReference is not one -- it flattens POSITIONED patch "
+        "embeddings and can bind. The control validates the task, never an architecture's inability. "
+        "Quantum arms are shown per seed (15 each, complete) because the distribution is bimodal and a "
+        "mean would describe neither the capability nor the failure. The IMPLICIT arm -- no positional "
+        "parameters at all, position entering only via the fixed patch-to-wire map -- puts 5 of 15 seeds "
+        "more than 3 binomial s.d. above chance, peaking at 69.0 (8.1 s.d.), so the quantum tree binds "
+        "using only its topology. Explicit position adds nothing detectable (-0.6, limit 5.5). This is "
+        "capability, not reliability: most seeds sit at floor, and on an all-seeds basis both quantum "
+        "arms are resolvably below classical_bare. The task also saturates -- 4.5 points separate every "
+        "classical arm -- so it shows WHETHER an architecture binds, not how well.",
+    )
+
+
 def main():
     os.makedirs(FIGDIR, exist_ok=True)
     print(f"Regenerating figures into {FIGDIR}")
+    fig_synthetic_examples()
+    fig_clevr_attributes()
+    fig_clevr_relations()
+    fig_clevr_binding()
     fig_model_comparison()
     fig_ablations()
     fig_readout()
