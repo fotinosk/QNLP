@@ -32,8 +32,9 @@ This log tracks the theoretical derivations, simulation results, noisy emulation
   * ⚠️ Results live on the cluster at `/SAN/intelsys/discoviz/fotinos/QNLP/qnlp/image_tower/classification/quantum/results/c6_binding_{none,on_wire}_s*_results.json` (30 files) and have **not been pulled into the repo**. The `clevr_binding.png` figure is generated from transcribed numbers until they are.
 * **✅ DONE 2026-08-08 — the ansatz figures are regenerated** as `results/figures/encoding_ansatz.png` and `results/figures/ansatz_comparison.png`, plotted by `make_figures.py` from the existing `r2_ansatz_results.json` (**no retraining needed** — R2 had already run the correct comparison at 21 seeds and its results sat unplotted).
   * **⚠️ SCOPE CORRECTION, same day.** Both originals were archived and that was wrong for one. **`ansatz_comparison_noise.png` stays retired** (it contradicts the Metrics Record on `p_crit`). **`encoding_ansatz_sweep.png` is RETURNED to `results/` and retained as the SURVEY figure.** Two roles were conflated: it is superseded as *evidence for the ansatz decision*, but it is the project's **only record of the search space explored** — 4 encodings × 3 ansätze, including AMPLITUDE (classifying at two qubits / four parameters) and ZZ feature maps — and **R2 does not replace it, because R2 ran only the two survivors.** Retiring it would strip the evidence from the thesis's opening claim that a family of encoders was investigated.
-  * **Two of the objections I raised do not hold for that figure.** "HEA and ALT are not in the codebase" is not an objection to a *survey* — surveying options you then drop is the point. And **the `p_crit` contradiction is specific to `ansatz_comparison_noise.png`**: `encoding_ansatz_sweep.png` *agrees* with the record, its `MULTI_AXIS + IQP` curve staying above 50% across the whole sweep (~92% at p=0.15, ~65% at p=0.2), matching the logged `p_crit > 0.200`.
-  * **What remains is scope, and it belongs in the caption rather than in an archive**: one seed per config (fine for showing what was explored, not for ranking); 8×8 / four qubits, i.e. a **single node**, not the tower; and a depolarizing-noise x-axis the project later closed as out of scope, so the survey content is the p=0 column. ⚠️ The caption must also reconcile `MULTI_AXIS + IQP` at **95.3%** there (8×8, one node, one seed) against **80.9%** in R2 (16×16, full tree, 21 seeds) — different tasks, not a regression.
+  * **🔴 THAT RETURN IS REVERSED — `encoding_ansatz_sweep.png` is RETIRED as of 2026-08-15.** The survey was re-run at 30 seeds and its numbers turned out **not to be reproducible** from the code in the tree (`~64%` for `MULTI_AXIS + IQP` against the logged `95.3%`, with both source files unmodified since commit `29591e8`). The retention argument above was sound in principle — the search space did need a record — but the fix is a re-run, not an archive exemption. **`results/figures/encoding_ansatz_survey.png` now serves that role and is generated from JSON.** See the 2026-08-15 entry.
+  * ~~**Two of the objections I raised do not hold for that figure.**~~ Half-right, and worth keeping for the reasoning. "HEA and ALT are not in the codebase" is indeed not an objection to a *survey* — and it was also **factually wrong**: both are in `benchmark_encodings_ansatze.py`, just not in `qttn_core.py`. The `p_crit` point stands: that contradiction is specific to `ansatz_comparison_noise.png`.
+  * ~~**What remains is scope, and it belongs in the caption rather than in an archive.**~~ **Superseded.** The scope facts were right (one seed; 8×8 single node; noise axis out of scope) but they were not what disqualified the figure. ⚠️ The reconciliation this bullet demanded — `95.3%` (8×8, node) vs `80.9%` (16×16, tree) as "different tasks, not a regression" — is **void**: at the *same* 8×8 single-node task the number is `~64%`, so the gap was never task difficulty.
   * ⚠️ **The `p_crit` contradiction remains recorded but NOT reconciled.** It blocks nothing while the retired figure is uncited, but resolve it before quoting any `p_crit` number. Original TODO retained below for the reasoning.
 * **~~📌 TODO (added 2026-08-07)~~ — regenerate the two ansatz figures on synthetic shapes with the ansatz of record.** `results/encoding_ansatz_sweep.png` and `results/ansatz_comparison_noise.png` both benchmark **HEA / IQP / ALT**, but the shipped model implements **`iqp` vs `strongly_entangling`** and HEA is not in the codebase — so neither figure describes an architecture that exists. Re-run noiseless at 16×16 on the coherent tree, multiple seeds, with the two ansätze actually implemented. Three defects compound here:
   1. **Wrong ansätze** (HEA retired before the architecture of record existed).
@@ -85,6 +86,43 @@ This log tracks the theoretical derivations, simulation results, noisy emulation
 ---
 
 ## Log Entries
+
+### [2026-08-15] Encoding × Ansatz Survey RE-RUN (30 seeds) — the 2026-07-17 Numbers Are Not Reproducible, and the Figure Is Retired
+
+* **Objective**: put the node-level survey on a data footing. Two things rested on the 2026-07-17 sweep and neither was checkable: the thesis quotes `MULTI_AXIS + IQP` at **95.3%** as the leading candidate, and **ALT** appears in the survey and then never again with no recorded disposition. The original produced **only a PNG — no JSON** — so nothing downstream could be verified against it.
+* **Config**: `rerun_encoding_ansatz_survey.py`, 4 encodings × 3 ansätze × **30 seeds**, noiseless only (the noise axis is out of scope). Same protocol as `harvest_sweeps()` — 8×8, single 4-qubit node, 512/128, 8 epochs, AdamW lr=0.03 wd=1e-4 — scored on the project convention (`pc.train_run` → `pc.summarise`, mean of last 5 epochs). 224 s wall for the whole grid.
+
+* **Results** (chance 25%, single-attribute ceiling 50%):
+
+  | encoding | hea | iqp | alt |
+  |---|---|---|---|
+  | **multi_axis** | `63.3 ± 3.4` | **`64.0 ± 3.1`** | `61.3 ± 3.7` |
+  | angle (`scalar_ry`) | `58.2 ± 3.5` | `59.6 ± 3.3` | `57.3 ± 2.8` |
+  | zz_map | `56.6 ± 3.9` | `56.5 ± 3.4` | `57.6 ± 3.9` |
+  | amplitude | `51.7 ± 2.2` | `52.3 ± 3.3` | `51.5 ± 2.4` |
+
+* **❌ THE HEADLINE NUMBERS FROM 2026-07-17 ARE NOT REPRODUCIBLE.** Replicating `harvest_sweeps()` exactly — fixed data seed 42, no torch seeding, single end-of-training eval — gives `61.7 / 63.3 / 64.1` across three repeats for `MULTI_AXIS + IQP`, against the logged **95.3%**. Everything that could explain a 30-point gap was checked and eliminated:
+  * `benchmark_encodings_ansatze.py` — one commit (`29591e8`, 2026-07-18, the day *after* the entry), never modified, no uncommitted changes.
+  * `synthetic_shapes.py` — same single commit, unmodified. Mode is `overlapping` in both (shared default).
+  * Protocol identical, **including the eval set size**: `95.3% = 122/128` and `96.9% = 124/128` exactly.
+  * Only uncontrolled variable: the environment (PennyLane is now 0.43.2; the July version is unrecorded). **I could not identify the mechanism and am not claiming one.**
+
+* **⚠️ BUT THE NUMBERS ARE RETIRED ON AN ARGUMENT THAT DOES NOT DEPEND ON THE RE-RUN.** `95.3%` on **one 4-qubit node at 8×8** exceeds the **`89.3%`** the *full 16-qubit coherent tree* reaches at 16×16 (R7, 2026-07-29). A quarter of the qubits, a quarter of the pixels, one node instead of a hierarchy — outscoring the entire tower. That ordering cannot be right whatever produced it.
+  * **This also voids the reconciliation the superseded README demanded.** That note required the caption to explain 95.3% (8×8, node) vs 80.9% (16×16, tree) as "different tasks, not a decline". At the *same* 8×8 single-node task the number is `~64%`, so the gap was never task difficulty.
+
+* **✅ THE ORDERING SURVIVES — NOTHING DOWNSTREAM MOVES.** `multi_axis` leads at every ansatz, which is exactly what R2 independently resolved at 16×16 on the tree (`+12.9`, limit 3.7). The encoding decision is untouched, and every architecture decision after it rests on R2, not on this survey.
+
+* **✅ FINDING 1 — THE HEA-OVER-IQP ORDERING WAS NEVER RESOLVABLE.** `run_r2_ansatz.py:8-10` records the original selection as choosing `MULTI_AXIS + IQP` (95.3%) over `MULTI_AXIS + HEA` (96.9%) "on parameter-efficiency grounds", which reads as picking the weaker arm. At 30 seeds the two are **tied at every encoding** — `multi_axis` is `63.3` vs `64.0` against a **1.7**-pt limit, and hea never leads resolvably anywhere. So there is no awkward "HEA won but we picked IQP" to explain: IQP is chosen from a tie on parameter count (8 vs 12 per node) and gate depth, which is the same reasoning `phase15_common.py:38-44` already records for the tree-level choice.
+
+* **✅ FINDING 2 — ALT NOW HAS A DISPOSITION, ON SUBSTANCE.** ALT is the only arm that loses resolvably anywhere, and only at the best encoding: `−2.8` vs iqp and `−2.1` vs hea at `multi_axis` (limits 1.8). Everywhere else it ties. The write-up can now say "surveyed, trailed at the best encoding, not carried forward" as a measured statement rather than an absence.
+
+* **⚠️ FINDING 3 — AMPLITUDE IS AT THE SINGLE-ATTRIBUTE CEILING, AND THE OLD SWEEP HID IT.** All three amplitude arms land at `51.5–52.3` against a 50.0 ceiling. At two qubits it is **not learning the colour–shape conjunction at all**. The 2026-07-17 entry reported `78.1%` and framed it as "maximum qubit compression … retaining model capacity". It does not retain the capacity that matters on this dataset. This is the one place where the re-run changes a *claim* rather than a level.
+
+* **Consequences**:
+  * `encoding_ansatz_sweep.png` **RETIRED** and moved back to `results/superseded/`, reversing the 2026-08-08 correction that returned it. The search-space role it was retained for is now served by `results/figures/encoding_ansatz_survey.png`, generated from JSON.
+  * `make_figures.fig_encoding_ansatz_survey()` added. Its docstring in `fig_encoding_ansatz()` was also corrected: it claimed "HEA and ALT are not in the shipped codebase", which is false — they are in `benchmark_encodings_ansatze.py`, just not in `qttn_core.py`.
+  * ⚠️ **Naming, which the write-up was conflating**: the survey's `hea` is a **star**-entangler (CNOTs from every child onto wire 0); the tree-level `strongly_entangling` is PennyLane's **ring**-entangler `StronglyEntanglingLayers`. They are different circuits and the labels are not interchangeable.
+* **Reproduce**: `conda run -n qnlp python -m qnlp.image_tower.classification.quantum.rerun_encoding_ansatz_survey --seeds-per-arm 30` → `results/encoding_ansatz_survey_rerun_results.json`.
 
 ### [2026-07-17] Log Initialization & Scope Alignment
 * **Activity**: Created the research log and set up the thesis investigation roadmap in [llm/quantum_investigation_roadmap.md](file:///Users/fotinoskyriakides/Desktop/Dev/qnlp/llm/quantum_investigation_roadmap.md).
@@ -180,6 +218,19 @@ This log tracks the theoretical derivations, simulation results, noisy emulation
   **[RETAINED WITH CAVEAT]** *Figure 3: Test accuracy of the 4-qubit QTTN model under depolarizing noise channels swept from p = 0.0 to p = 0.20. The red line shows model accuracy, and the blue dashed line represents the 25% random guess baseline. The model maintains high performance up to p = 0.02, demonstrating favorable noise-resilience characteristics.*
 
 ### [2026-07-17] Completed Task: Multi-Dimensional Ansatz & Data Encoding Benchmarks
+
+> [!CAUTION]
+> **⚠️ SUPERSEDED 2026-08-15 — DO NOT CITE THE ACCURACY FIGURES BELOW.** The `95.3–96.9%`,
+> `78.1%` and `89.8%` numbers in this entry are **not reproducible** from the code in the
+> tree; both source files are unmodified since commit `29591e8`, and re-running this exact
+> protocol gives `~64%` for `MULTI_AXIS + IQP`. `95.3%` on one 4-qubit node at 8x8 also
+> exceeds the `89.3%` the full 16-qubit coherent tree reaches at 16x16, which cannot be
+> right. The **encoding conclusion survives** (multi_axis leads, confirmed independently by
+> R2 on the tree); the **ansatz conclusion does not** (hea and iqp are tied at 30 seeds, so
+> the "IQP at 95.3% vs HEA at 96.9%" framing was never resolvable); and the **amplitude
+> conclusion is reversed** (it sits at the 50% single-attribute ceiling, not at 78.1%).
+> See the 2026-08-15 entry and `rerun_encoding_ansatz_survey.py`.
+
 * **Objective**: Evaluate 4 data encoding styles (Angle, Multi-Axis, Amplitude, ZZ Feature Map) against 3 ansatz architectures (HEA, IQP, ALT) on the 8x8 synthetic shapes dataset under depolarizing noise sweeps.
 * **Motivation**: Systematically map the complete trade-off space of QML image classifiers between qubit economy, parameter optimization overhead, noiseless classification capacity, and physical noise resilience.
 * **Narrative Fit**: This unified benchmark represents the completion of Phase 3 (Ansatz Expressibility & Optimization Benchmarks) of the thesis roadmap. It provides the empirical foundation to choose the final model architecture for the CLEVR scaling experiments.
@@ -1524,6 +1575,11 @@ Found while building the C2 combiner, which prints "seeds needed for the observe
 | — | **⚠️ BUDGET CAVEAT ON EVERY C3 ROW ABOVE** | — | — | — | **C3's quantum-vs-classical rows are all at 30 epochs, where the quantum colour head had not converged. At 90 epochs the verdicts change (colour: classical `+49.6` → tie; material: quantum `+8.8` → tie). The classical arms were NOT re-run at 90, so neither budget is privileged. Do not quote one table without the other.** |
 | 2026-07-28 | R4 corrected: classical CP bare (rank swept freely) | 16x16 Overlapping (1024/30) | Score, last-5 mean (21 seeds) | 56.7% ± 6.9 | 340 params, lr=0.003/bond_dim=4/rank=2. Matched-constraint arm for Question A.3. |
 | 2026-07-28 | R4 corrected: classical CP + residual + dropout | 16x16 Overlapping (1024/30) | Score, last-5 mean (21 seeds) | 88.4% ± 5.5 | 352 params. +31.7 vs bare — residual/dropout strongly load-bearing classically. |
+| — | **⚠️ THE 2026-07-17 ENCODING/ANSATZ ROWS ARE RETIRED** | — | — | — | **The `95.3–96.9%` and `78.1%` / `89.8%` figures from the single-node survey are NOT reproducible from the code in the tree (both source files unmodified since commit `29591e8`), and `95.3%` on one 4-qubit node at 8x8 exceeds the `89.3%` the full 16-qubit tree reaches at 16x16. Superseded by the 2026-08-15 re-run rows below. Do not cite the old numbers.** |
+| 2026-08-15 | Survey re-run: 4-qubit node, multi_axis × {hea, iqp, alt} | 8x8 Overlapping (512/128, 8 ep) | Score, last-5 mean (30 seeds) | 63.3% ± 3.4 / **64.0% ± 3.1** / 61.3% ± 3.7 | hea/iqp/alt. **hea vs iqp TIED** (+0.7, limit 1.7); ALT loses resolvably (−2.8 vs iqp, limit 1.8). |
+| 2026-08-15 | Survey re-run: 4-qubit node, angle (`scalar_ry`) × {hea, iqp, alt} | 8x8 Overlapping (512/128, 8 ep) | Score, last-5 mean (30 seeds) | 58.2% ± 3.5 / 59.6% ± 3.3 / 57.3% ± 2.8 | multi_axis leads scalar_ry at every ansatz — the direction R2 later resolves on the tree. |
+| 2026-08-15 | Survey re-run: 4-qubit node, zz_map × {hea, iqp, alt} | 8x8 Overlapping (512/128, 8 ep) | Score, last-5 mean (30 seeds) | 56.6% ± 3.9 / 56.5% ± 3.4 / 57.6% ± 3.9 | Entangling-at-encoding buys nothing here; all three tied. |
+| 2026-08-15 | Survey re-run: 2-qubit node, amplitude × {hea, iqp, alt} | 8x8 Overlapping (512/128, 8 ep) | Score, last-5 mean (30 seeds) | 51.7% ± 2.2 / 52.3% ± 3.3 / 51.5% ± 2.4 | ⚠️ **AT THE 50% SINGLE-ATTRIBUTE CEILING** — not learning the conjunction. The old sweep's `78.1%` "qubit compression retains capacity" claim does not hold. |
 
 
 

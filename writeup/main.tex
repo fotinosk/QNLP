@@ -60,11 +60,11 @@
 
 Tensor networks are a natural quantum-native architecture for image encoding, since their contraction structure mirrors the spatial hierarchy of an image. Several candidate architectures exist, but their relative merits under NISQ constraints have not been established empirically.
 
-We investigate a family of quantum image encoders spanning tree, matrix-product and MERA topologies, four data encodings and several variational ansätze, and characterise the properties that discriminate between them: the scaling of entanglement generation with entangling-gate density, gradient variance as a function of qubit count, depolarizing-noise tolerance, and classical simulability.
+We investigate a family of quantum image encoders spanning tree, matrix-product and MERA topologies, and narrow within the surviving topology across four data encodings, three variational ansätze and two readout protocols. Selection is driven by measured gradient variance as a function of qubit count, the information bandwidth of the readout, parameter efficiency, and the memory cost of classical simulation.
 
 The selected architecture is a coherent quantum tree tensor network, in which image patches are encoded on qubits and contracted hierarchically through entangling unitaries, with intermediate states passed between levels as qubits rather than measured. It is trained in noiseless simulation at the largest resolution that remains tractable.
 
-We evaluate on CLEVR against classical tensor-network and parameter-matched neural baselines. The quantum tower exceeds its parameter-matched neural counterpart on the majority of heads, and exceeds its direct classical analogue, the same tree with CP-decomposed nodes in place of unitaries, on shape and material classification indicating that the unitarity constraint does not reduce representational capacity at this scale. A variant carrying no positional parameters attains parity on spatial-relation classification, establishing that the tree topology encodes position implicitly. On a binding task with class-conditional marginals equalised by construction, tensor networks reach 91–93\%, while a parameter-matched MLP reaches 94.6\%.
+We evaluate on CLEVR against classical tensor-network and neural baselines. The quantum tower exceeds its direct classical analogue, the same tree with CP-decomposed nodes in place of unitaries, on shape classification while carrying 18\% fewer parameters, with parity on the remaining three attributes; an unstructured neural baseline of roughly twice the size leads on every attribute. The unitarity constraint therefore does not reduce representational capacity at this scale, though hierarchical contraction does not by itself close the gap to an unstructured network on perception. A variant carrying no positional parameters attains parity on spatial-relation classification, establishing that the tree topology encodes position implicitly. On a binding task with class-conditional marginals equalised by construction, where every classical architecture falls to chance under patch shuffling, classical tensor networks reach 91–93\% and a parameter-matched MLP 94.6\%; the quantum tree, carrying no positional parameters at all, separates the arrangements on 5 of 15 initialisations and peaks 8.1 standard deviations above chance.
 
 Substituting a tensor-network vision tower for frozen CLIP yields a vision-language model that is quantum-inspired end to end. On ARO, this model improves attribution accuracy from 70\% to 77.65\% and relation accuracy from 55.81\% to 59.78\%.
     
@@ -152,7 +152,7 @@ Consequently, this provides a rare opportunity to evaluate the exact same archit
 
 \section{Universal Quantum Circuit Mechanics}
 
-Unlike classical neural networks, which natively process and propagate continuous real-valued matrices, quantum machine learning models operate exclusively within a complex Hilbert space. As a results all quantum machine learning models operating on classical data need to select a way to encode this information onto quantum states as well as the foundational components of the variational quantum circuits.
+Unlike classical neural networks, which natively process and propagate continuous real-valued matrices, quantum machine learning models operate exclusively within a complex Hilbert space. As a result, all quantum machine learning models operating on classical data need to select a way to encode this information onto quantum states as well as the foundational components of the variational quantum circuits.
 
 \subsection{Data Encoding Strategies}
 Before quantum computation can occur, classical information must be deterministically mapped into a quantum state. This dictates how effectively the model can utilize the Hilbert space.
@@ -164,20 +164,31 @@ Amplitude Encoding \cite{amplitude_encoding} maps an entire vector of normalized
 \end{equation}
 While this provides an optimal, exponential compression of classical data into the quantum Hilbert space, its physical implementation requires deep, dense circuits that are often prohibitively difficult to train and execute on NISQ devices.
 
-\subsubsection{Scalar Rotation Encoding (Scalar $R_y$)}
+\subsubsection{Scalar Rotation Encoding (\texttt{scalar\_ry})}
+\label{sec:enc_scalar_ry}
 An alternative is angle embedding \cite{angle_embedding}, which embeds a classical data point $x_i$ into the amplitude of a single qubit state by applying a Pauli-Y rotation:
 \begin{equation}
     |\psi(x_i)\rangle = R_y(x_i) |0\rangle = \cos\left(\frac{x_i}{2}\right)|0\rangle + \sin\left(\frac{x_i}{2}\right)|1\rangle
 \end{equation}
-While highly gate-efficient and NISQ-friendly, this approach confines the encoded state strictly to a single plane of the Bloch sphere, significantly underutilizing the qubit's available state space.
+While highly gate-efficient and NISQ-friendly, this approach confines the encoded state strictly to a single plane of the Bloch sphere, significantly underutilizing the qubit's available state space. This encoding is referred to as \texttt{scalar\_ry} throughout; it appears under the alias \texttt{angle} in the single-node survey code, where it denotes the identical circuit.
 
-\subsubsection{Multi-Axis Encoding}
+\subsubsection{Multi-Axis Encoding (\texttt{multi\_axis})}
+\label{sec:enc_multi_axis}
 To increase representational capacity without increasing the qubit count, we evaluate a multi-axis encoding strategy \cite{data_reuploading}. This approach distributes the classical feature across multiple rotational axes sequentially:
 \begin{equation}
     |\psi(x_i)\rangle = R_z(x_i) R_y(x_i) R_x(x_i) |0\rangle
 \end{equation}
 By explicitly maximizing the utilization of the Bloch sphere, multi-axis encoding embeds the classical data into a richer, more complex initial quantum state prior to entanglement.
+
+\subsubsection{Second-Order Pauli-Z Feature Map (\texttt{zz\_map})}
+\label{sec:enc_zz_map}
+The three strategies above are all product encodings: each classical feature is written onto its own qubit independently, so the encoded state carries no correlation between features before the ansatz acts. To test whether entangling the data \textit{at encoding time} is worthwhile, we additionally evaluate the second-order Pauli-Z feature map of Havlíček et al.\ \cite{havlicek2019}. Hadamards prepare a uniform superposition, single-qubit $R_z$ rotations write each feature, and a ring of $ZZ$ couplings writes the pairwise products:
+\begin{equation}
+    |\psi(\mathbf{x})\rangle = \left[ \prod_{i} \text{IsingZZ}\big(x_i x_{i+1}\big) \right] \left[ \bigotimes_{i} R_z(x_i) \right] H^{\otimes N} |0\rangle^{\otimes N}
+\end{equation}
+where the product runs over adjacent wire pairs on a ring. The resulting state is entangled before the variational layer is applied, which raises the expressibility of the embedding but also makes it the most gate-expensive of the four.
 \subsection{Parameterized Ansatz Design}
+\label{sec:ansatz_design}
 Once the data is encoded, the node must process it to extract relational features. This is achieved by applying a parameterized unitary operation $U(\theta)$, known as the ansatz. The structural design of the ansatz acts as the model's inductive bias.
 \subsubsection{Hardware Efficient Ansatz (HEA)}
 A standard baseline in variational quantum machine learning is the Hardware Efficient Ansatz (HEA) \cite{kandala2017}. This architecture applies successive layers of arbitrary single-qubit rotations followed by heavily connected entanglement gates (such as a ring of CNOTs). The unitary for a single layer $l$ operating on $N$ qubits is expressed as:
@@ -185,6 +196,8 @@ A standard baseline in variational quantum machine learning is the Hardware Effi
     U_{HEA}(\theta_l) = W_{ent} \prod_{j=1}^N R(\theta_{j,l})
 \end{equation}
 where $R$ represents parameterized $SU(2)$ rotations and $W_{ent}$ is the multi-qubit entangling array. While incredibly expressive, deep HEA circuits are famously susceptible to barren plateaus, where the variance of the gradient vanishes exponentially.
+
+Two concrete instantiations of this family appear in the experiments that follow, and the distinction matters when reading the results tables. The broad single-node survey uses a \textit{star-entangler} variant, in which an $R_z$--$R_y$--$R_z$ rotation triple on each wire is followed by CNOTs from every child wire onto a single parent wire; this is the arm labelled \texttt{hea}. The ranked hybrid-tree evaluation instead uses PennyLane's \texttt{StronglyEntanglingLayers}, the canonical ring-entangler realisation, and is the arm labelled \texttt{strongly\_entangling}. Both are hardware-efficient in the sense defined above and differ only in entanglement topology; they are not the same circuit, and the two labels are not interchangeable.
 \subsubsection{Alternating Layered Ansatz (ALT)}
 To reduce the CNOT gate depth and explore different trainability profiles, we evaluate an Alternating Layered Ansatz (ALT). This architecture applies layers of parameterized Pauli-Y rotations followed by a "brickwork" entanglement structure, where CNOT gates alternate their connectivity at each layer (e.g., coupling even pairs in layer $l$, and odd pairs in layer $l+1$):
 \begin{equation}
@@ -215,11 +228,13 @@ While the \texttt{classical\_bare} arm matches the quantum constraints, standard
 A critical requirement for interpretability is calibrating task difficulty. We introduced a standard, non-hierarchical Multi-Layer Perceptron (\texttt{mlp\_reference}). This model is not a tensor network and serves only to benchmark the dataset. Without it, a low score from the CP-TTN would be uninterpretable, it could indicate that the dataset is extremely difficult, or that the hierarchical tensor merge is a poor fit for the task. If the MLP scores highly while the tensor networks fail, it isolates the failure to the topological design rather than classical computation itself.
 
 \subsection{Simulation Constraints and the Density Matrix Wall}
+\label{sec:density_wall}
 Before proceeding to optimization, it is crucial to establish the computational limits that bounded these architectural choices. To simulate realistic quantum noise, frameworks like PennyLane must compute the full density matrix, an operation that scales as $\mathcal{O}(4^N)$. For our 16-qubit coherent circuit, a noisy simulation using \texttt{default.mixed} requires approximately 68GB of memory per instance. 
 At this scale, batched gradient descent—which is strictly required for neural network training—becomes computationally intractable. This hardware and library limitation forced the complete abandonment of noisy simulation during training. Furthermore, it forced the rejection of spatial ancillas, as adding even a single ancilla qubit exponentially worsened the memory bottleneck. Consequently, the architecture and experiments were strictly bounded to noiseless statevector simulation, which scales at $\mathcal{O}(2^N)$, utilizing PennyLane's \texttt{default.qubit} and \texttt{lightning.qubit} devices. Spatial ancillas and noisy simulations were run only for synthetic data for this reason. 
 
 % ---------------------------------------------------------
 \section{Topology-Specific Mechanics: TTN Readout Protocols}
+\label{sec:readout_protocols}
 The final component required to fully define the Quantum Coherent Tree is the classical readout mechanism. Unlike 1D Matrix Product States where information flows sequentially, or standard variational circuits where all qubits are measured simultaneously, a Tree Tensor Network traces out (discards) the majority of its qubits at each hierarchical layer. In our 16-to-4-to-1 quad-tree, 12 leaf qubits are traced out in the first layer, leaving only 4 parent qubits to advance to the root node. 
 Consequently, all spatial reasoning and feature extraction must funnel into this final root node before measurement. Extracting a classical prediction from these surviving qubits presents a unique topological challenge.
 
@@ -241,21 +256,8 @@ In our simulated 16-qubit architecture, the inter-node connection is restricted 
 The single marginal readout fails primarily because of this restricted internal bandwidth. If computational resources permitted a larger bond dimension—by allocating multiple qubits per node connection to exponentially increase $\chi$—a single-qubit expectation value at the root would theoretically be sufficient, as the internal bonds would possess the capacity to losslessly propagate complex feature representations up the hierarchy. However, because we are constrained by the statevector simulation limit ($\mathcal{O}(2^N)$) and cannot physically thicken the internal quantum bonds, utilizing a multi-wire readout on the surviving root qubits acts as a necessary theoretical workaround. It artificially widens the effective bond dimension at the very top of the tree, compensating for the restricted information flow inherent to our single-qubit bond topology.
 
 
-% ==========================================
-% CHAPTER 3: SYNTHETIC DATA
-% ==========================================
-% \chapter{Synthetic Data: Topological Optimization and Trainability}
-
-% \section{Dataset and Aims}
-% % - Introduce the 16x16 Synthetic Shapes dataset.
-% % - Aims: Establish baseline perception, avoid barren plateaus, and resolve the core node architecture before scaling.
-
-% To evaluate the candidate tensor network architectures, we introduce a procedurally generated Synthetic Shapes dataset of 16×16 RGB images featuring four geometric classes (circles, squares, triangles, crosses). To prevent trivial coordinate memorization, a random spatial jitter is applied alongside Gaussian noise to simulate real-world channel fluctuations. The dataset operates in three modes:\textit{color-only}, \textit{shape-only}, and \textit{overlapping} (decorrelated shape and color). The procedural generation code and visual examples are provided in Appendix \ref{appendix:synthetic_data}.
-
-% The primary aim of this phase is to establish a rigorous perception baseline and explicitly test quantum topological trainability. A fundamental roadblock in scaling Variational Quantum Circuits is the barren plateau phenomenon \cite{barren_plateaus}, where gradients vanish exponentially as a function of qubit count and circuit depth. Before advancing to complex datasets, we must verify whether the structural design of the candidate topologies inherently mitigates this issue. This controlled, low-resolution environment allows us to rapidly monitor gradient variance, diagnose the onset of barren plateaus, and systematically resolve core architectural components—specifically the classical-to-quantum encoding strategy, the parameterized ansatz, and the classical readout mechanism—ensuring the surviving architectures are structurally viable and optimizable.
-
-
 \chapter{Topological Optimization (Synthetic Data)}
+\label{ch:synthetic}
 % This chapter details the empirical testing of the candidate architectures defined in Chapter 3.
 
 \section{Dataset and Aims}
@@ -282,7 +284,7 @@ To execute the four evaluations outlined above, we employ a strict, elimination-
 
 All candidate models are trained using the Adam optimizer with a categorical cross-entropy loss function. To ensure a fair, best-case comparison, hyperparameters such as learning rates and weight initialization bounds are independently tuned for each architecture. 
 
-Due to the $\mathcal{O}(4^N)$ memory limits of noisy emulation (the Density Matrix Wall established in Section 3.4), all quantum training is executed via exact statevector simulation using PennyLane's \texttt{lightning.qubit} device. This bypasses the memory bottleneck while maintaining absolute mathematical fidelity for the unitary operations. Only the single, most parameter-efficient and performant configuration to survive this rigorous protocol is selected to advance to the CLEVR benchmark.
+Due to the $\mathcal{O}(4^N)$ memory limits of noisy emulation (the Density Matrix Wall established in Section \ref{sec:density_wall}), all quantum training is executed via exact statevector simulation using PennyLane's \texttt{lightning.qubit} device. This bypasses the memory bottleneck while maintaining absolute mathematical fidelity for the unitary operations. Only the single, most parameter-efficient and performant configuration to survive this rigorous protocol is selected to advance to the CLEVR benchmark.
 
 \section{Optimization Results}
 The following sections detail the empirical findings from the optimization sweeps, sequentially resolving the topological trainability, the optimal ansatz-encoding pairing, and the readout bottleneck.
@@ -305,31 +307,31 @@ For the QTTN, this empirical success is theoretically guaranteed. Pesah et al. \
 
 
 \subsection{Ansatz and Encoding Investigation}
-% TODO: this needs some work, for example it talks about good results from IQP but not HEA, why was HEA abandonded? 
 
 Having established the baseline trainability of the QTTN topology, the next phase of optimization focused on its internal node mechanics. The representational capacity of a quantum node is dictated by the pairing of its classical-to-quantum encoding strategy and its parameterized ansatz. 
 
 \subsubsection{Documenting the Search Space}
-To broadly explore the available architectural space, we executed a comprehensive combinatorial sweep across four encoding strategies (\texttt{angle}, \texttt{multi\_axis}, \texttt{amplitude}, and \texttt{zz\_map}) and three ans\"{a}tze (HEA, ALT, and IQP). 
+\label{sec:search_space}
+To broadly explore the available architectural space, we executed a combinatorial sweep across the four encoding strategies defined in Section \ref{sec:enc_scalar_ry}--\ref{sec:enc_zz_map} (\texttt{scalar\_ry}, \texttt{multi\_axis}, \texttt{amplitude} and \texttt{zz\_map}) and the three ans\"{a}tze of Section \ref{sec:ansatz_design} (HEA, ALT and IQP), giving twelve configurations. The results are shown in Figure \ref{fig:encoding_ansatz_survey}.
 
-As illustrated in Figure \ref{fig:encoding_ansatz_sweep}, this initial sweep served as a broad, exploratory survey of the theoretical landscape. It is crucial to define the strict constraints of this specific diagnostic:
-\begin{enumerate}
-    \item It was executed on a downsampled $8 \times 8$ dataset utilizing only a single 4-qubit quantum node, rather than the full hierarchical tree.
-    \item It was evaluated using only a single initialization seed per configuration.
-    \item While the x-axis measures simulated depolarizing noise, subsequent project scoping closed explicit noise tolerance as out of scope; thus, the relevant survey content is strictly the $p=0.000$ noiseless column.
-\end{enumerate}
+Two constraints bound what this diagnostic can establish. First, it was executed on a downsampled $8 \times 8$ dataset using a single 4-qubit quantum node rather than the full hierarchical tree, so it characterises node-level circuits and not the tower. Second, the four-class dataset admits a \textit{single-attribute ceiling} at $50\%$: colour alone separates two of the four classes from the other two, as does shape, so either attribute in isolation caps at $50\%$ and any score materially above it requires binding colour to shape. This makes the ceiling, rather than the $25\%$ chance floor, the meaningful reference line.
 
 \begin{figure}[hbt!]
     \centering
-    \includegraphics[width=1.0\textwidth]{ch3/encoding_ansatz_sweep.png}
-    \caption{Broad configuration sweep of 4 encodings $\times$ 3 ans\"{a}tze at the single-node ($8 \times 8$) scale using one seed per configuration. The relevant survey content is the $p=0.000$ column, demonstrating the general superiority of the \texttt{multi\_axis} encoding.}
-    \label{fig:encoding_ansatz_sweep}
+    \includegraphics[width=1.0\textwidth]{ch3/encoding_ansatz_survey.png}
+    \caption{Node-level survey of the search space: four encodings $\times$ three ans\"{a}tze on a single 4-qubit node at $8 \times 8$, 30 seeds per configuration, noiseless. The \texttt{multi\_axis} encoding leads at every ansatz, while \texttt{amplitude} sits at the $50\%$ single-attribute ceiling.}
+    \label{fig:encoding_ansatz_survey}
 \end{figure}
 
-The primary value of this single-node survey was identifying the most promising candidates for the hierarchical tree. Notably, the \texttt{multi\_axis} + IQP configuration achieved $95.3\%$ accuracy at $p=0$. However, this high metric is a direct artifact of the simplified $8 \times 8$ single-node task. To rigorously rank configurations, a vastly stricter statistical evaluation was required on the full image resolution.
+Three observations follow. The \texttt{multi\_axis} encoding leads at every ansatz, reaching $64.0\%$ against $59.6\%$ for \texttt{scalar\_ry}, $56.5\%$ for \texttt{zz\_map} and $52.3\%$ for \texttt{amplitude}. The direction of that result is confirmed independently, and at far greater statistical strength, on the full tree in the next section.
+
+The \texttt{amplitude} encoding, by contrast, sits at $51.5$--$52.3\%$ across all three ans\"{a}tze --- that is, exactly at the single-attribute ceiling. Compressing four patches into two qubits is the most qubit-efficient option available, but at this width the encoding does not learn the colour--shape conjunction at all; it resolves one attribute and stops. Qubit economy is therefore not free, and \texttt{amplitude} is eliminated here rather than carried forward.
+
+The ansatz, however, is \textit{not} resolved by this survey. HEA and IQP are statistically tied at every encoding, differing by $0.7$ points at \texttt{multi\_axis} against a resolution limit of $1.7$. ALT is the only arm that loses resolvably, and only at the best encoding ($-2.8$ against IQP and $-2.1$ against HEA, both past their limits); it is not carried forward. The two surviving ans\"{a}tze were therefore taken to a stricter evaluation at the full image resolution, on the full tree.
 
 \subsubsection{Rigorous Hybrid-Tree Evaluation}
-To definitively resolve the optimal configuration, the top candidates from the survey were subjected to a rigorous evaluation using 21 independent random seeds on the $16 \times 16$ dataset (1024 train / 64 test). 
+\label{sec:hybrid_eval}
+To definitively resolve the optimal configuration, the surviving candidates from the survey were subjected to a rigorous evaluation using 21 independent random seeds on the $16 \times 16$ dataset (1024 train / 64 test). At this scale the hardware-efficient arm is PennyLane's standard \texttt{StronglyEntanglingLayers}, denoted \texttt{strongly\_entangling}, in preference to the hand-rolled node circuit used in the survey; the two are members of the same family but are not identical circuits, so the absolute figures are not comparable across the two scales.
 
 Importantly, this ranking was established using a \textit{hybrid} tree architecture (the measure-and-re-encode topology). In this framework, every node builds its own 4-qubit device, and the levels communicate by passing classical scalar measurements, completely bypassing the need for a massive coherent 16-qubit register. Statistical significance across the configurations was determined using Welch's unequal variances t-test to calculate the Minimum Detectable Effect (MDE).
 
@@ -342,7 +344,7 @@ As shown in Figure \ref{fig:encoding_ansatz}, transitioning from the \texttt{sca
     \label{fig:encoding_ansatz}
 \end{figure}
 
-With the encoding established, we evaluated the parameterized ansatz, comparing the \texttt{strongly\_entangling} baseline against the structured \texttt{iqp} ansatz. Unlike the encoding choice, the empirical results revealed that the two ans\"{a}tze are statistically tied in peak accuracy on the hybrid tree. The IQP ansatz achieved a mean accuracy of $80.9\%$ (a realistic metric for the complex $16 \times 16$ task, correcting the inflated $95.3\%$ single-node survey result), edging out the strongly entangling ansatz at $79.3\%$. However, as shown in Figure \ref{fig:ansatz_comparison}, this $+1.6$ point difference falls strictly below the statistical resolution limit ($\text{MDE} = 4.8$).
+With the encoding established, we evaluated the parameterized ansatz, comparing the \texttt{strongly\_entangling} baseline against the structured \texttt{iqp} ansatz. The result reproduces the survey's verdict at greater strength: the two ans\"{a}tze are statistically tied. The IQP ansatz achieved a mean accuracy of $80.9\%$, edging out the strongly entangling ansatz at $79.3\%$, but as shown in Figure \ref{fig:ansatz_comparison} this $+1.6$ point difference falls strictly below the statistical resolution limit ($\text{MDE} = 4.8$). The ansatz is therefore unresolved on accuracy at both scales, and the choice must be made on other grounds.
 
 \begin{figure}[hbt!]
     \centering
@@ -351,7 +353,7 @@ With the encoding established, we evaluated the parameterized ansatz, comparing 
     \label{fig:ansatz_comparison}
 \end{figure}
 
-Despite the statistical tie in raw accuracy, the \texttt{iqp} ansatz was selected for two critical structural reasons. First, the IQP ansatz demonstrated a tighter variance across the 21 seeds (standard deviation of $4.9$ vs $9.7$), indicating higher training stability. Second, the IQP circuit enforces a rigid inductive bias using commuting, diagonal operations, which requires significantly shallower physical gate depth.
+Despite the statistical tie in raw accuracy, the \texttt{iqp} ansatz was selected for two structural reasons. First, it demonstrated a tighter spread across the 21 seeds (standard deviation of $4.9$ vs $9.7$), indicating more stable training, which buys resolution on every comparison downstream. Second, the IQP circuit enforces a rigid inductive bias using commuting, diagonal operations, which requires a shallower physical gate depth. Since the accuracy comparison is a tie at both the node and the tree scale, these are the operative criteria; the two arms are allocated identical parameter budgets here, so parameter economy does not discriminate between them.\footnote{The two ans\"{a}tze share a $[\,\text{layers} \times \text{qubits} \times 3\,]$ weight tensor so that the arms are exactly parameter-matched, of which IQP uses two of the three rotation columns. At the single-node scale of the survey, where the circuits were implemented independently, IQP is genuinely the cheaper of the two (8 parameters against 12).}
 
 This winning node configuration—the highly expressive \texttt{multi\_axis} encoding paired with the stable, shallow \texttt{iqp} ansatz—was subsequently adopted and ported directly into the fully coherent 16-qubit QTTN (evaluated later in this chapter) as the architecture of record.
 
@@ -360,7 +362,7 @@ This winning node configuration—the highly expressive \texttt{multi\_axis} enc
 % - State the finding: Transitioning to the 4-wire multi-Pauli readout closed a massive 43-point accuracy gap.
 % - FIGURES: Reference readout_bottleneck.png.
 
-Following the resolution of the internal node mechanics, we evaluated the final component of the architecture: the classical readout protocol. As theorized in Section 3.3.3, the hierarchical tensor topology aggressively traces out leaf qubits at each layer, forcing all spatial reasoning to funnel into the final root node. 
+Following the resolution of the internal node mechanics, we evaluated the final component of the architecture: the classical readout protocol. As theorized in Section \ref{sec:readout_protocols}, the hierarchical tensor topology aggressively traces out leaf qubits at each layer, forcing all spatial reasoning to funnel into the final root node.
 
 In an ideal, unconstrained physical quantum computer, this severe information funnel would be resolved by simply increasing the bond dimension between nodes (i.e., passing multiple qubits from the leaf layers up to the root, exponentially increasing $\chi$). Given a sufficiently large bond dimension, taking the expectation value of a single marginal qubit at the root would theoretically provide enough bandwidth for the classical loss function to train the network.
 
@@ -382,6 +384,7 @@ It is important to state explicitly that while this multi-readout protocol is st
 \end{figure}
 
 \subsection{Dropout and Residuals: Porting Classical Mechanisms}
+\label{sec:ablations}
 % - Detail the noise sweeps: Present the empirical effect of simulated quantum noise (e.g., depolarizing channels) on the surviving ansätze. Which ansatz was most resilient?
 % - Detail the ablation tests: Classical residuals and spatial ancilla qubits failed to justify their parameter cost or triggered the Density Matrix Wall, leading to their rejection.
 % - FIGURES: Reference ablations_and_noise.png.
@@ -407,31 +410,52 @@ The \texttt{mixed\_channel} approach—our attempt to port ResNet skip connectio
 Finally, the noise degradation sweep revealed that the simple \texttt{baseline} architecture was notably more resilient to depolarizing channels than any of the complex alternatives, and that noise strictly degraded performance rather than acting as a beneficial "Quantum Dropout" regularizer. Consequently, classical residuals and spatial ancillae were deliberately discarded. The lean, baseline node architecture proved to be the mathematically optimal balance of accuracy, hardware efficiency, and noise resilience.
 
 \section{Model Parameter Efficiency}
-% This is the climax of the chapter: pitting the optimized quantum node against the classical controls.
-% - State the parameter counts: 
-%    * mlp_reference: 999 parameters
-%    * classical_bare: 428 parameters (tuned CP rank)
-%    * classical_full: 352 parameters
-%    * quantum_coherent: 287 parameters (using unshared level-1 weights)
-% - The Verdict: The quantum node beats the classical CP node by +9.7 points while using 33% fewer parameters, proving the unitary constraint acts as a powerful structural regularizer.
-% - FIGURES: Reference model_comparison.png.
 
-This phase represents the climax of the architectural investigation: pitting the fully optimized quantum tensor network against classical tensor and neural benchmarks to probe parameter efficiency.
-For this final evaluation, the winning node configuration—the \texttt{multi\_axis} encoding paired with the \texttt{iqp} ansatz and multi-Pauli readout—was ported into a fully coherent 16-qubit QTTN. We compared this \texttt{quantum\_coherent} model against three classical baselines designed to test the specific efficacy of the tensor structure:
+This section pits the fully optimized quantum tensor network against classical tensor and neural benchmarks to probe parameter efficiency. The winning node configuration---the \texttt{multi\_axis} encoding paired with the \texttt{iqp} ansatz and the multi-Pauli readout---was ported into a fully coherent 16-qubit QTTN and compared against five baselines:
+
 \begin{enumerate}
-    \item \textbf{\texttt{mlp\_reference} (999 parameters):} A standard, unstructured Multi-Layer Perceptron to establish the classical accuracy ceiling of the dataset.
-    \item \textbf{\texttt{classical\_bare} (428 parameters):} A classical tensor network utilizing Canonical Polyadic (CP) decomposition with a tuned rank, serving as the direct structural analog to the quantum tree.
-    \item \textbf{\texttt{classical\_full} (352 parameters):} An optimized classical tensor network featuring added non-linearities and normalization.
-    \item \textbf{\texttt{quantum\_coherent} (287 parameters):} Our fully coherent 16-qubit QTTN, utilizing unshared level-1 weights to maximize expressivity within its hardware constraints.
+    \item \textbf{\texttt{mlp\_reference}:} A standard, unstructured Multi-Layer Perceptron, deliberately over-provisioned to establish the accuracy ceiling of the dataset.
+    \item \textbf{\texttt{mlp\_param\_matched}:} The same architecture shrunk to approximately the quantum model's parameter budget, which separates the effect of structure from the effect of capacity.
+    \item \textbf{\texttt{classical\_bare}:} A classical tensor network using Canonical Polyadic (CP) decomposition with a swept rank --- the direct structural analogue to the quantum tree under matched constraints, with no residual connections and no dropout.
+    \item \textbf{\texttt{classical\_full}:} The same CP tree equipped with the residual connections and dropout that the quantum node was shown in Section \ref{sec:ablations} not to benefit from.
+    \item \textbf{\texttt{quantum\_hybrid}:} The measure-and-re-encode tree of Section \ref{sec:hybrid_eval}, retained here to quantify what passing intermediate states as qubits rather than as classical scalars is worth.
 \end{enumerate}
-The empirical results of this head-to-head comparison are illustrated in Figure \ref{fig:model_comparison}.
+
+\begin{table}[hbt!]
+    \centering
+    \begin{tabular}{l c c}
+        \toprule
+        \textbf{Architecture} & \textbf{Parameters} & \textbf{Accuracy} \\
+        \midrule
+        \texttt{mlp\_reference}    & 999 & $96.0 \pm 1.5$ \\
+        \midrule
+        \textbf{\texttt{quantum\_coherent}} & \textbf{287} & $\mathbf{89.3 \pm 3.9}$ \\
+        \texttt{classical\_full} (CP + residual + dropout) & 352 & $88.4 \pm 5.5$ \\
+        \texttt{classical\_bare} (CP) & 428 & $79.6 \pm 10.3$ \\
+        \texttt{quantum\_hybrid} & 211 & $79.4 \pm 8.0$ \\
+        \texttt{mlp\_param\_matched} & 257 & $70.5 \pm 18.1$ \\
+        \bottomrule
+    \end{tabular}
+    \caption{Parameter efficiency on $16 \times 16$ synthetic shapes (1024 train / 64 test, scored on the mean of the last five epochs). The coherent quantum tree is the second most accurate model in the comparison at less than a third of the parameters of the model above it.}
+    \label{tab:model_comparison}
+\end{table}
+
+The results are given in Table \ref{tab:model_comparison} and Figure \ref{fig:model_comparison}. Three of the four comparisons resolve against the Welch limit, and the fourth is a tie that matters.
+
 \begin{figure}[hbt!]
     \centering
     \includegraphics[width=1.0\textwidth]{ch3/model_comparison.png}
-    \caption{Final parameter efficiency comparison. The 287-parameter coherent QTTN outperforms the structurally equivalent classical tensor network despite operating with a strict parameter deficit, proving the efficacy of unitary regularization.}
+    \caption{Final parameter efficiency comparison. The 287-parameter coherent QTTN outperforms the structurally equivalent classical tensor network despite a strict parameter deficit, and ties the augmented classical tree that carries residual connections and dropout.}
     \label{fig:model_comparison}
 \end{figure}
-The \texttt{quantum\_coherent} model successfully demonstrated extreme parameter efficiency. Despite utilizing $33\%$ fewer parameters than the tuned \texttt{classical\_bare} CP tensor network, the quantum model achieved a $+9.7$ point increase in classification accuracy. This result provides compelling empirical evidence that the strict unitary constraint inherent to quantum circuits does not merely restrict the model; rather, it acts as a powerful, naturally occurring structural regularizer that forces the network to learn highly generalizable spatial representations with a remarkably low parameter footprint.
+
+Against \texttt{classical\_bare}, its direct structural analogue, the quantum model gains $+9.7$ points (limit $6.3$) while using $33\%$ fewer parameters. This is the central result of the chapter: under matched constraints the unitary restriction does not cost representational capacity, and on this task it appears to act as a structural regularizer rather than a handicap.
+
+Against \texttt{classical\_full} the two are \textit{tied} ($89.3$ against $88.4$). This is worth stating explicitly rather than presenting the \texttt{classical\_bare} comparison alone, because it is the stronger claim of the two: the quantum tree matches the best classical tensor network in the study while using $19\%$ fewer parameters \textit{and} without the residual connections and dropout that the classical arm depends on --- mechanisms which, as Section \ref{sec:ablations} showed, actively harm the quantum node when ported to it. The classical tree needs them; the quantum tree reaches the same accuracy without them.
+
+Against \texttt{quantum\_hybrid} the coherent tree gains $+9.9$ points (limit $5.7$), which is what justifies the coherent topology over the simpler measure-and-re-encode design. Against \texttt{mlp\_param\_matched} it gains $+18.8$ points (limit $9.0$), establishing that at this parameter budget the hierarchical contraction is doing work that an unstructured network of the same size cannot.
+
+Two qualifications belong with these numbers. First, the 999-parameter \texttt{mlp\_reference} leads the entire comparison at $96.0\%$; the claim here concerns the quantum node against its \textit{structural} counterparts at matched capacity, not against classical vision at unrestricted capacity. Second, the classical arms were hyperparameter-tuned while the quantum arm inherited its learning rate from an earlier task, so the comparison is conservative in the quantum model's favour.
 
 
 \section{Architectural Verdict}
@@ -439,12 +463,8 @@ The \texttt{quantum\_coherent} model successfully demonstrated extreme parameter
 
 Following the exhaustive empirical diagnostics conducted across this chapter, the optimal architectural configuration of the model has been definitively resolved. 
 The fully coherent, 287-parameter Quantum Tree Tensor Network (QTTN)—constructed utilizing the \texttt{multi\_axis} encoding strategy, the parameter-efficient \texttt{iqp} ansatz, and a multi-Pauli top-layer readout—has mathematically proven its trainability, stability, and extreme parameter efficiency on synthetic spatial reasoning tasks. 
-Having successfully established this robust perception baseline, this specific quantum architecture, alongside its classical tensor controls (\texttt{classical\_bare} and \texttt{classical\_full}), will advance to the next phase of the investigation. Code for the 3 models can be found in the appendix \ref{appendix:models}.
+Having successfully established this robust perception baseline, this specific quantum architecture, alongside its classical tensor controls (\texttt{classical\_bare} and \texttt{classical\_full}), will advance to the next phase of the investigation. Definitions for all three models are given in Appendix \ref{appendix:models}.
 
-
-% ==========================================
-% CHAPTER 4: CLEVR
-% ==========================================
 
 % ==========================================
 % CHAPTER 5: CLEVR
@@ -625,6 +645,7 @@ responds to, not whether the information could be extracted by other means.
 % CHAPTER 6: ARO
 % ==========================================
 \chapter{ARO: Vision-Language Integration}
+\label{ch:aro}
 
 Having established the compositional capabilities of tensor topologies on isolated vision tasks, the final phase integrates the quad-tree architecture into a full Vision-Language Model (VLM) via the Attribution, Relation, and Order (ARO) benchmark. 
 
@@ -1098,6 +1119,9 @@ def get_synthetic_shapes_loaders(
 
 \chapter{Model Architectures}
 \label{appendix:models}
+
+This appendix lists the model definitions referenced in the main text. The first two listings are the arms compared in Chapter \ref{ch:synthetic}: \texttt{CoherentQTTNClassifier} is the \texttt{quantum\_coherent} arm, and \texttt{ClassicalTTNClassifier} provides both the \texttt{classical\_bare} and \texttt{classical\_full} arms, which differ only by the residual and dropout flags. The third listing, \texttt{CPQuadRankLayer}, belongs to Chapter \ref{ch:aro} rather than to the synthetic study: it is the classical tensor node of the DisCoViz vision tower, and it is included here so that the two CP implementations can be compared directly.
+
 \section*{Code Listing: \texttt{CoherentQTTNClassifier}}
 The fully coherent 16-qubit Quantum Tree Tensor Network (QTTN) deployed in Task R7. Unlike the measure-and-re-encode hybrid used for node-level optimization, this architecture maintains quantum coherence across the entire tree, applying unitaries directly to surviving qubits until the final multi-Pauli measurement.
 

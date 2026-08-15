@@ -265,6 +265,81 @@ def fig_readout():
 
 ANSATZ_C = {"strongly_entangling": "#E69F00", "iqp": "#0072B2"}
 
+# The single-node survey uses the three node-level ansatz names, which are NOT
+# the same circuits as the two tree-level names above: `hea` is a star-entangler
+# (CNOTs from every child onto wire 0), whereas `strongly_entangling` is
+# PennyLane's ring-entangler StronglyEntanglingLayers.
+SURVEY_ANSATZ_C = {"hea": "#E69F00", "iqp": "#0072B2", "alt": "#009E73"}
+SURVEY_ENCODINGS = ("multi_axis", "angle", "zz_map", "amplitude")
+SURVEY_ANSATZE = ("hea", "iqp", "alt")
+
+
+def fig_encoding_ansatz_survey():
+    """Replaces the retired encoding_ansatz_sweep.png.
+
+    The original survey ran this same 4x3 grid at 8x8 on a single 4-qubit node
+    with ONE seed per config and produced only a PNG -- no JSON -- so nothing
+    downstream could be checked against it. Its headline numbers
+    (multi_axis+IQP 95.3%, multi_axis+HEA 96.9%) are NOT reproducible from the
+    code in the tree: `benchmark_encodings_ansatze.py` and `synthetic_shapes.py`
+    are both byte-identical to the commit that produced the figure, and running
+    `harvest_sweeps()`'s exact protocol now yields ~62-64% for multi_axis+IQP.
+    The levels are also internally implausible -- 95.3% on ONE 4-qubit node at
+    8x8 exceeds the 89.3% the full 16-qubit coherent tree reaches at 16x16.
+
+    This plots the re-run instead: same grid, same protocol, 30 seeds, noiseless
+    only (the noise axis was scoped out of the thesis). The ORDERING survives;
+    only the levels change.
+    """
+    d = _load("encoding_ansatz_survey_rerun_results.json")
+    if not d:
+        print("  SKIP encoding_ansatz_survey (missing encoding_ansatz_survey_rerun_results.json)")
+        return
+    arms = {tuple(a["config"].split("+")): a for a in d["arms"]}
+    n = d["seeds_per_arm"]
+
+    fig, ax = plt.subplots(figsize=(10.5, 4.6))
+    width, xs = 0.26, range(len(SURVEY_ENCODINGS))
+    for k, ans in enumerate(SURVEY_ANSATZE):
+        pos = [x + (k - 1) * width for x in xs]
+        means = [arms[(e, ans)]["score_mean"] for e in SURVEY_ENCODINGS]
+        stds = [arms[(e, ans)]["score_std"] for e in SURVEY_ENCODINGS]
+        ax.bar(pos, means, width, yerr=stds, label=ans, color=SURVEY_ANSATZ_C[ans], capsize=3)
+        for x, e, m, s in zip(pos, SURVEY_ENCODINGS, means, stds):
+            ax.annotate(f"{m:.1f}", (x, m + s + 2.6), ha="center", fontsize=7.5)
+            ax.annotate(
+                f"{arms[(e, ans)]['num_params']}p", (x, m + s + 0.6), ha="center", fontsize=6.5, color="#666666"
+            )
+
+    ax.set_xticks(list(xs))
+    # Params are per-ansatz (hea spends 3 rotations per qubit, iqp and alt 2), so
+    # they belong on the bars rather than on the shared encoding tick.
+    ax.set_xticklabels([f"{e}\n({arms[(e, 'iqp')]['qubits']} qubits)" for e in SURVEY_ENCODINGS])
+    ax.set_ylabel("accuracy % (mean of last 5 epochs)")
+    ax.set_ylim(0, 85)
+    ax.legend(fontsize=8, ncol=3, loc="upper right", frameon=False, title="ansatz", title_fontsize=8)
+    ax.set_title(
+        f"Encoding x ansatz survey, single 4-qubit node at 8x8, {n} seeds per configuration",
+        fontsize=11,
+    )
+    _reference_lines(ax)
+
+    _save(
+        fig,
+        "encoding_ansatz_survey.png",
+        f"Node-level survey of the space searched: 4 encodings x 3 ansatze on ONE quantum node at 8x8, "
+        f"{n} seeds each, noiseless. Parameter counts are per node and printed on each bar; hea spends 3 "
+        f"rotations per qubit against 2 for iqp and alt. THE ENCODING IS WHAT THIS FIGURE "
+        f"RESOLVES: multi_axis leads at every ansatz, and amplitude sits at the single-attribute ceiling "
+        f"(51.5-52.3) -- at two qubits it is not learning the colour-shape conjunction at all, which the "
+        f"original single-seed sweep obscured by reporting 78.1%. THE ANSATZ IS NOT RESOLVED HERE: hea and "
+        f"iqp are tied at every encoding (multi_axis: 63.3 vs 64.0 against a 1.7-pt limit). ALT is the only "
+        f"arm that loses resolvably, and only at the best encoding (-2.8 vs iqp, -2.1 vs hea); it is not "
+        f"carried forward. Note that `hea` here is a star-entangler node circuit and is NOT the same "
+        f"as the tree-level `strongly_entangling` arm in the R2 figure. This replaces the retired "
+        f"encoding_ansatz_sweep.png, whose levels are not reproducible from the code in the tree.",
+    )
+
 
 def _r2_arms():
     """R2's encoding x ansatz sweep, keyed by (encoding, ansatz)."""
@@ -285,10 +360,16 @@ def fig_encoding_ansatz():
     """Replaces encoding_ansatz_sweep.png.
 
     The retired figure swept ANGLE/MULTI_AXIS/AMPLITUDE/ZZ_MAP x HEA/IQP/ALT at
-    8x8 with ONE seed per config. HEA and ALT are not in the shipped codebase --
-    qttn_core implements {strongly_entangling, iqp} -- so that figure benchmarks
-    an architecture that does not exist. This plots R2 instead: the same
-    question at 16x16, 21 seeds per arm, on the protocol of record.
+    8x8 with ONE seed per config on a single node. That survey is now re-run
+    multi-seed by fig_encoding_ansatz_survey() above, which is the figure for
+    the space searched. This one plots R2: the same question at 16x16 on the
+    full hybrid tree, 21 seeds per arm, on the protocol of record -- i.e. the
+    ranked comparison, which is what the survey may NOT be cited for.
+
+    Note the ansatz names differ by design between the two figures. The survey's
+    `hea`/`alt` are node-level circuits defined in benchmark_encodings_ansatze;
+    qttn_core implements {strongly_entangling, iqp}, and `strongly_entangling`
+    is PennyLane's ring-entangler, not the survey's star-entangler `hea`.
     """
     _, arms = _r2_arms()
     mlp = _mlp_ref()
@@ -777,6 +858,7 @@ def main():
     fig_model_comparison()
     fig_ablations()
     fig_readout()
+    fig_encoding_ansatz_survey()
     fig_encoding_ansatz()
     fig_ansatz_comparison()
     print(

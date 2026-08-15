@@ -1,0 +1,142 @@
+# Thesis correction list — `main.tex`
+
+Review date: 2026-08-15. Line numbers refer to `main.tex` at commit `a366773`.
+
+Verified against `llm/research_log.md`, `qnlp/image_tower/classification/quantum/make_figures.py`,
+`qnlp/image_tower/classification/quantum/results/*.json`, `qnlp/discoviz/models/image_model.py`,
+`qnlp/discoviz/models/cp_node.py`, `qnlp/scripts/aro_contrastive/{config,run}.py`,
+`qnlp/core/training/losses/contrastive.py`.
+
+Type key: **[F]** factual error · **[C]** coherence/contradiction · **[O]** overclaim or missing
+qualification · **[M]** mechanical.
+
+Status key: `TODO` · `DONE` · `WONTFIX` (with reason).
+
+---
+
+## Abstract (L59–69)
+
+| # | Line | Type | Status | Issue | Fix |
+|---|---|---|---|---|---|
+| 1 | 67 | **F** | DONE | "exceeds its parameter-matched neural counterpart on the majority of heads" — false under every reading. Loses all four heads to `mlp_reference` (63.0/52.7/61.0/94.1 vs 93.1/74.1/84.0/98.6); loses 3 of 4 to `classical_full`. `research_log.md:52`: *"`mlp_reference` beats every TTN arm on every head."* | Delete; state the true `classical_bare` comparison and concede the MLP lead. |
+| 2 | 67 | **F** | DONE | "exceeds its direct classical analogue … on shape **and material**" — material is 61.0 vs 56.5 = +4.5 against an MDE of ≈7.6. §5.2 itself calls material parity. The `+8.8` material win was the superseded 30-epoch result. | Shape only, parity on the other three. |
+| 3 | 63 | **O** | DONE | Claims the topology family was discriminated by four properties: entanglement generation vs gate density, gradient variance, depolarizing-noise tolerance, classical simulability. The body delivers **gradient variance only**. The topology noise figure was retired (`research_log.md:676`) because the QTTN arm scored 42.2%, below the single-attribute ceiling, under a broken scalar readout. | Cut to what Ch. 4 actually shows. Do not reintroduce the retired noise comparison. |
+| 4 | 63 / Ch. 3 | **C** | WONTFIX | MERA is surveyed in the abstract but is not a candidate architecture in §3.2. It appears only in Fig. 4.1. | Author's call: the drop is considered adequately explained in Ch. 2. |
+| 5 | 67 | **O** | DONE | The binding sentence reports only the classical arms. The quantum binding result is the chapter's headline and §7.1.3's central claim. | Add the quantum arm and the shuffle control. |
+| 6 | 59 | **M** | TODO | Abstract exceeds the 200-word cap noted in the source comment. Was ~250 before the #1–#5 fixes, **333 after** — those fixes each replaced a short false claim with a longer true one. Needs a compression pass, not a revert. | — |
+
+---
+
+## Chapter 3 — Theoretical Framework
+
+| # | Line | Type | Status | Issue | Fix |
+|---|---|---|---|---|---|
+| 7 | 219, 285 | **M** | DONE | "Section 3.4" does not exist. The Density Matrix Wall is §3.2.5. | Replaced all hardcoded section numbers with `\label`/`\ref` (`sec:density_wall`, `sec:readout_protocols`, `sec:ablations`, `sec:search_space`, `sec:hybrid_eval`, `sec:ansatz_design`, `ch:synthetic`, `ch:aro`), so they cannot drift again. |
+| 8 | 157–179 | **C** | DONE | Three encodings defined (amplitude, scalar $R_y$, multi-axis); §4.3.1 sweeps **four**, including `zz_map`, which is never defined. | Added §3.1.1.4, the second-order Pauli-Z feature map, with its circuit and the product-vs-entangled-encoding contrast. |
+| 9 | 167, 313, 336 | **M** | DONE | Same object named three ways: "Scalar Rotation Encoding (Scalar $R_y$)", `angle`, `scalar_ry`. | Canonicalised on `scalar_ry`; the `angle` code alias is noted once in §3.1.1.2. §4.3.1 updated. |
+| 10 | 182–193, 345 | **C** | DONE | §3.1.2 defines HEA / ALT / IQP; §4.3.2 compares `strongly_entangling` vs `iqp`. HEA→`strongly_entangling` is never stated, and **ALT is never resolved anywhere**. | §3.1.2.1 now distinguishes the star-entangler `hea` from the ring-entangler `strongly_entangling` and states they are not interchangeable; §4.3.2 repeats it at the point of use. ALT resolved by the re-run (see #45). |
+| 11 | 155 | **M** | DONE | "As a results" | "As a result" |
+
+---
+
+## Chapter 4 — Topological Optimization
+
+| # | Line | Type | Status | Issue | Fix |
+|---|---|---|---|---|---|
+| 12 | 409–434 | **O** | DONE | §4.4 lists `classical_full` (352p) and `mlp_reference` (999p) but reports neither result. `classical_full` **ties** the 287p quantum arm (`research_log.md:800`); the 999p MLP beats it. Reporting only the `classical_bare` win reads as selection. | Added Table 4.1 with all six arms and their accuracies. All four resolved comparisons now stated (`classical_bare` +9.7, `quantum_hybrid` +9.9, `mlp_param_matched` +18.8, `classical_full` tie), the `classical_full` tie framed as the stronger claim, and both qualifications added (the 999p MLP leads; the classical arms were tuned while the quantum arm was not). |
+| 13 | 308 | **M** | DONE | Unresolved TODO in the source asking why HEA was abandoned. | Answered by the re-run (HEA and IQP are tied, not HEA-over-IQP) and deleted. See #45. |
+| 14 | 442 | **M** | DONE | "Code for the 3 models can be found in the appendix" — Appendix B contains `CoherentQTTNClassifier`, `ClassicalTTNClassifier` (bare & full), and `CPQuadRankLayer`. The last is the **DisCoViz** node, not a Ch. 4 arm. | Added a preamble to Appendix B mapping each listing to its arm and stating that `CPQuadRankLayer` belongs to Ch. \ref{ch:aro}, included for comparison of the two CP implementations. |
+| 15 | 247–256, 445–451 | **M** | DONE | Commented-out duplicate of §4.1; two consecutive "CHAPTER 5: CLEVR" banner comments. | Both deleted. |
+
+---
+
+## Chapter 5 — CLEVR
+
+| # | Line | Type | Status | Issue | Fix |
+|---|---|---|---|---|---|
+| 16 | 532–548 | **C** | TODO | Table 5.1 quotes the 90-epoch budget only; the figure on the same page plots **both** (solid/hatched). `make_figures.py:495`: *"NEITHER BUDGET IS PRIVILEGED — quote both or neither."* A reader sees numbers in the figure absent from the table. | Add the 30-epoch column, or state in the caption why 90 is quoted and that at 30 the quantum arm beat `classical_full` on shape **and** material. |
+| 17 | 513–554 | **O** | TODO | Never states that no single epoch budget is fair to all four heads — they share one summed loss and converge at very different rates. `research_log.md` Finding 2 flags this as *"must be stated in the write-up."* | One sentence. |
+| 18 | 488, 502 | **M** | TODO | `as shown in \ref{fig:...}` — missing the word "Figure". | Both. |
+| 19 | 556–562 | **O** | TODO | The relational quantum arms ran at **30 epochs** while §5.2 establishes the tower needs ~90 (`research_log.md:54, 1183`: *"a floor, not a ceiling"*). Unstated. | State it — it makes the parity claim conservative. |
+| 20 | 571–601 | **F** | TODO | The binding probe ran at **32×32**; every other CLEVR experiment ran at 16×16. Unstated, and it explains the parameter jump (462 → 725) that otherwise looks like an error — fewer classes but more parameters. | State the resolution in §5.1 or §5.4. |
+| 21 | 573 | **M** | TODO | Footnote cites Table 5.1 for "84.8%–99.1%", but 84.8 is `mlp_param_matched`, which has no row there (converged early; no 90-epoch run needed). | Cite the 30-epoch source, or "across all arms at their converged budgets". |
+| 22 | 575 | **M** | TODO | `they do not bind *better* than` — Markdown asterisks render literally in LaTeX. | `\emph{better}` |
+| 23 | 575 | **M** | TODO | "we introduce conduct a binding probe exepriment" | "we conduct a binding probe experiment" |
+| 24 | 575 | **F** | TODO | "Every architecture was evaluated against a patch-shuffled control" — the quantum arms were not (Table 5.2 shows `---`). | "Every classical architecture…" |
+| 25 | 600 | **F** | TODO | "$-0.6$ gap against an MDE of 5.5" is not derivable from Table 5.2, which reports best seeds (73.8 − 69.0 = **+4.8**). The −0.6 is the 15-seed mean difference. | Say "on the 15-seed means". |
+| 26 | 600 | **M** | TODO | "This supports out previous tests" | "our" |
+| 27 | 606–620 | **F** | TODO | "On the same images, a 683-parameter network tells the two arrangements apart 94.6%." Different builds: the CLIP probe uses 224px canvases (cell 96) from `clevr_objects_64_val.npz`; the binding probe used `clevr_binding_size_32_*.npz`. | "On composites built the same way", or drop "the same". |
+| 28 | 611–616 | **M** | TODO | The quoted 0.0050 / 0.0654 / 7.6% come from `c7_clip_geometry_floorbg_results.json`, not the main run (0.0050 / 0.0690 / 7.2%). Both defensible; the reader can't tell which. | Name the variant and why it's the conservative choice. |
+
+---
+
+## Chapter 6 — ARO
+
+Verified against the actual ARO training code. The node type checks out — `TTNImageModel` is built
+from `CPQuadRankLayer`, so the CP continuity claim with Chs. 4–5 holds. Five things around it do not.
+
+| # | Line | Type | Status | Issue | Fix |
+|---|---|---|---|---|---|
+| 29 | 695 | **C** | TODO | *"replacing … CLIP ViT with the hierarchical CP-TTN yields vastly superior geometric and spatial binding"* contradicts §5.4: *"within the isolated vision tower, there is no compositional advantage for tensor networks over a plain MLP."* `thesis_outline.md:379` anticipates this: *"the advantage is not attributable to the tensor network binding better, because in a controlled vision-only test it doesn't."* | Route the explanation through CLIP's measured 13× insensitivity, as §7.1.4 already does. **Highest-value single fix in the document.** |
+| 30 | 633, 646 | **F** | TODO | "8×8 (64-patch) image grid", "64-qubit input layer". Actual config: `image_size=64`, `patch_size=4` → **16×16 = 256 patches**, `depth = log₄(256) = 4` (confirmed by `gains = [2.0, 1.5, 1.0, 1.0]`). | 256 patches, 256-qubit input layer. Strengthens the intractability argument. |
+| 31 | 646 | **F** | TODO | "contracts … to a single root tensor … into a final 512-dimensional image embedding." `in_dim` runs 64→128→256→512→**1024**, then `Linear(1024, 512)` + L2. The 512 is the output embedding, not the root. | Four levels, 1024-dim root, linear projection to 512. |
+| 32 | 643–646 | **C/O** | TODO | **The ARO tower carries an explicit learned positional embedding** — `image_model.py:44-45`, a `[1, 256, 64]` parameter (16,384 values) gated by learned `pos_scale`, added at L88. Contradicts §4.3.4 (ancilla rejected), §5.3 (*"absolutely no explicit positional parameters"* as the critical finding) and §7.1.3 (*"captured by the architecture rather than supplied to it"*). | State that the ARO tower reintroduces positional encoding and why — different scale, different task, and Ch. 5 established only a **bounded null** (no benefit at effects ≥5.5), not that it hurts. Unaddressed, the thesis argues against its own model. |
+| 33 | 635, 639 | **C** | TODO | The ARO tower uses `dropout=0.3` and residuals on layers 2–3 (`use_res = True if i > 1 else False`), making it the **`classical_full`** analogue, not `classical_bare` — which Ch. 4 defines as the CP arm stripped of exactly these, and §4.3.4 rejected them for the quantum node. | Say which control it corresponds to. Ch. 4 showed `classical_full` (352p) *ties* the 287p quantum arm. |
+| 34 | 662 | **F** | TODO | "where $\tau$ is a **learned** temperature parameter." `ExperimentConfig.temperature = 0.07`, passed as a plain float into `InfoNCE` (`contrastive.py:22-27`). Not learnable. `thesis_outline.md:380` lists learnable temperature as a **failed** experiment (collapsed to ~0.015). | "fixed temperature $\tau = 0.07$". |
+| 35 | 637–651 | **O** | TODO | The **bilinear patch embedding** (separate colour and pixel factors multiplied elementwise, `image_model.py:37-40, 83-85`) is the entire input stage and appears nowhere in §6.2. | Add it. |
+| 36 | 667 | **O** | TODO | $\lambda$ and $\alpha$ described but never valued. Config: `triplet_weight = 40000.0`, `triplet_margin = 0.2`. The literature review calls the $\lambda$ rebalancing the breakthrough. | State $\lambda = 4\times10^4$, $\alpha = 0.2$. |
+| 37 | 669 | **O** | TODO | "the *only* variable changing is the vision encoder." DisCoClip's CLIP tower is **frozen**; the CP-TTN is **trained**. Frozen-vs-trained is confounded with hierarchical-vs-attention. | Soften "strictly attributed to the structural differences"; name the missing control (a trained non-hierarchical tower of comparable size). |
+| 38 | 697 | **O** | TODO | CLIP / OpenCLIP / BLIP rows are **zero-shot**; DisCoViz trains on the ARO train split with ARO's own hard negatives in the loss. *(No leakage — `run.py:161-166` evaluates on the held-out `test_parquet` and the code comment names and avoids the pooled-split hazard. The DisCoClip comparison is unaffected.)* | One sentence distinguishing the zero-shot rows. |
+| 39 | 697 | **O** | TODO | "severely dominates", "completely outperforms", "utterly fails" — for 59.78 vs 52.90 against a 50% chance floor. | Tone down throughout the chapter. |
+| 40 | 691, 695 | **M** | TODO | "$+7.64\%$ and $+3.97\%$ performance gain" — these are percentage **points**. | — |
+| 41 | §6.4 | **O** | TODO | The negative-results table planned in `thesis_outline.md:380` (alignment warmup → embedding collapse; learnable temperature → collapse; hard-negative mining → widened train/val gap; NLC+MLP head → conflicting gradients; frozen-CLIP text-only → cosine ≈ −0.0016) is absent. | Add it. Cheap credibility, and it pre-empts #34. |
+
+---
+
+## Chapter 7 — Conclusion
+
+| # | Line | Type | Status | Issue | Fix |
+|---|---|---|---|---|---|
+| 42 | 731–734 | **O** | TODO | "outperforms its unconstrained classical counterpart while using roughly a third fewer parameters, and this parameter efficiency **reproduces on real data**." On synthetic it is 33% fewer and +9.7 resolved; on CLEVR it is **18%** fewer and one resolved head of four. | Qualify. |
+| 43 | 747–751 | **C** | TODO | "It does so in the variant carrying no positional parameters whatsoever … adding an explicit positional mechanism changes nothing measurable." True of the quantum tower, false of the ARO tower (#32), two subsections apart. | Reconcile explicitly. |
+
+---
+
+## Appendix
+
+| # | Line | Type | Status | Issue | Fix |
+|---|---|---|---|---|---|
+| 44 | 976 | **M** | TODO | "used in Chapter 3 to investigate trainability" → the synthetic chapter is **Chapter 4**. | — |
+
+---
+
+## Found during correction work (2026-08-15)
+
+| # | Line | Type | Status | Issue | Fix |
+|---|---|---|---|---|---|
+| 45 | 341 (old) | **F** | DONE | §4.3.1 cited the single-node survey's `multi_axis + IQP` at **95.3%**, and §4.3.2 explained the later 80.9% as that figure "corrected" for task difficulty. **The 95.3% is not reproducible from the code in the tree.** `benchmark_encodings_ansatze.py` and `synthetic_shapes.py` are both byte-identical to the commit that produced the figure (`29591e8`), with no uncommitted changes; re-running `harvest_sweeps()`'s exact protocol gives ~62–64%. It is also internally implausible: 95.3% on one 4-qubit node at 8×8 exceeds the 89.3% the full 16-qubit coherent tree reaches at 16×16. | Survey re-run at 30 seeds (`rerun_encoding_ansatz_survey.py`). §4.3.1 rewritten on the new data; the "inflated metric" explanation in §4.3.2 removed. Old figure retired to `results/superseded/`. |
+| 46 | 337 (old) | **F** | DONE | Figure 4.2 was `encoding_ansatz_sweep.png`, whose own `results/superseded/README.md` says it "may not be cited for ranking configurations, or the ansatz decision" — while the caption claimed it demonstrated "the general superiority of the `multi_axis` encoding". | Replaced by `encoding_ansatz_survey.png`, generated from `encoding_ansatz_survey_rerun_results.json` by `make_figures.fig_encoding_ansatz_survey()`. |
+| 47 | §4.3.1 | **O** | DONE | The survey's `amplitude` encoding was reported in the log at 78.1% as "maximum qubit compression … retaining model capacity". At 30 seeds all three amplitude arms sit at **51.5–52.3%**, i.e. exactly on the 50% single-attribute ceiling — it is not learning the colour–shape conjunction at all. | §4.3.1 now states this as a substantive elimination, and introduces the single-attribute ceiling as the reference line rather than the 25% chance floor. |
+
+**Net effect on the argument: none downstream.** The encoding conclusion (`multi_axis` leads)
+survives and is independently resolved by R2 on the full tree, which is what every later
+architecture decision rests on. What changed is that the ansatz was never resolvable on
+accuracy at either scale — so IQP is now justified on parameter count (8 vs 12 per node),
+gate depth and training stability, which is what the code comments recorded all along.
+
+---
+
+## Investigated and withdrawn
+
+These were raised during review and do **not** require changes. Recorded so they are not re-opened.
+
+- **Table 5.2's identical `49.3 ± 2.7` for `classical_full` and `mlp_param_matched`** — genuine, matches
+  the source table at `research_log.md:1082-1087`. Not a transcription error.
+- **Missing 90-epoch `mlp_param_matched` row in Table 5.1** — the MLPs are converged and gain nothing
+  from 90 epochs (`research_log.md:1154-1161`). Only the footnote citation (#21) needs touching.
+- **Suspected ARO evaluation leakage** — does not occur. `aro_contrastive/run.py:161-166` evaluates on
+  the held-out test split and the code comment explicitly names and avoids the pooled-split hazard.
+- **Seed-count asymmetries and n=3 power caveats throughout Ch. 5** — out of scope by author decision.
+  None introduce a factual error, and Table 5.2's best-seed reporting is documented in its own caption.
+  Note that the 5-of-15 result is statistically sound independent of this: under the null, P(seed > 3
+  binomial sd) ≈ 0.13%, so 5/15 survives any multiple-comparison correction.

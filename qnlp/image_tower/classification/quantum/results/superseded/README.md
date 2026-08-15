@@ -20,18 +20,20 @@ dominates". They also use `scalar_ry` encoding, which R2 later measured as costi
 | 15, 16 | `spatial_ancilla_comparison_*.png` | 5 seeds; the reported 2.2-pt difference is well inside a ~10-pt resolution limit. |
 | 19 | `noise_scheduling_training.png` | Question F's premise is now attributed to a readout-calibration artifact. |
 
-## Added 2026-08-08 — ONE ansatz figure retired (corrected 2026-08-08, see note)
+## Added 2026-08-08 — BOTH ansatz figures retired (2026-08-08, then 2026-08-15)
 
-> **CORRECTION.** Both ansatz figures were moved here on 2026-08-08 and that was wrong for
-> one of them. `encoding_ansatz_sweep.png` has been **returned to `results/`**: it is
-> superseded as *evidence for the ansatz decision*, but it is the project's only record of
-> the *search space explored*, and nothing replaces that. R2 ran only the two survivors.
-> The two roles were conflated; they are separated below.
+> **HISTORY.** Both ansatz figures were moved here on 2026-08-08.
+> `encoding_ansatz_sweep.png` was then returned to `results/` the same day, on the grounds
+> that it was superseded as *evidence for the ansatz decision* but was the project's only
+> record of the *search space explored*. **That return is reversed as of 2026-08-15**: the
+> survey was re-run at 30 seeds and the original figure's numbers turned out not to be
+> reproducible from the code in this repository. The search-space role is now served by a
+> figure generated from JSON. See below.
 
 | figure | file | status |
 |---|---|---|
 | — | `ansatz_comparison_noise.png` | **RETIRED — do not use.** |
-| 4 | `encoding_ansatz_sweep.png` | **RETURNED to `results/`** — see "Retained as a survey figure" below. |
+| 4 | `encoding_ansatz_sweep.png` | **RETIRED 2026-08-15 — do not use.** Replaced by `figures/encoding_ansatz_survey.png`. |
 
 ### `ansatz_comparison_noise.png` — retired
 
@@ -49,32 +51,47 @@ A curve flat across the whole sweep is more likely measuring that than robustnes
 
 Replacement: `results/figures/ansatz_comparison.png` (R2, 21 seeds, 16x16, noiseless).
 
-### `encoding_ansatz_sweep.png` — retained as a survey figure
+### `encoding_ansatz_sweep.png` — RETIRED 2026-08-15 (reverses the 2026-08-08 correction)
 
-**Note that this figure does NOT share the p_crit defect above — it AGREES with the
-Metrics Record.** Its `MULTI_AXIS + IQP` curve stays above 50% across the whole sweep
-(~92% at p=0.15, ~65% at p=0.2), which is exactly the logged `p_crit > 0.200`. The
-contradiction is specific to `ansatz_comparison_noise.png`.
+**This figure was returned to `results/` on 2026-08-08 as the project's only record of the
+search space explored. It is now retired outright: its numbers are not reproducible from
+the code in this repository.** The survey was re-run
+(`rerun_encoding_ansatz_survey.py`, 30 seeds) and the search-space role it was retained for
+is now served by `results/figures/encoding_ansatz_survey.png`, which is generated from JSON.
 
-Nor is "HEA and ALT are not in the codebase" an objection to a survey figure — surveying
-options you then drop is the point of a survey.
+**The finding.** Running `harvest_sweeps()`'s exact protocol — fixed data seed 42, no torch
+seeding, 512/128, 8x8, 8 epochs, AdamW lr=0.03 wd=1e-4 — now yields `61.7 / 63.3 / 64.1`
+across repeats for `MULTI_AXIS + IQP`, against the logged **95.3%**. Everything that could
+explain a gap that size was checked and eliminated:
 
-**What it may be cited for**: documenting the space searched — 4 encodings x 3 ansatze,
-including AMPLITUDE (which classified at two qubits and four parameters) and ZZ feature
-maps. **What it may not be cited for**: ranking configurations, or the ansatz decision,
-which R2 settled at 21 seeds.
+- `benchmark_encodings_ansatze.py` — one commit (`29591e8`, 2026-07-18, the day after the
+  log entry), never modified since, no uncommitted changes.
+- `synthetic_shapes.py` — same single commit, unmodified. Dataset mode is `overlapping` in
+  both (the shared default).
+- Protocol identical, including the 128-sample eval set: `95.3% = 122/128` and
+  `96.9% = 124/128` exactly, so the original used the same test set size.
 
-Three scope facts belong in its caption, none of which invalidate it:
-1. **One seed per configuration.** Adequate to show what was explored, not to separate
-   configurations that land close together.
-2. **8x8, four qubits — a single node, not the tower.** It surveys node-level circuits.
-   The tower is 16 qubits at depth 2.
-3. **The x-axis is depolarizing noise, which the project later closed as out of scope.**
-   The survey content is the p=0 column; the rest characterises a single node.
+The only uncontrolled variable is the environment (PennyLane is now 0.43.2; the July
+version is unrecorded). **That is not why the numbers are retired.** They are retired
+because they are internally implausible: **95.3% on ONE 4-qubit node at 8x8 exceeds the
+89.3% the full 16-qubit coherent tree reaches at 16x16** (R7). A quarter of the qubits, a
+quarter of the pixels, one node instead of a hierarchy, outscoring the whole tower. That
+ordering cannot be right whatever produced it, and it holds independently of the re-run.
 
-⚠️ **Caption must reconcile the scale difference or it reads as a regression**: this figure
-puts `MULTI_AXIS + IQP` at 95.3% (8x8, one node, one seed) while R2 puts it at 80.9%
-(16x16, full tree, 21 seeds). Different tasks, not a decline.
+This also voids the reconciliation this section previously demanded — that 95.3% (8x8, one
+node) vs 80.9% (16x16, tree) be explained as "different tasks, not a decline". At the *same*
+8x8 single-node task the number is ~64%, so the gap was never task difficulty.
+
+**Nothing downstream moves.** The ordering survives the re-run: `multi_axis` still leads at
+every ansatz, which is what R2 independently confirms at 16x16 on the tree. Two things
+change, both in the honest direction: `hea` and `iqp` are **tied** at every encoding
+(63.3 vs 64.0 at multi_axis, 1.7-pt limit), so the old figure's HEA-over-IQP ordering was
+never resolvable; and `amplitude` sits at the **single-attribute ceiling** (51.5–52.3), i.e.
+it is not learning the colour–shape conjunction at all — which the single-seed sweep
+obscured by reporting 78.1%.
+
+Replacement: `results/figures/encoding_ansatz_survey.png`, from
+`results/encoding_ansatz_survey_rerun_results.json`.
 
 ## Retained in `results/` (unaffected — no classifier head involved)
 
@@ -91,5 +108,5 @@ as consistent with known theory (Task R5.2).
 |---|---|---|
 | 2 | `training_metrics.png` | 4-dim readout, so not bottlenecked. Valid as "gradients flow, it converges"; not valid for accuracy claims (256/15 protocol superseded). |
 | 3 | `noise_tolerance_curve.png` | Computes no `p_crit`; the log's "≈0.05" was a narrative reading. Under the formal <50% criterion this model's value is 0.10 (Task R5.1). |
-| 4 | `encoding_ansatz_sweep.png` | One seed per config across 12 configs. R2 supersedes the conclusion: encoding resolved, ansatz not. |
+| 4 | ~~`encoding_ansatz_sweep.png`~~ | **RETIRED 2026-08-15 — moved here, not usable with a caveat.** Numbers not reproducible; see the retirement note above. |
 | 5 | `representation_bias_results.png` | Data fine; the "proves the QTTN learns spatial representations" claim needs the R4 classical control alongside. |
