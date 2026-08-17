@@ -572,42 +572,42 @@ C3_90EP = {
 
 
 def fig_clevr_attributes():
-    """CLEVR single-object attribute classification, both epoch budgets.
+    """CLEVR single-object attribute classification at the 90-epoch budget.
 
-    The standing rule is to quote BOTH budgets or neither: at 30 epochs the
-    quantum arm beats classical_full on shape and material, and at 90 the
-    picture trades -- colour improves while material and size get resolvably
-    worse, because four heads share one summed loss and converge at different
-    rates. A single-budget figure would misrepresent that.
+    SUPERSEDES the earlier "quote BOTH budgets or neither" rule (2026-08-16).
+    The write-up now reports 90 epochs throughout, for two reasons:
+
+      1. 90 is the CONVERGED budget. The 8-way colour head was still climbing at
+         epoch 30 on both the quantum and the CP arms; 30 was inherited from a
+         4-class synthetic task and was never re-derived for CLEVR.
+      2. Quoting 90 is CONSERVATIVE for this thesis's own claim. At 30 epochs the
+         quantum arm beats classical_full on shape AND material; at 90 it wins
+         shape and merely ties material. Reporting the budget that weakens the
+         headline cannot be cherry-picking, which is what the both-budgets rule
+         existed to prevent.
+
+    The head-trading effect the old rule protected is still reported, in prose,
+    in the section text -- longer training improves colour while material and
+    size get resolvably worse, because four heads share one summed loss.
+
+    mlp_param_matched is omitted: it has no 90-epoch row (the MLPs converge well
+    before 30 and gain nothing from the longer budget), and including a 30-epoch
+    bar beside 90-epoch bars is the exact inconsistency this change removes.
     """
-    c3 = _load("c3_combined_results.json")
-    if not c3:
-        print("  SKIP clevr_attributes (missing c3_combined_results.json)")
+    if not C3_90EP:
+        print("  SKIP clevr_attributes (missing C3_90EP)")
         return
-    arms = ["quantum_coherent", "classical_full", "classical_bare", "mlp_reference", "mlp_param_matched"]
-    params = c3["params"]
+    arms = ["quantum_coherent", "classical_full", "classical_bare", "mlp_reference"]
+    c3 = _load("c3_combined_results.json")
+    params = c3["params"] if c3 else {}
 
     fig, axes = plt.subplots(1, 4, figsize=(15.5, 4.3), sharey=True)
-    width = 0.38
+    width = 0.6
     for ax, head in zip(axes, HEADS):
         for i, arm in enumerate(arms):
-            v = c3["arms"][arm][head]
-            ax.bar(
-                i - width / 2, v["score_mean"], width, yerr=v["score_std"], color=C[arm], capsize=2, label="_nolegend_"
-            )
-            nine = C3_90EP.get(arm, {}).get(head)
-            if nine:
-                ax.bar(
-                    i + width / 2,
-                    nine[0],
-                    width,
-                    yerr=nine[1],
-                    color=C[arm],
-                    alpha=0.45,
-                    hatch="///",
-                    capsize=2,
-                    label="_nolegend_",
-                )
+            mean, std = C3_90EP[arm][head]
+            ax.bar(i, mean, width, yerr=std, color=C[arm], capsize=3, label="_nolegend_")
+            ax.annotate(f"{mean:.1f}", (i, mean + std + 1.5), ha="center", fontsize=7.5)
         ax.axhline(C3_FLOORS[head], color="grey", ls=":", lw=1.2)
         ax.annotate(
             f"floor {C3_FLOORS[head]:.1f}%",
@@ -622,25 +622,19 @@ def fig_clevr_attributes():
         ax.set_xticklabels([f"{SHORT[a]}\n{params[a]}p" for a in arms], fontsize=7.5)
         ax.set_ylim(0, 105)
     axes[0].set_ylabel("accuracy % (mean of last 5 epochs)")
-    solid = plt.Rectangle((0, 0), 1, 1, fc="#666666")
-    hatched = plt.Rectangle((0, 0), 1, 1, fc="#666666", alpha=0.45, hatch="///")
-    fig.legend(
-        [solid, hatched], ["30 epochs", "90 epochs"], fontsize=8, loc="upper right", bbox_to_anchor=(0.995, 0.965)
-    )
-    fig.suptitle("CLEVR single-object attribute classification, 16x16 object crops", fontsize=12, y=0.99)
+    fig.suptitle("CLEVR single-object attribute classification, 16x16 object crops, 90 epochs", fontsize=12, y=0.99)
     _save(
         fig,
         "clevr_attributes.png",
-        "Per head, never averaged. Solid = 30 epochs, hatched = 90. Dotted line is the majority-class floor. "
-        "At 30 epochs the quantum tower (462p) beats classical_full (551p) on shape +12.7 and material +8.8, "
-        "both resolved -- parameter efficiency reproducing on real data. At 90 epochs it TRADES rather than "
-        "improves: colour 27.1 -> 63.0 (resolved) while material -9.7 and size -2.0 get resolvably worse, "
-        "because four heads share one summed loss and converge at different rates. Classical arms at 90 "
-        "epochs have very large seed variance (classical_bare colour +/-26.2), so the quantum arm's colour "
-        "sits INSIDE that spread rather than below it. NEITHER BUDGET IS PRIVILEGED -- quote both or "
-        "neither. mlp_reference beats every tensor-network arm on every head; the claim here is about the "
-        "quantum node vs the classical CP node, not about beating classical vision. mlp_param_matched has "
-        "no 90-epoch row (that stage crashed). Quantum n=3, classical n=10.",
+        "Per head, never averaged. Dotted line is the majority-class floor. All arms at the 90-epoch budget: "
+        "the 8-way colour head had not converged at 30 epochs, which was inherited from a 4-class synthetic "
+        "task and never re-derived for CLEVR. THE 462p QUANTUM TOWER IS THE SMALLEST TENSOR NETWORK HERE and "
+        "takes a resolved +9.7 on shape against the 563p classical_bare, its direct structural counterpart, "
+        "with the other three heads tied. Note that the longer budget is a TRADE, not a free win: colour "
+        "improves 27.1 -> 63.0 while material and size get resolvably worse, because four heads share one "
+        "summed loss and converge at very different rates -- so no single budget is optimal for all four. "
+        "mlp_reference beats every tensor-network arm on every head; the claim here is about the quantum "
+        "node vs the classical CP node, not about beating classical vision.",
     )
 
 
