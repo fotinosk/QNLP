@@ -97,8 +97,8 @@ from `CPQuadRankLayer`, so the CP continuity claim with Chs. 4–5 holds. Five t
 
 | # | Line | Type | Status | Issue | Fix |
 |---|---|---|---|---|---|
-| 42 | 731–734 | **O** | TODO | "outperforms its unconstrained classical counterpart while using roughly a third fewer parameters, and this parameter efficiency **reproduces on real data**." On synthetic it is 33% fewer and +9.7 resolved; on CLEVR it is **18%** fewer and one resolved head of four. | Qualify. |
-| 43 | 747–751 | **C** | TODO | "It does so in the variant carrying no positional parameters whatsoever … adding an explicit positional mechanism changes nothing measurable." True of the quantum tower, false of the ARO tower (#32), two subsections apart. | Reconcile explicitly. |
+| 42 | 731–734 | **O** | DONE | "outperforms its unconstrained classical counterpart while using roughly a third fewer parameters, and this parameter efficiency **reproduces on real data**." On synthetic it is 33% fewer and +9.7 resolved; on CLEVR it is **18%** fewer and one resolved head of four. | Split into synthetic and CLEVR claims: a resolved win at a third fewer parameters on synthetic (plus the classical_full tie), against an 18%% deficit and one resolved head of four on CLEVR. What transfers is now stated as "not worse at matched or lower capacity" rather than "consistently better". |
+| 43 | 747–751 | **C** | DONE | "It does so in the variant carrying no positional parameters whatsoever … adding an explicit positional mechanism changes nothing measurable." True of the quantum tower, false of the ARO tower (#32), two subsections apart. | Added a third boundary: implicit position was measured on a depth-two 16-patch tree, and the scaled tower of Ch. 6 contracts four levels over 256 patches and carries an explicit gated embedding. Framed as a deliberate departure at a different scale, with the depth at which implicit position stops sufficing named as unmeasured. |
 
 ---
 
@@ -128,6 +128,9 @@ survives and is independently resolved by R2 on the full tree, which is what eve
 architecture decision rests on. What changed is that the ansatz was never resolvable on
 accuracy at either scale — so IQP is now justified on parameter count (8 vs 12 per node),
 gate depth and training stability, which is what the code comments recorded all along.
+
+| 50 | 859, 893 | **C** | DONE | Ch. 7 was written against the pre-correction Ch. 6 and says "a single small image size at shallow depth is the only configuration trained end to end". Once Ch. 6 correctly describes a depth-four, 256-patch tower that *is* trained end to end, the claim is false as stated — it is true only of the **coherent quantum** configuration. | Both passages now scope the limit to the coherent tower and name the classical tower's four levels explicitly, turning a stale claim into the asymmetry that motivates the future work. |
+| 51 | 823 | **O** | DONE | §7.1.4's "surpasses a far larger foundation model on relational reasoning" repeats the zero-shot-vs-trained issue corrected in Ch. 6 (#38). | Qualified in one clause: a small task-adapted model against a zero-shot general-purpose one, indicating what such a model can reach rather than ranking architectures. |
 
 ---
 

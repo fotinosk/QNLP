@@ -405,7 +405,7 @@ The empirical results, shown in Figure \ref{fig:ablations_and_noise}, decisively
 \begin{figure}[hbt!]
     \centering
     \includegraphics[width=1.0\textwidth]{ch3/ablations_and_noise.png}
-    \caption{Node-level ablations (30 seeds) and noise degradation sweeps (15 seeds). The attempts to port classical mechanisms yielded either true null results (\texttt{reupload}) or actively harmed performance (\texttt{mixed\_channel}, \texttt{with\_ancilla}) while degrading noise resilience.}
+    \caption{Node-level ablations and depolarizing-noise sweeps, measured on the hybrid tree at single-node scale --- full-tree emulation of noise is infeasible at $\mathcal{O}(4^N)$. Attempts to port classical mechanisms yielded either a true null (\texttt{reupload}) or actively harmed performance (\texttt{mixed\_channel}, \texttt{with\_ancilla}) while degrading noise resilience. The ancilla result is measured on a translation-invariant task, where position barely affects the label, and does not generalise to relational settings; that case is tested separately in Chapter \ref{ch:clevr}.}
     \label{fig:ablations_and_noise}
 \end{figure}
 The \texttt{reupload} mechanism achieved a nominal $+1.5$ point increase over the baseline; however, this fell well below the statistical resolution limit ($\text{MDE} = 3.8$), yielding a true statistical null that failed to justify its additional gate depth. 
@@ -448,7 +448,7 @@ The results are given in Table \ref{tab:model_comparison} and Figure \ref{fig:mo
 \begin{figure}[hbt!]
     \centering
     \includegraphics[width=1.0\textwidth]{ch3/model_comparison.png}
-    \caption{Final parameter efficiency comparison. The 287-parameter coherent QTTN outperforms the structurally equivalent classical tensor network despite a strict parameter deficit, and ties the augmented classical tree that carries residual connections and dropout.}
+    \caption{Parameter efficiency on $16 \times 16$ synthetic shapes: accuracy by arm (left) and accuracy against parameter count on a logarithmic axis (right). The 287-parameter coherent QTTN outperforms the structurally equivalent classical tensor network despite a parameter deficit, and ties the augmented classical tree that carries residual connections and dropout. Dotted and dashed lines mark chance ($25\%$) and the single-attribute ceiling ($50\%$) respectively; error bars are one standard deviation across seeds.}
     \label{fig:model_comparison}
 \end{figure}
 
@@ -547,7 +547,7 @@ Accommodating these additional classification heads increased the parameter foot
 \begin{figure}[hbt!]
     \centering
     \includegraphics[width=0.9\textwidth]{ch3/clevr_attributes.png}
-    \caption{Attribute extraction performance. The multi-head readout forces the quantum architecture to simultaneously resolve all 15 classes from a single underlying statevector.}
+    \caption{Attribute extraction on $16 \times 16$ CLEVR object crops, reported per head and never averaged, at the 90-epoch budget. Dotted lines mark the majority-class floor for each head, which differs because the heads have different class counts. The multi-head readout forces the quantum architecture to resolve all 15 classes simultaneously from a single underlying statevector. Error bars are one standard deviation across seeds.}
     \label{fig:clevr_attributes}
 \end{figure}
 
@@ -588,7 +588,7 @@ While quantum training frequently collapsed to the chance floor, on the runs tha
 \begin{figure}[hbt!]
     \centering
     \includegraphics[width=1.0\textwidth]{ch3/clevr_relations.png}
-    \caption{Relational classification. Hatched bars report the runs that trained; solid quantum bars include collapsed runs. On the runs that train, the quantum tower is statistically tied with \texttt{classical\_bare}, its direct structural counterpart at a comparable parameter count.}
+    \caption{Four-way spatial relation classification (Left, Right, Front, Behind) on two-object CLEVR crops, against a $26.6\%$ majority-class floor. Hatched bars report the runs that trained; solid quantum bars include the runs that collapsed to chance. On the runs that train, the quantum tower is statistically tied with \texttt{classical\_bare}, its direct structural counterpart at a comparable parameter count. \texttt{quantum\_none} carries no positional parameters, position entering only through the fixed patch-to-wire assignment.}
     \label{fig:clevr_relations2}
 \end{figure}
 
@@ -621,6 +621,13 @@ Every classical architecture was evaluated against a patch-shuffled control. As 
     \caption{Compositional binding with class-conditional marginals equalised by construction. Every classical architecture falls to chance once patches are shuffled, so the task cannot be solved without binding an attribute to a position. Tensor networks bind; a 683-parameter MLP, smaller than any of them, binds slightly better. Quantum arms report the best seed and the count clearly above floor, since their distribution is bimodal and a mean would describe neither the capability nor the failure.}
     \label{tab:binding_results}
 \end{table}
+
+\begin{figure}[hbt!]
+    \centering
+    \includegraphics[width=1.0\textwidth]{ch3/clevr_binding.png}
+    \caption{Compositional binding, with the classical arms shown against their patch-shuffled controls (hatched) and the quantum arms shown per seed. The shuffle control collapses every classical architecture to the chance line, confirming that the task cannot be solved without binding an attribute to a position. The quantum arms are plotted as individual seeds rather than as a mean because their distribution is bimodal: a minority of initialisations separate the arrangements clearly while the remainder sit at the floor, so a mean would describe neither outcome.}
+    \label{fig:clevr_binding_results}
+\end{figure}
 
 Interestingly, the 725-parameter \texttt{quantum\_none} architecture carries zero explicit positional parameters; position enters the quantum statevector solely via the fixed mapping of image patches to data wires. Despite this, the network successfully resolves the binding probe using only its topology, putting 5 of its 15 seeds more than 3 binomial standard deviations above the chance floor, peaking at 69.0\% ($8.1$ s.d.). Furthermore, explicitly injecting coordinate embeddings into the tree (\texttt{quantum\_on\_wire}) yields no statistically resolvable improvement over the implicit topology: comparing the two arms on their full distributions rather than their best runs, the gap is $-0.6$ points against an MDE of $5.5$, with both arms carrying signal. This is a bounded null rather than an absence of evidence, and it supports our previous results pointing towards the omission of explicit positional data from the quantum node.
 It should be noted that the quantum models still suffer from model collapse with the majority of quantum seeds collapsing to chance. 
@@ -776,13 +783,22 @@ rejected on positive evidence rather than dismissed on principle.
 
 \subsection{The Quantum Node}
 
-The unitarity constraint is not a handicap. Under matched conditions the
-quantum tree node outperforms its unconstrained classical counterpart while
-using roughly a third fewer parameters, and this parameter efficiency
-reproduces on real data rather than holding only on synthetic benchmarks. A
-secondary observation concerns multi-head training: extending the optimisation
-budget causes attribute heads sharing a single loss to trade against one
-another rather than improve together.
+The unitarity constraint is not a handicap. On synthetic shapes, under matched
+constraints, the quantum tree node outperforms its unconstrained classical
+counterpart by a resolved margin while using a third fewer parameters, and it
+ties the strongest classical tensor network in the study --- one that needs
+both residual connections and dropout to get there, mechanisms the quantum node
+was separately shown to be harmed by.
+
+That result is weaker but not absent on real data. On CLEVR the quantum tower
+holds an eighteen per cent parameter deficit to the same classical counterpart
+and wins one of four attribute heads by a resolved margin, tying on the other
+three. What transfers, then, is that the unitary node is not \emph{worse} at
+matched or lower capacity; the stronger synthetic claim, that it is
+consistently better, does not. A secondary observation concerns multi-head
+training: extending the optimisation budget causes attribute heads sharing a
+single loss to trade against one another rather than improve together, so no
+single budget is optimal for all of them.
 
 \subsection{Compositional Structure}
 
@@ -794,16 +810,29 @@ above-chance score provably requires binding an attribute to a position, the
 quantum tower separates the arrangements at many standard deviations above
 chance. It does so in the variant carrying no positional parameters whatsoever,
 with position entering only through the fixed assignment of image patches to
-qubit wires. The tree's topology is therefore sufficient on its own:
-compositional structure is captured by the architecture rather than supplied to
-it, and adding an explicit positional mechanism changes nothing measurable.
+qubit wires. At this scale the tree's topology is therefore sufficient on its
+own: compositional structure is captured by the architecture rather than
+supplied to it, and adding an explicit positional mechanism changes nothing
+measurable.
 
-Two boundaries belong with that result. The quantum tower reaches this solution
-in a minority of initialisations, so what is established is capability rather
-than reliability; and on the same probe a plain neural network of comparable
-size binds equally well, so the finding is that the quantum-native route
-\emph{works}, not that hierarchical contraction is the only architecture that
-can. Both possibilities were registered in advance of the measurement.
+Three boundaries belong with that result. The quantum tower reaches this
+solution in a minority of initialisations, so what is established is capability
+rather than reliability; and on the same probe a plain neural network of
+comparable size binds equally well, so the finding is that the quantum-native
+route \emph{works}, not that hierarchical contraction is the only architecture
+that can. Both possibilities were registered in advance of the measurement.
+
+The third is a matter of scale, and it is why the scaled tower of Chapter
+\ref{ch:aro} does not inherit the conclusion. The sufficiency of implicit
+position was measured on a depth-two tree over sixteen patches. The
+vision--language tower contracts four levels over 256, where a patch's
+identity must survive twice as many contractions and be distinguished from
+sixteen times as many alternatives, and it carries an explicit gated positional
+embedding accordingly. That is a deliberate departure rather than an
+inconsistency --- what Chapter \ref{ch:clevr} established is a bounded null at
+one depth, not a general claim that explicit position is unnecessary --- but
+the depth at which the implicit signal ceases to suffice was not measured, and
+locating it is the obvious extension of that ablation.
 
 \subsection{From Viability to a Vision--Language Model}
 
@@ -812,8 +841,11 @@ directly in the metric it uses at inference, a frozen CLIP encoder responds an
 order of magnitude more strongly to which objects are present than to how they
 are arranged, on images that a very small model separates almost perfectly.
 Replacing that encoder with a tensor-network tower, while holding the language
-model fixed, improves compositional performance on both ARO tasks and surpasses
-a far larger foundation model on relational reasoning.
+model fixed, improves compositional performance on both ARO tasks, and the
+resulting model exceeds a far larger foundation model on relational reasoning
+--- though that last comparison sets a small task-adapted model against a
+zero-shot general-purpose one, and indicates what such a model can reach rather
+than ranking the two architectures.
 
 Taken together these results support the wider programme. The tensor-network
 vision tower demonstrably improves compositional performance in a full
@@ -826,12 +858,16 @@ pipeline.
 
 \subsection{Limitations}
 
-The scale at which these claims hold is narrow. A single small image size at
-shallow depth is the only configuration trained end to end, and every noise
-result characterises an individual tree node rather than the assembled tower.
-Both are consequences of classical simulation cost rather than of the
-architecture, and both, along with the training instability noted above,
-are addressed in the future work that follows.
+The scale at which the \emph{quantum} claims hold is narrow. A single small
+image size at depth two is the only coherent configuration trained end to end,
+and every noise result characterises an individual tree node rather than the
+assembled tower. The classical tower scales considerably further --- four
+levels over 256 patches in the vision--language setting --- but that is
+precisely the asymmetry: everything the quantum node was shown to do, it was
+shown to do at sixteen qubits. Both limits are consequences of classical
+simulation cost rather than of the architecture, and both, along with the
+training instability noted above, are addressed in the future work that
+follows.
 
 
 \section{Future Work}
@@ -861,8 +897,11 @@ roughly eight. Recycling therefore converts tree depth from an unreachable
 regime into a question of latency and gate error.
 
 That in turn unlocks \textbf{training at greater depth}, the project's narrowest
-constraint: one small image size at depth two is the only configuration trained
-end to end. Forward passes already run at depth three and four on a
+constraint: one small image size at depth two is the only \emph{coherent}
+configuration trained end to end, against the four levels the classical tower
+reaches in Chapter \ref{ch:aro}. Closing that gap is what would let the quantum
+node be evaluated on the task the architecture was built for. Forward passes
+already run at depth three and four on a
 tensor-network simulator, but that device provides no backpropagation, and
 gradients by parameter shift cost close to a minute per step. Parameter shift is
 the native gradient method on hardware, so the very procedure that makes deeper

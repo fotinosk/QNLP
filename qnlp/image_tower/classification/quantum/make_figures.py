@@ -34,6 +34,8 @@ import matplotlib.pyplot as plt
 from qnlp.image_tower.classification.quantum import phase15_common as pc
 
 FIGDIR = os.path.join(pc.RESULTS_DIR, "figures")
+# Caption-free copies for the write-up; see _save().
+THESIS_FIGDIR = os.path.join(FIGDIR, "thesis")
 CHANCE, SHORTCUT_CEILING = 25.0, 50.0
 
 # Colourblind-safe, consistent across every figure.
@@ -81,14 +83,27 @@ def _reference_lines(ax, mlp=None, show_ceiling=True):
 
 
 def _save(fig, name, caption, wrap=150):
-    """Lay the caption out beneath the axes rather than on top of them.
+    """Write each figure twice: once annotated, once clean.
 
-    tight_layout is applied first, then space is reserved proportional to the
-    wrapped caption's line count, so captions never collide with axis labels.
+    The captions in this module are written for the research record -- they name
+    tasks and questions by their internal IDs, flag what a figure may NOT be
+    cited for, and shout the caveats in capitals. That is the right voice for a
+    lab notebook and the wrong one for a thesis, where LaTeX supplies the caption
+    and a second caption baked into the image is both duplicative and off-key.
+
+    So: `figures/` keeps the annotated version, and `figures/thesis/` gets the
+    same axes with no caption block. The thesis copies are the ones to import
+    into the write-up. Nothing is lost -- the provenance the annotated captions
+    carry is still generated, just not shipped into the document.
     """
     os.makedirs(FIGDIR, exist_ok=True)
-    lines = textwrap.wrap(" ".join(caption.split()), wrap)
+    os.makedirs(THESIS_FIGDIR, exist_ok=True)
     fig.tight_layout()
+
+    # Clean copy first, before any caption text is attached to the figure.
+    fig.savefig(os.path.join(THESIS_FIGDIR, name), dpi=200, bbox_inches="tight")
+
+    lines = textwrap.wrap(" ".join(caption.split()), wrap)
     line_h = 0.030
     fig.subplots_adjust(bottom=0.16 + line_h * len(lines))
     # va="bottom" anchors the block's bottom edge, so multi-line captions grow
@@ -96,7 +111,7 @@ def _save(fig, name, caption, wrap=150):
     fig.text(0.02, 0.015, "\n".join(lines), fontsize=7.5, color="#333333", va="bottom", linespacing=1.6)
     fig.savefig(os.path.join(FIGDIR, name), dpi=200, bbox_inches="tight")
     plt.close(fig)
-    print(f"  wrote {name}  ({len(lines)} caption lines)")
+    print(f"  wrote {name}  (annotated + clean; {len(lines)} caption lines)")
 
 
 def coherent_baseline():
@@ -180,7 +195,7 @@ def fig_model_comparison():
     ax2.set_ylabel("accuracy %")
     ax2.set_title("Accuracy per parameter", fontsize=10)
     _reference_lines(ax2, show_ceiling=False)
-    fig.suptitle("Quantum image tower vs. classical controls, 16x16 synthetic shapes", fontsize=12, y=0.98)
+    fig.suptitle("Quantum image tower vs. classical controls, $16 \\times 16$ synthetic shapes", fontsize=12, y=0.98)
     _save(
         fig,
         "model_comparison.png",
@@ -240,7 +255,7 @@ def fig_readout():
     """The R7 readout finding: why the bond width is the binding constraint."""
     fig, ax = plt.subplots(figsize=(6.2, 4.2))
     labels = [
-        "scalar\n(1 value,\nroot <Z>)",
+        "scalar\n(1 value,\nroot $\\langle Z \\rangle$)",
         "root_multi_pauli\n(3 values,\nroot Bloch vector)",
         "top_layer_qubits\n(4 values,\ntop-layer wires)",
     ]
@@ -251,7 +266,7 @@ def fig_readout():
     ax.set_ylabel("accuracy %")
     ax.set_ylim(0, 100)
     _reference_lines(ax)
-    ax.set_title("Readout width is the binding constraint (coherent tree)", fontsize=10)
+    ax.set_title("Readout width limits the coherent tree", fontsize=10)
     _save(
         fig,
         "readout_bottleneck.png",
@@ -399,17 +414,17 @@ def fig_encoding_ansatz():
     ax1.set_ylabel("accuracy % (mean of last 5 epochs)")
     ax1.set_ylim(0, 122)
     ax1.legend(fontsize=8, loc="upper center", ncol=2, frameon=False)
-    ax1.set_title("Encoding x ansatz, 21 seeds each", fontsize=10)
+    ax1.set_title("Encoding $\\times$ ansatz, 21 seeds each", fontsize=10)
     _reference_lines(ax1, mlp=mlp["mlp_reference"]["score_mean"] if mlp else None)
 
     # Effect sizes against their resolution limits -- the point of the figure.
     cmps = [
         (
-            "encoding\n(multi_axis - scalar_ry,\nat iqp)",
+            "encoding\nmulti_axis over scalar_ry",
             pc.compare(arms[("scalar_ry", "iqp")], arms[("multi_axis", "iqp")]),
         ),
         (
-            "ansatz\n(iqp - strongly_ent.,\nat multi_axis)",
+            "ansatz\niqp over strongly_entangling",
             pc.compare(arms[("multi_axis", "strongly_entangling")], arms[("multi_axis", "iqp")]),
         ),
     ]
@@ -420,7 +435,7 @@ def fig_encoding_ansatz():
         ax2.plot([c["difference"]], [y], "D", ms=9, color="#0072B2" if c["resolved"] else "#888888", zorder=3)
         # Left-aligned at a fixed x so long labels can never overflow the axis.
         ax2.annotate(
-            f"{c['difference']:+.1f}  (limit {m:.1f}) -- {'RESOLVED' if c['resolved'] else 'not resolved'}",
+            f"{c['difference']:+.1f} pts, MDE {m:.1f}" + ("  (resolved)" if c["resolved"] else "  (within noise)"),
             (-5.7, y + 0.30),
             ha="left",
             fontsize=8,
@@ -432,7 +447,7 @@ def fig_encoding_ansatz():
     ax2.set_xlabel("difference in accuracy (pts)")
     ax2.set_xlim(-6, 16)
     ax2.set_ylim(-0.6, len(cmps) - 0.25)
-    ax2.set_title("Effect size vs resolution limit", fontsize=10)
+    ax2.set_title("Measured difference vs. minimum detectable effect", fontsize=10)
 
     _save(
         fig,
@@ -475,7 +490,7 @@ def fig_ansatz_comparison():
     ax1.set_ylabel("validation accuracy %")
     ax1.set_ylim(0, 100)
     ax1.legend(fontsize=8, loc="lower right")
-    ax1.set_title("multi_axis encoding, mean +/- 1 s.d. over 21 seeds", fontsize=10)
+    ax1.set_title("multi_axis encoding, mean $\\pm$ 1 s.d. over 21 seeds", fontsize=10)
     _reference_lines(ax1)
 
     for k, ansatz in enumerate(("strongly_entangling", "iqp")):
@@ -491,7 +506,8 @@ def fig_ansatz_comparison():
     ax2.set_ylabel("accuracy % (mean of last 5 epochs)")
     ax2.set_ylim(0, 100)
     ax2.set_title(
-        f"Per-seed spread: {cmp_['difference']:+.1f} pts, limit {cmp_['min_detectable_effect']:.1f} -> NOT RESOLVED",
+        f"Per-seed spread: {cmp_['difference']:+.1f} pts against an MDE of "
+        f"{cmp_['min_detectable_effect']:.1f}, within noise",
         fontsize=10,
     )
     _reference_lines(ax2, show_ceiling=True)
@@ -622,7 +638,9 @@ def fig_clevr_attributes():
         ax.set_xticklabels([f"{SHORT[a]}\n{params[a]}p" for a in arms], fontsize=7.5)
         ax.set_ylim(0, 105)
     axes[0].set_ylabel("accuracy % (mean of last 5 epochs)")
-    fig.suptitle("CLEVR single-object attribute classification, 16x16 object crops, 90 epochs", fontsize=12, y=0.99)
+    fig.suptitle(
+        "CLEVR single-object attribute classification, $16 \\times 16$ object crops, 90 epochs", fontsize=12, y=0.99
+    )
     _save(
         fig,
         "clevr_attributes.png",
@@ -722,7 +740,7 @@ def fig_clevr_relations():
     ax2.set_xlabel("seeds (of 10)")
     ax2.set_xlim(0, 10)
     ax2.legend(fontsize=7.5, loc="lower right")
-    ax2.set_title("Training frequently collapses", fontsize=10)
+    ax2.set_title("Seeds reaching above the majority floor", fontsize=10)
 
     _save(
         fig,
@@ -860,6 +878,7 @@ def main():
         "topology_barren_plateaus, entropy_vs_tree_depth, entropy_propagation_vs_noise -- these\n"
         "involve no classifier head and are unaffected. topology_noise_resilience is RETIRED."
     )
+    print(f"\nAnnotated (research record): {FIGDIR}\nClean (import these into the write-up): {THESIS_FIGDIR}")
 
 
 if __name__ == "__main__":
