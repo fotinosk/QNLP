@@ -303,7 +303,7 @@ As shown in Figure \ref{fig:topology_barren_plateaus}, the empirical variance di
     \label{fig:topology_barren_plateaus}
 \end{figure}
 
-For the QTTN, this empirical success is theoretically supported. Pesah et al. \cite{pesah2021_qcnn} proved that hierarchical topologies avoid barren plateaus. However, the proof does not extend to 1D MPS or standard MERA networks. Their survival in this specific diagnostic is an empirical artifact of the shallow depths and bounded scales ($N \le 20$) tested. Nonetheless, at the operational scales required for our vision task, the gradient variance of all architectures remained highly stable and optimizable.
+For the QTTN, this empirical success is theoretically supported. Literature shows \cite{pesah2021_qcnn} \cite{liu2022tnbp} that hierarchical topologies avoid barren plateaus. However, the proof does not extend to 1D MPS or standard MERA networks. Their survival in this specific diagnostic is an empirical artifact of the shallow depths and bounded scales ($N \le 20$) tested. Nonetheless, at the operational scales required for our vision task, the gradient variance of all architectures remained highly stable and optimizable.
 
 
 \subsection{Ansatz and Encoding Investigation}
@@ -713,293 +713,71 @@ DisCoViz also exceeds CLIP and OpenCLIP by a wide margin, and exceeds BLIP on Re
 
 \section{Conclusion}
 
-This report set out to build the missing half of a quantum-inspired
-vision--language model. The language side already existed in DisCoCat, whose
-contraction follows a sentence's grammatical structure; the open question was
-whether an image encoder could be built on the same principle, and whether
-replacing its classical tensor nodes with genuine quantum unitaries costs or
-buys anything. We surveyed a family of candidate encoders --- tree,
-matrix-product and MERA topologies across four data encodings and three
-ans\"{a}tze --- narrowed them on measured evidence, and evaluated the survivor
-in isolation, on CLEVR, and finally as one tower of a full vision--language
-model.
+This report set out to build the missing half of a quantum-inspired vision--language model. The language side already existed in DisCoCat, whose contraction follows a sentence's grammatical structure; the open question was whether an image encoder could be built on the same principle, and whether replacing its classical tensor nodes with genuine quantum unitaries costs or buys anything. We surveyed a family of candidate encoders: tree, matrix-product and MERA topologies across four data encodings and three ans\"{a}tze and narrowed them on measured evidence, and evaluated the survivor in isolation, on CLEVR, and finally as one tower of a full vision--language model.
 
 \subsection{Architecture}
 
-The selected architecture is a coherent quantum tree tensor network. Two design
-decisions proved load-bearing and were each established the hard way:
-intermediate states must pass between tree levels as qubits rather than being
-measured and re-encoded, and the model must read its top layer rather than a
-single root, the latter a consequence of a classical simulation limit rather
-than a design preference. Mechanisms that classical intuition recommends, most
-notably residual connections and explicit positional encoding, were tested and
-rejected on positive evidence rather than dismissed on principle.
+The selected architecture is a coherent quantum tree tensor network. Two design decisions proved important and were each established through experiments: intermediate states must pass between tree levels as qubits rather than being measured and re-encoded, and the model must read its top layer rather than a single root, because of simulation limitations rather. Common classical mechanisms like residual connections, dropout and explicit positional encoding, were tested and rejected due to lack of evidence supporting their usefulness.
 
 \subsection{The Quantum Node}
 
-The unitarity constraint is not a handicap. On synthetic shapes, under matched
-constraints, the quantum tree node outperforms its unconstrained classical
-counterpart by a resolved margin while using a third fewer parameters, and it
-ties the strongest classical tensor network in the study --- one that needs
-both residual connections and dropout to get there, mechanisms the quantum node
-was separately shown to be harmed by.
+The unitarity constraint is not a liability. On synthetic shapes the quantum tree node outperforms its unconstrained classical counterpart while using a third fewer parameters, and it ties the strongest classical tensor network in the study.
 
-That result is weaker but not absent on real data. On CLEVR the quantum tower
-holds an eighteen per cent parameter deficit to the same classical counterpart
-and wins one of four attribute heads by a resolved margin, tying on the other
-three. What transfers, then, is that the unitary node is not \emph{worse} at
-matched or lower capacity; the stronger synthetic claim, that it is
-consistently better, does not. A secondary observation concerns multi-head
-training: extending the optimisation budget causes attribute heads sharing a
-single loss to trade against one another rather than improve together, so no
-single budget is optimal for all of them.
+That result is weaker but not absent on real data. On CLEVR the quantum tower holds an eighteen per cent parameter deficit to the same classical counterpart and wins one of four attribute heads, tying on the other three. What can be said looking at the synthetic data and the CLEVR dataset is that the unitary node is not worse at matched capacity, but the stronger claim, that it is better, cannot be made. A secondary observation concerns multi-head training: extending the optimisation budget causes attribute heads sharing a single loss to trade against one another rather than improve together, so no single budget is optimal for all of them.
 
 \subsection{Compositional Structure}
 
-The aim was to establish that a quantum-native architecture can capture
-compositional structure, and it does. On a probe whose class-conditional
-marginals are identical by construction, validated by a control in which
-every architecture falls to exactly chance under patch shuffling, so that any
-above-chance score provably requires binding an attribute to a position, the
-quantum tower separates the arrangements at many standard deviations above
-chance. It does so in the variant carrying no positional parameters whatsoever,
-with position entering only through the fixed assignment of image patches to
-qubit wires. At this scale the tree's topology is therefore sufficient on its
-own: compositional structure is captured by the architecture rather than
-supplied to it, and adding an explicit positional mechanism changes nothing
-measurable.
+The aim was to establish that a quantum-native architecture can capture compositional structure, and it does. The quantum tower separates the arrangements well above chance. It does so with no positional parameters whatsoever, with position entering only through the fixed assignment of image patches to qubit wires. At this scale the tree's topology is therefore sufficient on its own: compositional information is captured by the architecture rather than supplied to it, and adding an explicit positional mechanism changes nothing measurable.
 
-Three boundaries belong with that result. The quantum tower reaches this
-solution in a minority of initialisations, so what is established is capability
-rather than reliability; and on the same probe a plain neural network of
-comparable size binds equally well, so the finding is that the quantum-native
-route \emph{works}, not that hierarchical contraction is the only architecture
-that can. Both possibilities were registered in advance of the measurement.
+The quantum tower manages to bind, but it also displays a bimodal distribution, with the majority of runs failing to train and falling to chance, something attributed to a training failure that can be easily identified and discarded. The plain neural network also binds equally well, clearly showing that hierarchical contraction is not the only architecture that can.
 
-The third is a matter of scale, and it is why the scaled tower of Chapter
-\ref{ch:aro} does not inherit the conclusion. The sufficiency of implicit
-position was measured on a depth-two tree over sixteen patches. The
-vision--language tower contracts four levels over 256, where a patch's
-identity must survive twice as many contractions and be distinguished from
-sixteen times as many alternatives, and it carries an explicit gated positional
-embedding accordingly. That is a deliberate departure rather than an
-inconsistency --- what Chapter \ref{ch:clevr} established is a bounded null at
-one depth, not a general claim that explicit position is unnecessary --- but
-the depth at which the implicit signal ceases to suffice was not measured, and
-locating it is the obvious extension of that ablation.
+The quantum tower was tested with and without explicit positional parameters and showed no benefit either way, though only at the sixteen qubits that could be simulated. A separate ablation in Chapter \ref{ch:synthetic}, which spent a whole qubit per position, did harm performance, but on a translation-invariant task that says little about relational settings. The vision--language tower of Chapter \ref{ch:aro} is a different regime: at a fixed patch size a wider image gives more patches and therefore a deeper tree, and that tower contracts four levels over 256 patches rather than two over sixteen. Positional information is correspondingly harder to retain, so explicit embeddings were used there. Whether they are in fact needed at that depth was not measured.
 
 \subsection{From Viability to a Vision--Language Model}
 
-That capability matters because of where the architecture is destined. Measured
-directly in the metric it uses at inference, a frozen CLIP encoder responds an
-order of magnitude more strongly to which objects are present than to how they
-are arranged, on images that a very small model separates almost perfectly.
-Replacing that encoder with a tensor-network tower, while holding the language
-model fixed, improves compositional performance on both ARO tasks, and the
-resulting model exceeds a far larger foundation model on relational reasoning
---- though that last comparison sets a small task-adapted model against a
-zero-shot general-purpose one, and indicates what such a model can reach rather
-than ranking the two architectures.
+The compositional capacity matters because it is the metric that DisCoClip cites. Measuring the embedding vector similarity, a frozen CLIP encoder responds an order of magnitude more strongly to which objects are present than to how they are arranged. Replacing that encoder with a tensor-network tower, while holding the language model fixed, improves compositional performance on both ARO tasks, and the resulting model exceeds a far larger foundation model on relational reasoning. It should be noted though that this comparison sets a small task-adapted model against a zero-shot general-purpose one.
 
-Taken together these results support the wider programme. The tensor-network
-vision tower demonstrably improves compositional performance in a full
-vision--language model; its quantum counterpart demonstrably performs the same
-binding at a fraction of the parameters. A quantum-native vision--language
-model is therefore a viable path rather than a speculative one, with the
-qualification that the two halves of that argument have so far been measured
-separately, since the quantum tower has not yet been placed in the full
-pipeline.
+Taken together these results support the wider scope. The tensor-network vision tower demonstrably improves compositional performance in a full vision--language model; its quantum counterpart demonstrably performs the same binding at a fraction of the parameters. A quantum-native vision--language model is therefore a viable path, with the caveat that the two halves of that argument have so far been measured separately, since the quantum tower has not yet been placed in the full pipeline.
 
 \subsection{Limitations}
 
-The scale at which the \emph{quantum} claims hold is narrow. A single small
-image size at depth two is the only coherent configuration trained end to end,
-and every noise result characterises an individual tree node rather than the
-assembled tower. The classical tower scales considerably further --- four
-levels over 256 patches in the vision--language setting --- but that is
-precisely the asymmetry: everything the quantum node was shown to do, it was
-shown to do at sixteen qubits. Both limits are consequences of classical
-simulation cost rather than of the architecture, and both, along with the
-training instability noted above, are addressed in the future work that
-follows.
+The scale at which the \emph{quantum} claims hold is narrow. A single small image size at depth two is the only coherent configuration trained end to end, and every noise result characterizes an individual tree node rather than the assembled tower. The classical tower scales considerably further but this introduces an asymmetry since it cannot be said which are scaling limitations inherent to both or just the classical model. These are consequences of classical simulation cost rather than of the architecture, and both, along with the training instability noted above, are addressed in the future work that follows.
 
 
 \section{Future Work}
 
-Two directions follow from this work. The first is a set of experiments blocked
-not by the architecture but by the cost of simulating it classically, which
-become tractable on quantum hardware. The second is the design of a
-vision--language model in which both towers, and the comparison between them,
-are quantum.
+Two directions follow from this work. The first is a set of experiments blocked not by the architecture but by the cost of simulating it classically, which become tractable on quantum hardware. The second is the design of a vision--language model in which both towers, and the comparison between them, are quantum.
 
 \subsection{Execution on Quantum Hardware}
 
-Several of this project's sharpest limitations are properties of the simulator
-rather than of the model, and they share a signature: the technique is already
-validated, and only its classical emulation is infeasible.
+Several of this project's limitations are properties of the simulator rather than of the model, and they have a common fingerprint: the technique is already validated, and only its classical emulation is infeasible.
 
-The clearest case is \textbf{active qubit recycling}. Measuring and resetting
-qubits once a tree node has consumed them was shown to be mathematically exact,
-reducing a sixteen-qubit tree to seven physical qubits with an identical output.
-It does not extend beyond depth two in simulation for reasons entirely internal
-to simulators: the deferred-measurement transform allocates a fresh ancilla wire
-for every measurement, and the alternative branch-tracking strategy grows
-exponentially in the number of resets. On hardware, mid-circuit measurement and
-reset are native operations with no such blow-up, and the saving is
-substantial --- a tree that would nominally require eighty qubits fits in
-roughly eight. Recycling therefore converts tree depth from an unreachable
-regime into a question of latency and gate error.
+The clearest case is \textbf{active qubit recycling}. Measuring and resetting qubits once a tree node has consumed them was shown to be exact, reducing a sixteen-qubit tree to seven physical qubits with an identical output. It does not extend beyond depth two in simulation due to implementation choices of the simulator. On hardware, mid-circuit measurement and reset are native operations with no blow-up, and the saving is substantial, a tree that would require eighty qubits fits in roughly eight. Recycling therefore converts tree depth from an unreachable regime into a question of latency and gate error.
 
-That in turn unlocks \textbf{training at greater depth}, the project's narrowest
-constraint: one small image size at depth two is the only \emph{coherent}
-configuration trained end to end, against the four levels the classical tower
-reaches in Chapter \ref{ch:aro}. Closing that gap is what would let the quantum
-node be evaluated on the task the architecture was built for. Forward passes
-already run at depth three and four on a
-tensor-network simulator, but that device provides no backpropagation, and
-gradients by parameter shift cost close to a minute per step. Parameter shift is
-the native gradient method on hardware, so the very procedure that makes deeper
-trees prohibitive to simulate is how they would be trained physically.
+That would unlock \textbf{training at greater depth}, the project's narrowest constraint: one small image size at depth two is the only \emph{coherent} configuration trained end to end, versus the four levels the classical tower reaches in Chapter \ref{ch:aro}. Closing that gap is what would let the quantum node be evaluated on the ARO dataset. Forward passes already run at depth three and four on a tensor-network simulator, but that device provides no backpropagation and devices offering backpropagation require really large amounts of CPU.
 
-A third experiment addresses a measured defect rather than a scaling ambition.
-The tower reads its top layer rather than contracting to a single root, because
-reading the root alone costs more than forty accuracy points. This is a
-workaround for a bond dimension of one, imposed by statevector memory: every
-additional qubit per node doubles the simulated state, while on hardware the
-cost is merely linear. Increasing the bond dimension would test whether the
-architecture as originally designed --- a tree that genuinely contracts to a
-root --- performs as intended.
+The third experiment addresses an architectural compromise. A tree tensor network is meant to contract to a single root, and that root is meant to summarise the whole image. Ours cannot: each child passes only one qubit to its parent, giving a bond dimension of two, so by the time information reaches the root almost none of it has survived. Reading the root alone therefore heavily degrades accuracy, so the tower instead reads all four wires at the top layer, the root together with the three qubits the tree would normally discard. That workaround exists because of simulation memory. Each additional qubit per bond doubles the state a simulator must hold, whereas on hardware it costs just one more physical qubit. Widening the bonds on a device would let the architecture be tested as intended, with a root that summarises the tree.
 
-Hardware would also permit two measurements currently possible only in
-miniature. All noise results in this report characterise a \emph{single} tree
-node, because simulating a noisy sixteen-qubit circuit requires a density matrix
-of prohibitive size; on hardware noise is not emulated but inhabited, so the
-resilience of the assembled tower could be measured directly. Similarly, the
-gradient-scaling study stops at twenty qubits because automatic differentiation
-caches a statevector at every gate, whereas sampling gradients physically would
-allow the polynomial-scaling claim to be tested at widths where it becomes
-falsifiable.
+Hardware would also permit whole-tree noise results. All noise results in this report characterise a \emph{single} tree node, because simulating a noisy sixteen-qubit circuit requires a density matrix of prohibitive size; on hardware noise is not emulated but enforced, so the resilience of the assembled tower could be measured directly. Similarly, the gradient-scaling study stops at twenty qubits because automatic differentiation caches a statevector at every gate, whereas sampling gradients physically would allow the polynomial-scaling claim to be tested thoroughly and allow for general claims to be made on barren plateau resilience.
 
-\paragraph{What hardware would not resolve.} The binding constraint on this
-architecture is optimisation stability, and that is not a simulation artefact.
-If anything, physical execution sharpens it: simulation returns exact
-expectation values, whereas hardware returns sampled estimates, adding shot
-noise to a landscape on which training already collapses from a substantial
-fraction of initialisations.
+\subsubsection{Training Instability}
+Every limitation above is a simulation one. The most serious one is not. Most training runs collapse to chance and never recover, and that is a property of the optimisation landscape rather than of the simulator, hardware runs do not change that. Barren plateaus are not the cause. Liu et al.\ show gradient variance decaying only polynomially in tree tensor networks under local loss functions \cite{liu2022tnbp}, our own measurements agree at the widths used, and the failure pattern does not match; a plateau would flatten the landscape for every initialisation, not leave a third of them training normally. Anschuetz and Kiani show that shallow models without barren plateaus can still be untrainable, because only a superpolynomially small fraction of their local minima lie near the global optimum \cite{anschuetz2022traps}. This matches what we see, a bimodal distribution, with one modality at chance and another able to learn.
 
-That instability is well documented in the wider literature, and our
-observations match it closely. Anschuetz and Kiani show that variational models
-which are shallow and exhibit \emph{no} barren plateaus can nonetheless be
-untrainable, because only a superpolynomially small fraction of their local
-minima lie within any constant energy of the global optimum, rendering such
-models untrainable absent a good initial guess \cite{anschuetz2022traps}. This
-describes our situation precisely: gradient variance measurements confirm the
-absence of a barren plateau at the widths used, yet a majority of random
-initialisations never leave chance --- a landscape densely populated with traps
-rather than a flat one. Consistent with this, the tensor-network-specific
-analysis of Liu et al.\ finds that barren plateaus are absent for
-\emph{local} loss functions, with tree tensor networks showing polynomially
-decaying gradient variance, better-behaved than matrix product states
-\cite{liu2022tnbp} --- again matching our measurements, and again not sufficient
-for reliable training.
-
-Two remedies from that literature are worth testing. The identity-block
-initialisation of Grant et al.\ constrains the circuit to evaluate to the
-identity at the start of training, bounding its effective depth on the first
-update \cite{grant2019init}; we tested a near-identity variant and found no
-measurable effect, which is consistent with a trap-dominated rather than
-plateau-dominated landscape. More promising is \emph{warm-starting from a
-classical tensor network}: Rudolph et al.\ train a matrix product state
-classically, transfer it into a parametrized circuit, and report gradient
-magnitudes that remain stable where randomly initialised circuits decay
-exponentially, at scales up to a hundred qubits \cite{rudolph2023pretraining}.
-The correspondence is unusually direct in our case, since the classical CP tree
-tensor network is not an analogue of the quantum tower but its structural
-counterpart, trained on the same data and already known to converge reliably. A
-trained classical tree could therefore supply the quantum circuit's initial
-parameters rather than random values. Related work embeds pre-trained tree
-tensor networks into quantum classifiers through adiabatic encoding, removing
-the postselection overhead that would otherwise make such transfers impractical
-\cite{murota2025ttn}.
+Two approaches from that literature are worth testing. The identity-block initialisation of Grant et al.\ constrains the circuit to evaluate to the identity at the start of training, bounding its effective depth on the first update \cite{grant2019init}; we tested a near-identity variant and found no measurable effect, which is consistent with a trap-dominated rather than plateau-dominated landscape. More promising is \emph{warm-starting from a classical tensor network}: Rudolph et al.\ train a matrix product state classically, transfer it into a parametrized circuit, and report gradient magnitudes that remain stable where randomly initialised circuits decay exponentially \cite{rudolph2023pretraining}. This is particularly fitting in our case. Rudolph et al.\ transfer between two different architectures, whereas our classical CP tree shares the quantum tower's topology exactly differing only in that its nodes are unconstrained contractions rather than unitaries. It is trained on the same data and converges reliably, so it is available as a starting point.
 
 \subsection{Towards a Fully Quantum Vision--Language Model}
 
-The architecture described here is quantum up to a classical boundary: patch
-data is encoded into rotation angles, and measured expectation values are
-projected into an embedding space where similarity is computed classically.
-Those two interfaces are unavoidable for a model that consumes images and
-produces scores. A more ambitious design would keep both towers as quantum
-circuits and compare their outputs quantum-mechanically, never materialising an
-embedding vector at all. Two problems stand between the present work and that
-design, and neither is incidental.
+The architecture described here is quantum with classical 'edges': patch data is encoded into rotation angles, and measured expectation values are projected into an embedding space where similarity is computed classically. Those two interfaces are unavoidable for a model that consumes images and produces scores. A more ambitious design would keep both towers as quantum circuits and compare their outputs quantum-mechanically, never materialising an embedding vector at all. Two problems stand between the present work and that design.
 
-\paragraph{The similarity measure.} Contrastive training requires a similarity
-between an image representation and a text representation, and the obvious
-quantum analogue of cosine similarity is state fidelity, estimated by a SWAP
-test. The substitution is less direct than it appears. Fidelity returns the
-\emph{squared modulus} of the overlap, which discards sign: perfectly opposed
-states are indistinguishable from perfectly aligned ones. Contrastive objectives
-depend on pushing negatives apart, so a measure that maps maximal dissimilarity
-onto maximal similarity removes the direction the gradient should travel in.
+\subsubsection{The similarity measure}
+Contrastive training requires a similarity between an image representation and a text representation, and the obvious quantum analogue of cosine similarity is state fidelity. The substitution is less direct than it appears. Fidelity returns the \emph{squared modulus} of the overlap, which discards sign: perfectly opposed states are indistinguishable from perfectly aligned ones, conflating maximal similarity with maximal dissimilarity.
 
-A second difficulty is more fundamental. Thanasilp et al.\ show that quantum
-kernel values concentrate exponentially in the number of qubits towards a fixed
-value, so that the number of measurements required for successful training
-grows exponentially and predictions on unseen inputs become independent of the
-input \cite{thanasilp2024concentration}. Critically for this proposal, they
-identify the \emph{fidelity kernel} as particularly vulnerable, since its
-reliance on a global measurement induces exponential concentration even when the
-embedding's expressibility and the entanglement of the data states are low. A
-similarity built on state overlap therefore inherits a known scaling pathology
-rather than merely an implementation cost.
+A second difficulty is more fundamental. Thanasilp et al.\ show that quantum kernel values concentrate exponentially in the number of qubits towards a fixed value, so that the number of measurements required for successful training grows exponentially and predictions on unseen inputs become insensitive to the input \cite{thanasilp2024concentration}. Critically for this proposal, they identify the \emph{fidelity kernel} as particularly vulnerable, since its reliance on a global measurement induces exponential concentration even when the embedding's expressibility and the entanglement of the data states are low. A similarity built on state overlap therefore inherits a known scaling pathology rather than merely an implementation cost.
 
-A third difficulty is specific to this architecture. Because the tree traces out
-three of every four qubits, its output is a mixed state rather than a pure one;
-a SWAP test on mixed states returns the Hilbert--Schmidt inner product, whose
-magnitude is bounded by the purities of the states involved, so mixedness
-compresses the dynamic range independently of the content being compared. Given
-that survivor states were measured well inside the Bloch sphere, this is not a
-hypothetical concern.
+Alternatives exist and each trades one difficulty for another. A Hadamard test recovers the real part of the overlap and therefore preserves sign, at the cost of a controlled operation. A small trained circuit could take both registers and emit a score directly, avoiding a fixed metric but introducing another variational object to optimise. The present design, measuring both towers and comparing classically, remains a viable candidate, since it is cheap and preserves the sign.
 
-Alternatives exist and each trades one difficulty for another. A Hadamard test
-recovers the real part of the overlap and therefore preserves sign, at the cost
-of a controlled operation. A small trained circuit could take both registers and
-emit a score directly, avoiding a fixed metric but introducing another
-variational object to optimise. And the present design --- measuring both towers
-and comparing classically --- remains the baseline that any quantum similarity
-must justify itself against, since it is cheap, signed, and free of
-concentration effects.
-
-\paragraph{Matching the two Hilbert spaces.} A second problem is structural, and
-follows directly from what makes the language model attractive. In DisCoCat the
-contraction topology is determined by the sentence's grammatical structure
-rather than by a fixed layout, so different sentences induce different circuits
-and, in general, different output register widths. Any similarity computed by
-state overlap requires both states to inhabit the same Hilbert space. A quantum
-vision--language model therefore needs a convention mapping every parse, of any
-structure, onto a register of fixed width --- whether by padding to a maximum
-arity, by a learned compression stage, or by constraining the admissible
-diagrams. This is an architectural commitment rather than an implementation
-detail, and a prerequisite for the similarity question above rather than a
-consequence of it. It is also a problem the classical pipeline never had to
-confront: projecting a contraction of any shape into a fixed-dimensional
-embedding is trivial classically, and is precisely what the final linear layer
-does.
-
-\paragraph{The nearest experiment.} One study would strengthen this report
-considerably at a fraction of that cost. The quantum tower and the
-vision--language results were measured separately, the latter using the
-classical tensor-network tower. Placing the quantum tower into the full pipeline
-and evaluating it on the same compositional benchmark would join the two halves
-of the viability argument. The obstacle is cost rather than design: contrastive
-training requires three forward passes per sample, over far more data than the
-classification experiments used, and at a seed budget dictated by the collapse
-rate. Reducing that collapse rate --- most plausibly by the classical
-warm-starting described above --- is therefore the prerequisite for the entire
-programme, and the most valuable single piece of future work.
-
-
-
+\subsubsection{Matching the two output spaces}
+A second problem is structural, and follows directly from what makes the language model attractive. In DisCoCat the contraction topology is determined by the sentence's grammatical structure rather than by a fixed layout, so different sentences induce different circuits and, in general, different output register widths. Any similarity computed by state overlap requires both states to inhabit the same Hilbert space. It is also a problem the classical pipeline never had to confront due to the well-curated ARO dataset. Solutions to this problem would either involve abandoning the expressivness of the text model in favor of a fixed output shape, or designing a versatile projection layer.
 
 % =============================================
 % 9. BIBLIOGRAPHY / REFERENCES
