@@ -20,7 +20,7 @@
 \usepackage{titlesec}
 \titleclass{\chapter}{straight}
 \titleformat{\chapter}{\normalfont\Huge\bfseries}{\thechapter.}{1em}{}
-% \titlespacing*{\chapter}{0pt}{-30pt}{10pt}
+\titlespacing*{\chapter}{0pt}{20pt plus 4pt minus 2pt}{5pt}
 
 \pagestyle{fancy}
 \fancyhf{}
@@ -36,9 +36,9 @@
 \begin{center}
     \vspace*{0.8cm}
 
-    \Large \textbf{Quantum Inspired Vision-Language: A Tensorial Approach} \\
-
-
+    \rule{\textwidth}{0.4pt}
+    \Huge \textbf{Quantum Tensor Networks for Vision} \\[0.2cm]
+    \large Architecture, Compositionality and Trainability \\
     \vspace{0.8cm}
 
     \large \textbf{Fotinos Kyriakides} \\
@@ -47,27 +47,19 @@
 
 
     \large University College London \\
-    \vspace{0.2cm}
-
-
-    % \rule{\textwidth}{0.4pt}
+    \rule{\textwidth}{0.4pt}
+    % \vspace{0.2cm}
 
     \large \textbf{Abstract}
     \end{center}
 
 \normalsize
 
-Tensor networks are a natural quantum-native architecture for image encoding, since their contraction structure can be made to capture the spatial hierarchy of an image. Several candidates exist, but their relative merits under NISQ constraints have not been established empirically.
+Tensor networks are a natural quantum-native architecture for image encoding, since their contraction structure can capture an image's spatial hierarchy, but the relative merits of the candidates have not been established empirically. We survey tree, matrix-product and MERA topologies across four data encodings, three ans\"{a}tze and three readout protocols, and select a coherent quantum tree tensor network trained in noiseless simulation.
 
-We investigate a family of quantum image encoders: tree, matrix-product and MERA topologies, as well as four data encodings, three variational ansätze and three readout protocols. The viability of the protocols is measured against barren plateau susceptibility, qubit count and circuit depth, information capacity and simulability.
+We then examine which of its quantum properties carry weight. Unitarity costs nothing: at $18\%$ fewer parameters the quantum node beats its unconstrained classical counterpart on shape perception and matches it on spatial relations, without the dropout and residual connections the classical tree needs. Coherence between levels is load-bearing, passing intermediate states as qubits rather than measured scalars offers improvement. Bond dimension, held to one qubit per bond by simulation memory limits the readout. Gradient variance decays polynomially rather than exponentially, so there is no barren plateau; yet most initialisations still fail to train, indicating a landscape of poor local minima rather than a flat one. The tower nonetheless resolves a compositional binding task using its topology alone, with no explicit positional parameters.
 
-The selected architecture is a coherent quantum tree tensor network, in which image patches are encoded on qubits and contracted hierarchically through entangling unitaries. It is trained in noiseless simulation at sixteen qubits, the widest circuit that remains tractable. Certain system properties are investigated at the node level with noisy simulation, where possible.
-
-Using the CLEVR dataset the quantum coherent model is compared against its classical counterpart and neural network baselines. The classical counterpart replaces unitaries with CP-decomposed nodes and depends on dropout and residual connections, whereas the quantum model is measurably harmed by both and reaches its performance without them, and without explicit positional encoding. The quantum model beats the classical counterpart on shape classification while carrying 18\% fewer parameters, and matches it on spatial relations at a comparable count, so it can be said that the unitarity constraint does not reduce representational capacity at the scales used in these experiments. Despite the absence of explicit positional parameters, the quantum model proves its compositional capacity in a compositional binding task.
-
-Substituting a tensor-network vision tower for frozen CLIP yields a vision-language model that is quantum-inspired end to end. On ARO, this model improves attribution accuracy from 70\% to 77.65\% and relation accuracy from 55.81\% to 59.78\%.
-
-Throughout the experiments the quantum model showed extreme sensitivity to initialization, with frequent model collapses.
+Substituted for a frozen classical vision encoder, it yields a vision--language model that is quantum-inspired end to end and improves compositional accuracy on both attribution and relation, though it does not transfer to general-purpose caption data.
 
 \newpage
 
@@ -90,28 +82,15 @@ This line of work runs parallel to theirs in multiple ways, with the initial goa
 \setcounter{page}{1}
 
 \chapter{Introduction}
-% An introductory section, which states the aims and objectives of the project, discusses the rationale for the project (including how it relates to previous work), and outlines what is covered by each main section in the report.
 
-% \section{Aims and Objectives}
-% [State the specific goals of your project. Use bullet points or a numbered list.]
-
-% \section{Rationale and Previous Work}
-% [Discuss why this project matters. Link to previous research with citations.]
-
-% \section{Report Outline}
-% [Briefly describe what each chapter covers. End with: "Chapter 2 covers the
-% methodology. Chapter 3 presents the results. Chapter 4 discusses the findings
-% and concludes."]
 
 Quantum machine learning models promise large improvements over classical ones in both parameter count and expressiveness by taking advantage of quantum effects like entanglement and superposition. These advantages however come at a cost; some arise due to the computational limitations of the NISQ era \cite{nisq}, while others are intrinsic to the quantum paradigm.
 
 In this work, we set off to explore possible architectures for a quantum-inspired image encoder. The field of quantum-inspired machine learning \cite{quantum_inspired} mostly revolves around using tensor network architectures. This framework allows for both a classical and a quantum model to be developed in parallel, an approach we adopt in this work. We explore how classical features, like dropout \cite{dropout} and residual connections \cite{residuals}, can be applied to quantum circuits and whether or not they are needed. Moreover, we investigate how the selection of ansätze and encoding methods affects the expressivity of the model, its depth and parameter efficiency.
 
 Beyond architectural details, we evaluate and contrast the resulting tensor network's performance with contemporary MLP models on various benchmarks across perception, relation, and composition tasks.
-% In doing so, we report two core findings regarding the vision tower: first, that the unitarity-constrained quantum node achieves higher parameter efficiency than its unconstrained classical counterpart, and second, that within the vision tower itself, tensor networks show no compositional advantage over a parameter-matched MLP.
 
 As a secondary objective, we explore how this architecture performs within a broader multimodal context. Contemporary Vision Language Models (VLMs) heavily rely on contrastive learning architectures\cite{clip} that frequently exhibit "bag-of-words" behavior, struggling on compositional benchmarks that require a strict understanding of spatial layout \cite{aro}. By combining our classical quantum-inspired image model with an existing quantum-inspired text model, we yield the first fully quantum-inspired vision-language model.
-% Evaluating this integrated model reveals our third finding: that the baseline frozen CLIP encoder is measurably blind to compositional binding, discarding spatial information that the smaller models readily capture.
 
 Ultimately, the aims of this project are threefold: (i) to explore viable quantum-inspired image encoder architectures using tensor networks; (ii) to rigorously benchmark the parameter efficiency and compositional capabilities of the quantum unitary node against classical unconstrained nodes and MLPs; and (iii) to integrate this image encoder into a multimodal framework to assess whether a structurally rigorous architecture can overcome the compositional limitations of standard contrastive VLMs.
 
@@ -619,10 +598,10 @@ We ran the same probe on a frozen CLIP image encoder \cite{radford2021learning}.
 % ==========================================
 % CHAPTER 6: ARO
 % ==========================================
-\chapter{ARO: Vision-Language Integration}
+\chapter{Vision-Language Integration}
 \label{ch:aro}
 
-Having established the compositional capabilities of tensor topologies on vision tasks, the final phase integrates the quad-tree architecture into a full Vision-Language Model (VLM) via the Attribution, Relation, and Order (ARO) benchmark.
+Having established the compositional capabilities of tensor topologies on vision tasks, the final phase integrates the quad-tree architecture into a full Vision-Language Model (VLM) via the Attribution, Relation, and Order (ARO) and COCO benchmarks.
 
 \section{Scaling Limits and the Classical Pivot}
 
@@ -705,6 +684,64 @@ The most critical comparison is between DisCoViz and the DisCoClip baseline, sin
 The improvement here is therefore not evidence that hierarchical contraction binds more effectively than the alternatives, as shown in the binding probe section\ref{sec:binding_probe}. What Section \ref{sec:clip_geometry} measured is the more likely explanation of the performance improvement: frozen CLIP's embedding moves an order of magnitude further when the objects in a scene change than when the same objects are rearranged, so the representation DisCoClip receives has already discarded most of the arrangement information its language model would need. Replacing that encoder with any tower that preserves spatial arrangement recovers the discarded signal. The tensor network is one such tower, and its compositional structure makes it a natural counterpart to the compositional text model.
 
 DisCoViz also exceeds CLIP and OpenCLIP by a wide margin, and exceeds BLIP on Relation ($59.78\%$ against $52.90\%$) while falling slightly short on Attribution ($77.65\%$ against $78.46\%$). These three rows are zero-shot evaluations of general-purpose models, whereas DisCoViz is trained on ARO's own training split with its hard negatives in the loss, so the comparison indicates what a small, task-adapted compositional model can achieve rather than a like-for-like architectural ranking.
+
+\subsection{Non Linear Contractions}
+The text tower as described is multilinear: a sentence embedding is a product of its word tensors, and no number of contractions changes that. A multilinear map combines its arguments the same way whatever their values, which is a poor fit for ARO, where true and false captions contain the same words and differ only in which attaches to which. We therefore insert a gated GELU after each pairwise contraction,
+\begin{equation}
+    x' = x + \gamma \cdot \mathrm{GELU}(x),
+\end{equation}
+with $\gamma$ learned. This lets a constituent's contribution depend on what its neighbours turned out to be.\begin{table}[hbt!]
+    \centering
+    \begin{tabular}{l c c}
+        \toprule
+        \textbf{Architecture} & \textbf{ARO Attribution} & \textbf{ARO Relation} \\
+        \midrule
+        \texttt{CLIP} \cite{radford2021learning} & 61.00\% & 51.53\% \\
+        \texttt{BLIP} & 78.46\% & 52.90\% \\
+        \midrule
+        \texttt{DisCoViz} (linear) & 77.65\% & 59.78\% \\
+        \textbf{\texttt{DisCoViz} (non-linear)} & \textbf{80.13\%} & \textbf{60.44\%} \\
+        \bottomrule
+    \end{tabular}
+    \caption{Effect of non-linear contractions on ARO, evaluated on the full 8,088-pair held-out test split. The non-linear variant exceeds BLIP on both tasks.}
+    \label{tab:nlc_results}
+\end{table}
+
+The gain is enough to pass BLIP on both tasks at a fraction of its size, and it costs two things. Contraction is no longer associative, so the compiler can no longer reorder it to keep intermediate tensors small, with long sentences occasionally producing intermediates too large to hold. And a non-linearity has no natural quantum counterpart.
+
+\section{Training using general purpose datasets}
+
+The ARO results above came from training on ARO's own split, so the model saw the exact kind of distractor it was later tested on. Whether compositional structure survives ordinary caption supervision is a different question. We retrain DisCoViz unchanged on COCO 2017 \cite{lin2014coco} --- 591,000 captions over 118,000 images, with no hard negatives, so only the InfoNCE term remains --- and evaluate it untuned on ARO, SugarCrepe \cite{hsieh2023sugarcrepe}, Winoground \cite{thrush2022winoground} and retrieval over 5,000 held-out images.
+
+The transfer does not happen. Trained on COCO, DisCoViz scores $50.22\%$ on ARO Attribution and $50.06\%$ on Relation, both indistinguishable from chance. Retrieval sits at chance too $0.02\%$ R@1, so the joint embedding is not discriminative enough to rank a caption against the corpus at all. The one benchmark that moves is SugarCrepe, at $71.86\%$ against a $50\%$ baseline.
+
+\subsection{Hard Negative Mining}
+
+Hard negatives are the clearest difference between the two regimes (alongside the larger vocabulary size), so we built them for COCO. Using the parses of the text tower, we swap either two nouns or two adjectives bound to different nouns, mirroring ARO's construction. Each positive draws a negative with probability $\pi$, which varies the dose and nothing else.
+
+\begin{table}[hbt!]
+    \centering
+    \begin{tabular}{l c c c c c c}
+        \toprule
+        $\boldsymbol{\pi}$ & \textbf{ARO Attr.} & \textbf{ARO Rel.} & \textbf{SugarCrepe} & \textbf{SC++} & \textbf{Wino. (group)} & \textbf{R@1} \\
+        \midrule
+        $0.00$ & 50.22 & 50.06 & 71.86 & 59.06 & 11.83 & 0.02 \\
+        $0.10$ & 49.97 & 49.20 & 71.60 & 59.74 & 14.34 & 0.02 \\
+        $0.25$ & 51.63 & 53.23 & 72.86 & 59.55 & 8.60 & 0.02 \\
+        $0.50$ & 49.81 & 52.10 & 70.77 & 59.30 & 9.32 & 0.00 \\
+        $1.00$ & 49.40 & 50.52 & 71.78 & 60.59 & 0.00 & 0.02 \\
+        \midrule
+        \textit{chance} & 50.00 & 50.00 & 50.00 & 50.00 & 16.67 & 0.02 \\
+        \bottomrule
+    \end{tabular}
+    \caption{DisCoViz trained on COCO at five hard-negative rates, evaluated without further tuning. All values are percentages. For reference, the same architecture trained on ARO reaches $77.65\%$ Attribution and $59.78\%$ Relation (Table \ref{tab:aro_results}).}
+    \label{tab:pi_sweep}
+\end{table}
+
+ARO does not move, with Attribution and Relation staying within a couple of points of chance at every rate. Retrieval never leaves its one-in-5,000 floor. Winoground stays below its $16.67\%$ random baseline throughout, behaviour that has been observed in CLIP models too \cite{thrush2022winoground}. Only SugarCrepe is above chance, at around $72\%$, but most of its negatives replace a word rather than swap two, so a model reading captions as unordered bags can score there while failing every swap, it only serves to rule out a complete training failure.
+
+Adding hard negatives therefore changes nothing, and none of these numbers describes a working vision--language model. The ARO result shows the architecture can be trained to resolve a particular kind of distractor when it is present in the loss, not that it acquires compositional structure from captions.
+
 
 % ==========================================
 % CHAPTER 5
