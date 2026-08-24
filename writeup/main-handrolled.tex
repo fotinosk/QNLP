@@ -58,7 +58,7 @@
 
 Tensor networks are a natural quantum-native architecture for image encoding, since their contraction structure can capture an image's spatial hierarchy, but the relative merits of the candidates have not been established empirically. We survey tree, matrix-product and MERA topologies across four data encodings, three ans\"{a}tze and three readout protocols, and select a coherent quantum tree tensor network trained in noiseless simulation.
 
-We then examine which of its quantum properties carry weight. Unitarity costs nothing: at $18\%$ fewer parameters the quantum node beats its unconstrained classical counterpart on shape perception and matches it on spatial relations, without the dropout and residual connections the classical tree needs. Coherence between levels is load-bearing, passing intermediate states as qubits rather than measured scalars offers improvement. Bond dimension, held to one qubit per bond by simulation memory, limits the readout. Gradient variance decays polynomially rather than exponentially, so there is no barren plateau; yet most initialisations still fail to train, indicating a landscape of poor local minima rather than a flat one. The tower nonetheless resolves a compositional binding task using its topology alone, with no explicit positional parameters.
+We then examine which of its quantum properties carry weight. Unitarity costs nothing: at $18\%$ fewer parameters the quantum node beats its unconstrained classical counterpart on shape perception and matches it on spatial relations, without the dropout and residual connections the classical tree needs. Coherence between levels is load-bearing: passing intermediate states as qubits rather than as measured scalars is worth $+9.9$ points. Bond dimension, held to one qubit per bond by simulation memory, limits the readout. Gradient variance decays polynomially rather than exponentially, so there is no barren plateau; yet most initialisations still fail to train, indicating a landscape of poor local minima rather than a flat one. The tower nonetheless resolves a compositional binding task using its topology alone, with no explicit positional parameters.
 
 Substituted for a frozen classical vision encoder, it yields a vision--language model that is quantum-inspired end to end and improves compositional accuracy on both attribution and relation, though it does not transfer to general-purpose caption data.
 
@@ -69,7 +69,7 @@ Substituted for a frozen classical vision encoder, it yields a vision--language 
 
 \chapter*{Acknowledgement and Statement of Contribution}
 
-I would like to thank my supervisor Professor Mehrnoosh Sadrzadeh for her continuous help and guidance throughout this  project. I would also like to acknowledge the work of the Quantum Learning UCL group for their help in developing this work, for engaging in interesting discussions, providing ideas and scrutinizing the generated results.
+I would like to thank my supervisor Professor Mehrnoosh Sadrzadeh for her continuous help and guidance throughout this  project. I would also like to acknowledge the work of the Quantum Learning UCL group for their help in developing this work, for engaging in interesting discussions, providing ideas and scrutinising the generated results.
 This line of work runs parallel to theirs in multiple ways, with the initial goal of finding a quantum inspired image model, being directly linked to their previous work on a quantum inspired text model (DisCoCat). Additionally, the quantum image model implementation run parallel to their implementation of the text model, with many fruitful conversations of promising areas of exploration, such as data reuploading as a quantum counterpart to residuals.
 
 
@@ -91,38 +91,42 @@ In this work, we set off to explore possible architectures for a quantum-inspire
 
 Beyond architectural features, we evaluate and contrast the resulting tensor network's performance with contemporary MLP models on various benchmarks across perception, relation, and composition tasks.
 
-As a secondary objective, we explore how this architecture performs within a broader multimodal context. Contemporary Vision Language Models (VLMs) heavily rely on contrastive learning architectures\cite{clip} that frequently exhibit "bag-of-words" behavior, struggling on compositional benchmarks that require a strict understanding of spatial layout \cite{aro}. By combining our classical quantum-inspired image model with an existing quantum-inspired text model, we yield the first fully quantum-inspired vision-language model.
+As a secondary objective, we explore how this architecture performs within a broader multimodal context. Contemporary Vision Language Models (VLMs) heavily rely on contrastive learning architectures\cite{clip} that frequently exhibit ``bag-of-words'' behaviour, struggling on compositional benchmarks that require a strict understanding of spatial layout \cite{aro}. By combining our classical quantum-inspired image model with an existing quantum-inspired text model, we yield the first fully quantum-inspired vision-language model.
 
-Ultimately, the aims of this project are threefold: (i) to explore viable quantum-inspired image encoder architectures using tensor networks; (ii) to rigorously benchmark the parameter efficiency and compositional capabilities of the quantum unitary node against classical unconstrained nodes and MLPs; and (iii) to integrate this image encoder into a multimodal framework to assess whether a structurally rigorous architecture can overcome the compositional limitations of standard contrastive VLMs.
+The aims of this project are threefold: (i) to explore viable quantum-inspired image encoder architectures using tensor networks; (ii) to benchmark the parameter efficiency and compositional capabilities of the quantum unitary node against classical unconstrained nodes and MLPs; and (iii) to integrate this image encoder into a multimodal framework to assess whether a structurally constrained architecture can overcome the compositional limitations of standard contrastive VLMs.
 
 \chapter{Related Work}
 
 \section{Language}
-Historically, natural language processing has struggled to balance the continuous semantic representation of individual words with the strict structural rules that bind them together. Early approaches, such as Bag-of-Words \cite{bow} and TF-IDF \cite{tfidf}, prioritized vocabulary presence over structure, representing text purely by word frequency. While computationally cheap, these methods completely fail at compositionality; they yield identical representations for "the man biting the dog" and "the dog biting the man". The subsequent introduction of static word embeddings like Word2Vec \cite{word2vec} and GloVe \cite{glove} successfully captured distributional semantics, mapping words to dense vectors where spatial distance denotes semantic similarity. However, composing full sentences typically relied on rudimentary operations like vector addition or averaging, flattening the text and destroying the hierarchical grammar necessary for complex relational meaning.
+Historically, natural language processing has struggled to balance the continuous semantic representation of individual words with the strict structural rules that bind them together. Early approaches, such as Bag-of-Words \cite{bow} and TF-IDF \cite{tfidf}, prioritised vocabulary presence over structure, representing text purely by word frequency. While computationally cheap, these methods completely fail at compositionality; they yield identical representations for ``the man biting the dog'' and ``the dog biting the man''. The subsequent introduction of static word embeddings like Word2Vec \cite{word2vec} and GloVe \cite{glove} successfully captured distributional semantics, mapping words to dense vectors where spatial distance denotes semantic similarity. However, composing full sentences typically relied on rudimentary operations like vector addition or averaging, flattening the text and destroying the hierarchical grammar necessary for complex relational meaning.
 
-To capture word order, sequential architectures like Recurrent Neural Networks (RNNs) \cite{rnn} and Long Short-Term Memory (LSTM) \cite{lstm} networks were introduced. While these models capture the one-dimensional sequential nature of text, they create a severe information bottleneck by compressing an arbitrarily long sentence into a single, fixed-size hidden state. Furthermore, they process text strictly from left to right rather than relationally, failing to inherently model the hierarchical tree structures of human language. This bottleneck was bypassed by the Transformer architecture \cite{attention}, which discarded recurrence entirely in favor of parallelized global self-attention. However, self-attention introduces a different compositional failure: it treats the input sequence as a fully connected graph rather than a strict linguistic hierarchy. Lacking built-in relational rules for syntax, Transformers are forced to simulate compositionality by scaling up to massive parameter counts and relying on vast amounts of training data.
+To capture word order, sequential architectures like Recurrent Neural Networks (RNNs) \cite{rnn} and Long Short-Term Memory (LSTM) \cite{lstm} networks were introduced. While these models capture the one-dimensional sequential nature of text, they create a severe information bottleneck by compressing an arbitrarily long sentence into a single, fixed-size hidden state. Furthermore, they process text strictly from left to right rather than relationally, failing to inherently model the hierarchical tree structures of human language. This bottleneck was bypassed by the Transformer architecture \cite{attention}, which discarded recurrence entirely in favour of parallelised global self-attention. However, self-attention introduces a different compositional failure: it treats the input sequence as a fully connected graph rather than a strict linguistic hierarchy. Lacking built-in relational rules for syntax, Transformers must learn compositionality from scale, through large parameter counts and large training corpora.
 
-In contrast to these bottom-up, data-driven approaches, computational linguistics offers a top-down paradigm that guarantees structural hierarchy by design. The Distributional Compositional Categorical (DisCoCat) model \cite{discocat} provided a foundational breakthrough by mathematically unifying continuous distributional semantics with formal, rigorous compositional logic trees. Grounded in applied category theory, DisCoCat maps the syntactic types of Pregroup algebra \cite{pregroup} directly onto continuous vector spaces. In this framework, words are no longer uniform vectors; their tensor order is strictly dictated by their grammatical function. The meaning of a sentence is computed by contracting these tensors along their shared grammatical indices.
+In contrast to these bottom-up, data-driven approaches, computational linguistics offers a top-down paradigm that guarantees structural hierarchy by design. The Distributional Compositional Categorical (DisCoCat) model \cite{discocat} unified continuous distributional semantics with formal compositional logic trees. Grounded in applied category theory, DisCoCat maps the syntactic types of Pregroup algebra \cite{pregroup} directly onto continuous vector spaces. In this framework, words are no longer uniform vectors; their tensor order is strictly dictated by their grammatical function. The meaning of a sentence is computed by contracting these tensors along their shared grammatical indices.
 
 This approach achieves text compositionality, but a word's tensor order follows its grammatical arity, so the words doing the compositional work carry the largest tensors. The same shape of problem appears in many-body physics, where a state over many sites is written not as one enormous tensor but as a network of local ones. Each tensor is attached to a site and each linked to its neighbours by bond indices whose dimension caps the correlation crossing them \cite{mps_physics}. A DisCoCat sentence has the same form: the words are the local tensors, the grammatical wires are the bonds, and their dimension governs both the cost of the model and how much of each constituent's meaning reaches the rest of the sentence.
 
 \section{Vision}
 
-Computer vision models have historically struggled to capture precise part-whole structural relationships, often settling for a "bag of features" approach rather than achieving true compositional understanding. Early Multi-Layer Perceptrons (MLPs) \cite{mlp} treated images as unstructured data, requiring a deterministic flattening into a 1D vector that inherently destroyed the 2D topological structure and spatial proximity of the pixels. Convolutional Neural Networks (CNNs) \cite{cnn} addressed this by introducing local receptive fields to extract hierarchical features. However, CNNs rely heavily on downsampling mechanisms like max-pooling. While pooling introduces translation invariance, it discards the precise relative positions of features within the pooling window. This spatial invariance causes CNNs to act as a loose collection of local features, failing at rigorous part-whole compositional tasks (the "Picasso effect", where a CNN might classify a face even if the features are spatially scrambled).
+Computer vision models have historically struggled to capture precise part-whole structural relationships, often settling for a ``bag of features'' approach rather than compositional understanding. Early Multi-Layer Perceptrons (MLPs) \cite{mlp} treated images as unstructured data, requiring a flattening into a 1D vector that destroyed the 2D topological structure and spatial proximity of the pixels. Convolutional Neural Networks (CNNs) \cite{cnn} addressed this by introducing local receptive fields to extract hierarchical features. However, CNNs rely heavily on downsampling mechanisms like max-pooling. While pooling introduces translation invariance, it discards the precise relative positions of features within the pooling window. This spatial invariance causes CNNs to act as a loose collection of local features, failing at part-whole compositional tasks (the ``Picasso effect'', where a CNN might classify a face even if the features are spatially scrambled).
 
 To bypass the limitations of convolutions, the Vision Transformer (ViT) \cite{vit} adapted the NLP self-attention mechanism for image data. A ViT divides an image into a sequence of flattened patches and applies global self-attention. Because this operation treats the input as a 1D sequence of tokens, the ViT completely discards the native 2D grid, relying entirely on learned positional embeddings to retain spatial context. Much like text Transformers, ViTs lack built-in relational rules for 2D data. By treating image patches as a fully connected graph, they are forced to brute-force the understanding of spatial relationships through massive parameter counts and vast datasets.
 
-In the multimodal domain, the evolution of Vision Language Models (VLMs) has centered on mapping these visual representations to language. Early architectures, such as ViLBERT \cite{vilbert} and LXMERT \cite{lxmert}, relied on computationally heavy pipelines using off-the-shelf object detectors to extract bounding boxes. This bounded the models to predefined vocabularies and destroyed the holistic 2D spatial context of the image. A paradigm shift occurred with the introduction of OpenAI's CLIP \cite{clip}, which eliminated bounding boxes in favor of aligning independent text and image encoders using a global contrastive InfoNCE loss \cite{infonce}. While highly scalable, this global alignment introduces a fatal flaw: the vision "bag-of-words" problem \cite{aro}. Because CLIP relies entirely on global feature alignment without any inherent structural inductive bias, it maps global visual features to global text vocabulary while remaining functionally blind to spatial layout. Consequently, the model fails to distinguish between text like "a glass on a table" and "a table on a glass", performing at near-chance levels on compositional benchmarks.
+In the multimodal domain, the evolution of Vision Language Models (VLMs) has centred on mapping these visual representations to language. Early architectures, such as ViLBERT \cite{vilbert} and LXMERT \cite{lxmert}, relied on computationally heavy pipelines using off-the-shelf object detectors to extract bounding boxes. This bounded the models to predefined vocabularies and destroyed the holistic 2D spatial context of the image. OpenAI's CLIP \cite{clip} eliminated bounding boxes in favour of aligning independent text and image encoders using a global contrastive InfoNCE loss \cite{infonce}. While highly scalable, this global alignment introduces the vision ``bag-of-words'' problem \cite{aro}. Because CLIP relies entirely on global feature alignment without any inherent structural inductive bias, it maps global visual features to global text vocabulary while remaining functionally blind to spatial layout. Consequently, the model fails to distinguish between text like ``a glass on a table'' and ``a table on a glass'', performing at near-chance levels on compositional benchmarks.
 
-This asymmetry between compositional text models and non-hierarchical vision models is perfectly encapsulated by the DisCoClip baseline \cite{discoclip}. DisCoClip successfully extended the DisCoCat language framework into a multimodal setting by grafting it onto a frozen CLIP vision backbone. While this provided a highly parameter-efficient and structurally rigorous text engine, the framework's end-to-end compositional reasoning was ultimately bottlenecked by CLIP's spatial limitations. To achieve true relational understanding, the spatially invariant vision encoder must be replaced with an architecture that inherently preserves 2D compositional hierarchies.
+This asymmetry between compositional text models and non-hierarchical vision models is what the DisCoClip baseline \cite{discoclip} exposes. DisCoClip extended the DisCoCat language framework into a multimodal setting by grafting it onto a frozen CLIP vision backbone. While this provided a parameter-efficient and structurally constrained text engine, the framework's end-to-end compositional reasoning was bottlenecked by CLIP's spatial limitations. Relational understanding therefore requires replacing the spatially invariant vision encoder with an architecture that preserves 2D compositional hierarchies.
 
 \section{Quantum Tensor Networks and VQCs}
 
 While tensor networks, such as the Matrix Product States used in NLP and the Tree Tensor Networks adapted for vision, provide solutions to the compositionality bottleneck in classical machine learning, their origins lie in many-body quantum physics \cite{mps_physics}. Because they were fundamentally designed to model quantum entanglement, tensor networks possess a native correspondence with quantum computing.
 
+Tensor networks entered machine learning as classical models. Stoudenmire and Schwab optimised a matrix product state directly as a supervised image classifier, sweeping its tensors with a DMRG-style update and demonstrating that a structure built for many-body states trains perfectly well by gradient descent on labelled data \cite{stoudenmire2016}. Tree topologies were subsequently applied to images specifically, on the grounds that a two-dimensional contraction order matches the spatial hierarchy of the input better than a one-dimensional chain \cite{ttn_images}. Huggins et al.\ then made the correspondence to quantum circuits explicit: an MPS or tree network of bounded bond dimension can be realised as a discretely parameterised circuit whose qubit count is set by the bond rather than by the size of the system it describes \cite{huggins2019tn}. That mapping is the one this work relies on, and it is what fixes our bond dimension at $\chi = 2$ once a single qubit is spent per bond.
+
 In a classical tensor network, each node contracts its inputs through an unconstrained multilinear map. Written out in full, a node combining four children would be an order-five tensor, so in practice the map is parameterised in canonical polyadic (CP) form: each child is projected onto $R$ components, the projections are multiplied elementwise, and the result is projected to the output, with $R$ setting the node's capacity. Constraining that map to be unitary ($U^{\dagger}U = I$) turns the network into a Variational Quantum Circuit, and a classical architecture can then be transpiled natively into a circuit in which contractions become rotation and entangling gates. The topology is unchanged; what differs is the operation each node is permitted to perform.
 
-Consequently, this provides a rare opportunity to evaluate the exact same architectural topology across both classical and quantum paradigms. By comparing an unconstrained classical tensor network against a unitary-constrained quantum circuit, we can isolate the effect of the quantum paradigm on parameter efficiency and expressive capacity, answering whether the unitary constraint acts as a handicap or a powerful structural regularizer.
+Hierarchical circuits of exactly this form have been studied as classifiers in their own right. Grant et al.\ implemented tree and MERA-like circuits on both simulators and superconducting hardware, discarding the majority of qubits at each level and reading a single output wire \cite{grant2018hierarchical}; that single-wire readout is the baseline protocol we take up in Section \ref{sec:readout_protocols} and find wanting. The same log-depth coarse-graining appears in the quantum convolutional neural network of Cong et al.\ \cite{cong2019qcnn}, whose alternating convolution and pooling layers are a MERA read in reverse, and it is for this family that the absence of barren plateaus is proved \cite{pesah2021_qcnn}.
+
+This allows the same architectural topology to be evaluated across both classical and quantum paradigms. By comparing an unconstrained classical tensor network against a unitary-constrained quantum circuit, we can isolate the effect of the quantum paradigm on parameter efficiency and expressive capacity, answering whether the unitary constraint acts as a handicap or a powerful structural regulariser.
 
 
 \chapter{Theoretical Framework and Candidate Architectures}
@@ -133,10 +137,10 @@ Consequently, this provides a rare opportunity to evaluate the exact same archit
 Unlike classical neural networks, which natively process and propagate continuous real-valued matrices, quantum machine learning models operate within a complex Hilbert space. As a result, all quantum machine learning models operating on classical data need to select a way to encode this information onto quantum states as well as the foundational components of the variational quantum circuits.
 
 \subsection{Data Encoding Strategies}
-Before quantum computation can occur, classical information must be mapped into a quantum state. This dictates how effectively the model can utilize the Hilbert space.
+Before quantum computation can occur, classical information must be mapped into a quantum state. This dictates how effectively the model can utilise the Hilbert space.
 
 \subsubsection{Amplitude Encoding}
-Amplitude Encoding \cite{amplitude_encoding} maps an entire vector of normalized classical data $\mathbf{x} \in \mathbb{R}^{2^N}$ directly into the complex amplitudes of an $N$-qubit quantum state:
+Amplitude Encoding \cite{amplitude_encoding} maps an entire vector of normalised classical data $\mathbf{x} \in \mathbb{R}^{2^N}$ directly into the complex amplitudes of an $N$-qubit quantum state:
 \begin{equation}
     |\psi(\mathbf{x})\rangle = \sum_{i=0}^{2^N-1} x_i |i\rangle \quad \text{where} \quad \sum |x_i|^2 = 1
 \end{equation}
@@ -148,7 +152,7 @@ An alternative is angle embedding \cite{angle_embedding}, which embeds a classic
 \begin{equation}
     |\psi(x_i)\rangle = R_y(x_i) |0\rangle = \cos\left(\frac{x_i}{2}\right)|0\rangle + \sin\left(\frac{x_i}{2}\right)|1\rangle
 \end{equation}
-While highly gate-efficient, this approach confines the encoded state strictly to a single plane of the Bloch sphere, significantly underutilizing the qubit's available state space. This encoding is referred to as \texttt{scalar\_ry} throughout; it appears under the alias \texttt{angle} in the single-node survey code.
+While highly gate-efficient, this approach confines the encoded state strictly to a single plane of the Bloch sphere, significantly underutilising the qubit's available state space. This encoding is referred to as \texttt{scalar\_ry} throughout; it appears under the alias \texttt{angle} in the single-node survey code.
 
 \subsubsection{Multi-Axis Encoding (\texttt{multi\_axis})}
 \label{sec:enc_multi_axis}
@@ -156,7 +160,7 @@ To increase representational capacity without increasing the qubit count, we eva
 \begin{equation}
     |\psi(x_i)\rangle = R_z(x_i) R_y(x_i) R_x(x_i) |0\rangle
 \end{equation}
-By explicitly maximizing the utilization of the Bloch sphere, multi-axis encoding embeds the classical data into a richer, more complex initial quantum state prior to entanglement.
+By spreading the rotation over all three axes, multi-axis encoding places the data anywhere on the Bloch sphere rather than on a single plane of it, before any entanglement is applied.
 
 \subsubsection{Second-Order Pauli-Z Feature Map (\texttt{zz\_map})}
 \label{sec:enc_zz_map}
@@ -166,62 +170,62 @@ The three strategies above are all product encodings: each classical feature is 
 \end{equation}
 where the product runs over adjacent wire pairs on a ring. The resulting state is entangled before the variational layer is applied, which raises the expressibility of the embedding but also makes it the most gate-expensive of the four.
 
-\subsection{Parameterized Ansatz Design}
+\subsection{Parameterised Ansatz Design}
 \label{sec:ansatz_design}
-Once the data is encoded, the node must process it to extract relational features. This is achieved by applying a parameterized unitary operation $U(\theta)$, known as the ansatz. The structural design of the ansatz acts as the model's inductive bias.
+Once the data is encoded, the node must process it to extract relational features. This is achieved by applying a parameterised unitary operation $U(\theta)$, known as the ansatz. The structural design of the ansatz acts as the model's inductive bias.
 
 \subsubsection{Hardware Efficient Ansatz (HEA)}
 A standard baseline in variational quantum machine learning is the Hardware Efficient Ansatz (HEA) \cite{kandala2017}. This architecture applies successive layers of arbitrary single-qubit rotations followed by heavily connected entanglement gates (such as a ring of CNOTs). The unitary for a single layer $l$ operating on $N$ qubits is expressed as:
 \begin{equation}
     U_{HEA}(\theta_l) = W_{ent} \prod_{j=1}^N R(\theta_{j,l})
 \end{equation}
-where $R$ represents parameterized $SU(2)$ rotations and $W_{ent}$ is the multi-qubit entangling array. While incredibly expressive, deep HEA circuits are famously susceptible to barren plateaus.
+where $R$ represents parameterised $SU(2)$ rotations and $W_{ent}$ is the multi-qubit entangling array. Deep HEA circuits are expressive but susceptible to barren plateaus.
 
 Two concrete instantiations of this family appear in the experiments that follow. The broad single-node survey uses a \textit{star-entangler} variant, in which an $R_z$--$R_y$--$R_z$ rotation triple on each wire is followed by CNOTs from every child wire onto a single parent wire; this is the arm labelled \texttt{hea}. The ranked hybrid-tree evaluation instead uses PennyLane's \texttt{StronglyEntanglingLayers}, the canonical ring-entangler realisation, and is the arm labelled \texttt{strongly\_entangling}. Both are hardware-efficient in the sense defined above and differ only in entanglement topology.
 
 \subsubsection{Alternating Layered Ansatz (ALT)}
-To reduce the CNOT gate depth and explore different trainability profiles, we evaluate an Alternating Layered Ansatz (ALT). This architecture applies layers of parameterized Pauli-Y rotations followed by a "brickwork" entanglement structure, where CNOT gates alternate their connectivity at each layer:
+To reduce the CNOT gate depth and explore different trainability profiles, we evaluate an Alternating Layered Ansatz (ALT). This architecture applies layers of parameterised Pauli-Y rotations followed by a ``brickwork'' entanglement structure, where CNOT gates alternate their connectivity at each layer:
 \begin{equation}
     U_{ALT}(\theta_l) = W_{brickwork}^{(l)} \prod_{j=1}^N R_y(\theta_{j,l})
 \end{equation}
 By restricting the rotation to a single axis and alternating the entanglement topology, ALT aims to maintain relational capacity while operating with a shallower, more noise-resilient circuit depth than HEA.
 
 \subsubsection{Instantaneous Quantum Polynomial (IQP) Ansatz}
-We additionally evaluate the Instantaneous Quantum Polynomial (IQP) ansatz \cite{iqp_ansatz, havlicek2019}. Consisting of Hadamard gates surrounding a diagonal parameterized unitary $D(\theta)$:
+We additionally evaluate the Instantaneous Quantum Polynomial (IQP) ansatz \cite{iqp_ansatz, havlicek2019}. Consisting of Hadamard gates surrounding a diagonal parameterised unitary $D(\theta)$:
 \begin{equation}
     U_{IQP}(\theta) = H^{\otimes N} D(\theta) H^{\otimes N}
 \end{equation}
-where $D(\theta)$ is typically an Ising-like Hamiltonian consisting of $Z$ rotations and $ZZ$ coupling gates. Because the core operations commute and are diagonal, the IQP ansatz possesses a strict, non-arbitrary inductive bias makes it more resillient to barren plateaus.
+where $D(\theta)$ is typically an Ising-like Hamiltonian consisting of $Z$ rotations and $ZZ$ coupling gates. Because the core operations commute and are diagonal, the IQP ansatz possesses a strict, non-arbitrary inductive bias, which makes it more resilient to barren plateaus.
 
 
 \section{Candidate Architectures}
 To isolate the effects of the quantum unitary constraint on parameter efficiency and expressive capacity, we constructed three topologically matched arms alongside a non-hierarchical baseline.
 
 \subsection{The Quantum Coherent Tree (QTTN)}
-The primary architecture under investigation is the Quantum Tree Tensor Network (QTTN). It operates on a 16-qubit device structured as a hierarchical quad-tree: 16 image patches are encoded into the leaves, contracted into 4 parent nodes, and finally contracted into a single root. The qubit count is set by the number of \textit{patches}, not by the image resolution: the input is always divided into a $4 \times 4$ grid, so a larger image yields larger patches rather than more qubits, and the circuit width is unchanged. Resolution therefore scales the classical patch-embedding layer that produces the rotation angles, while the simulation cost depends only on the 16 wires. The network applies parameterized unitary gates at each node providing a parameter-efficient framework with depth scaling logarithmically with the image size for a fixed patch size. Additional qubits could be spent in either of two ways. Widening the grid gives more, smaller patches and a deeper tree, which increases spatial resolution but worsens the compression ratio, since the layer entering the root remains four qubits at any depth. Thickening the bonds between levels instead raises the bond dimension to $\chi = 2^k$ for $k$ qubits per bond, which increases the information the tree can carry upward.
+The primary architecture under investigation is the Quantum Tree Tensor Network (QTTN). It operates on a 16-qubit device structured as a hierarchical quad-tree: 16 image patches are encoded into the leaves, contracted into 4 parent nodes, and finally contracted into a single root. The qubit count is set by the number of \textit{patches}, not by the image resolution: the input is always divided into a $4 \times 4$ grid, so a larger image yields larger patches rather than more qubits, and the circuit width is unchanged. Resolution therefore scales the classical patch-embedding layer that produces the rotation angles, while the simulation cost depends only on the 16 wires. The network applies parameterised unitary gates at each node providing a parameter-efficient framework with depth scaling logarithmically with the image size for a fixed patch size. Additional qubits could be spent in either of two ways. Widening the grid gives more, smaller patches and a deeper tree, which increases spatial resolution but worsens the compression ratio, since the layer entering the root remains four qubits at any depth. Thickening the bonds between levels instead raises the bond dimension to $\chi = 2^k$ for $k$ qubits per bond, which increases the information the tree can carry upward.
 
 \subsection{The Classical Control (CP-TTN)}
 The \texttt{classical\_bare} model serves as a faithful classical analogue to the quantum model. This model shares the exact same 16-to-4-to-1 quad-tree topology as the QTTN, but replaces the unitary quantum nodes with unconstrained classical Canonical Polyadic (CP)\cite{cp_decomposition} tensor contractions. By matching the topology, we can directly compare classical unconstrained capacity against quantum constrained capacity.
 
 \subsection{The Classical Full Model}
-While the \texttt{classical\_bare} arm matches the quantum constraints, standard classical architectures typically employ mechanisms like residual connections and dropout to prevent overfitting and vanishing gradients. The quantum equivalents of these components are evaluated. We introduced a \texttt{classical\_full} arm that includes them to quantify exactly how much of a performance gap is attributable to these standard classical regularizers.
+While the \texttt{classical\_bare} arm matches the quantum constraints, standard classical architectures typically employ mechanisms like residual connections and dropout to prevent overfitting and vanishing gradients. The quantum equivalents of these components are evaluated. We introduced a \texttt{classical\_full} arm that includes them to quantify exactly how much of a performance gap is attributable to these standard classical regularisers.
 
 \subsection{The MLP Reference}
-A critical requirement for interpretability is calibrating task difficulty. We introduced a standard, non-hierarchical Multi-Layer Perceptron (\texttt{mlp\_reference}). This model is not a tensor network and serves only to benchmark the dataset. If the MLP scores highly while the tensor networks fail, it isolates the failure to the topological design rather than classical computation itself.
+Interpreting any of the above requires calibrating task difficulty. We introduced a standard, non-hierarchical Multi-Layer Perceptron (\texttt{mlp\_reference}). This model is not a tensor network and serves only to benchmark the dataset. If the MLP scores highly while the tensor networks fail, it isolates the failure to the topological design rather than classical computation itself.
 
 \subsection{Simulation Constraints and the Density Matrix Wall}
 \label{sec:density_wall}
-Before proceeding to optimization, it is important to mention the computational limits that dictate what expriments are possible. To simulate realistic quantum noise, frameworks like PennyLane must compute the full density matrix, an operation that scales as $\mathcal{O}(4^N)$. For our 16-qubit coherent circuit, a noisy simulation using \texttt{default.mixed} requires approximately 68GB of memory per instance.
-At this scale, batched gradient descent becomes computationally intractable. This limitation forced the abandonment of full-tree noisy simulation during training. Furthermore, it forced the rejection of spatial ancillas, as adding even a single ancilla qubit exponentially worsened the memory bottleneck. Consequently, the architecture and experiments were strictly bounded to noiseless statevector simulation, which scales at $\mathcal{O}(2^N)$, utilizing PennyLane's \texttt{default.qubit} and \texttt{lightning.qubit} devices. Spatial ancillas and noisy simulations were run on individual nodes of the tree, which allowed us to gauge some of the properties.
+Before proceeding to optimisation, it is important to mention the computational limits that dictate what experiments are possible. To simulate realistic quantum noise, frameworks like PennyLane must compute the full density matrix, an operation that scales as $\mathcal{O}(4^N)$. For our 16-qubit coherent circuit, a noisy simulation using \texttt{default.mixed} requires approximately 68GB of memory per instance.
+At this scale, batched gradient descent becomes computationally intractable. This limitation forced the abandonment of full-tree noisy simulation during training, and with it the rejection of spatial ancillas, since adding even a single ancilla qubit exponentially worsened the memory bottleneck. The architecture and experiments were therefore bounded to noiseless statevector simulation, which scales at $\mathcal{O}(2^N)$, using PennyLane's \texttt{default.qubit} and \texttt{lightning.qubit} devices. Spatial ancillas and noisy simulations were run on individual nodes of the tree, which allowed us to gauge some of the properties.
 
 % ---------------------------------------------------------
 \section{Topology-Specific Mechanics: QTTN Readout Protocols}
 \label{sec:readout_protocols}
-The final component required to fully define the Quantum Coherent Tree is the classical readout mechanism. Unlike 1D Matrix Product States where information flows sequentially a Tree Tensor Network traces out the majority of its qubits at each hierarchical layer. In our 16 patch quad-tree, 12 leaf qubits are traced out in the first layer, leaving only 4 parent traced out to the root node.
+The final component required to fully define the Quantum Coherent Tree is the classical readout mechanism. Unlike 1D Matrix Product States, where information flows sequentially, a Tree Tensor Network traces out the majority of its qubits at each hierarchical layer. In our 16-patch quad-tree, 12 leaf qubits are traced out in the first layer, leaving 4 parent qubits, three of which are in turn traced out into the root.
 As a result, all spatial information and features must funnel into this final root node before measurement. Extracting a classical prediction from these surviving qubits is non-trivial.
 
 \subsection{Single Marginal Readout}
-The most basic theoretical protocol involves taking the expectation value of a single marginal qubit from the root node (e.g., measuring the Pauli-Z observable on wire 0, $\langle Z_0 \rangle$). While this is highly resource-efficient and minimizes the number of required measurement shots on physical hardware, it forces the network to compress its entire hierarchical analysis into a single scalar expectation value, reducing the information bandwidth available to the loss function.
+The most basic protocol, and the one used by the hierarchical quantum classifiers of Grant et al.\ \cite{grant2018hierarchical}, involves taking the expectation value of a single marginal qubit from the root node (e.g., measuring the Pauli-Z observable on wire 0, $\langle Z_0 \rangle$). While this is highly resource-efficient and minimises the number of required measurement shots on physical hardware, it forces the network to compress its entire hierarchical analysis into a single scalar expectation value, reducing the information bandwidth available to the loss function.
 
 \subsection{Widening the Readout}
 There are two distinct ways to extract more than a single number, and the difference between them matters.
@@ -246,18 +250,18 @@ This is why the two widenings are predicted to behave differently. Reading more 
 The multi-wire protocol is therefore a workaround for a simulation limit rather than a design choice. It widens the effective bond dimension only at the very top of the tree. Were a larger bond affordable (passing $k$ qubits per bond, giving $\chi = 2^k$) the tree would carry the information upward properly and a reading of the root register alone would suffice.
 
 
-\chapter{Topological Optimization}
+\chapter{Topological Optimisation}
 \label{ch:synthetic}
 
 \section{Dataset and Aims}
 
-To evaluate the architectures of Chapter \ref{ch:theory} we use a procedurally generated Synthetic Shapes dataset of $16 \times 16$ RGB images. The four classes form a $2 \times 2$ design over $\{$red, green$\}\times\{$circle, square$\}$, so colour and shape are independent. Shapes are jittered in position and scale and carry noise to discourage position memorization. The generation code is given in Appendix \ref{appendix:synthetic_data}.
+To evaluate the architectures of Chapter \ref{ch:theory} we use a procedurally generated Synthetic Shapes dataset of $16 \times 16$ RGB images. The four classes form a $2 \times 2$ design over $\{$red, green$\}\times\{$circle, square$\}$, so colour and shape are independent. Shapes are jittered in position and scale and carry noise to discourage position memorisation. The generation code is given in Appendix \ref{appendix:synthetic_data}.
 
 Chance is $25\%$. Colour alone splits the four classes into two pairs, and shape alone into two different pairs, so either attribute in isolation caps at $50\%$. The $50\%$ faux-ceiling is the line to watch: only a model using both attributes together can pass it.
 
-The primary aim of this phase is to establish a rigorous perception baseline and subject the candidate quantum topologies to empirical trainability tests. A common issue in Variational Quantum Circuits is the barren plateau phenomenon \cite{barren_plateaus}, where gradients vanish exponentially as a function of qubit count and circuit depth. Before advancing to complex, multi-object datasets, we must verify whether the structural design of the candidate topologies inherently mitigates this issue.
+The primary aim of this phase is to establish a perception baseline and subject the candidate quantum topologies to empirical trainability tests. A common issue in Variational Quantum Circuits is the barren plateau phenomenon \cite{barren_plateaus}, where gradients vanish exponentially as a function of qubit count and circuit depth. Before advancing to complex, multi-object datasets, we must verify whether the structural design of the candidate topologies mitigates this issue.
 
-This controlled, low-resolution environment allows us to rapidly iterate and execute four critical evaluations:
+This controlled, low-resolution environment allows us to rapidly iterate and execute four evaluations:
 \begin{enumerate}
     \item \textbf{Trainability:} Measuring gradient variance across topologies and qubit counts, to establish whether gradients survive at the widths used.
     \item \textbf{Node Design:} Sweeping encoding strategies against variational ans\"{a}tze to select the node's internal mechanics.
@@ -266,9 +270,9 @@ This controlled, low-resolution environment allows us to rapidly iterate and exe
 \end{enumerate}
 
 \section{Experimental Methodology}
-To execute the four evaluations outlined above, we use an elimination-based testing protocol. The configurations defined in Chapter \ref{ch:theory} are swept across the Synthetic Shapes dataset. Any architectural combination that triggers exponential gradient decay, fails to converge beyond random chance, or needs more parameters than can be reaonably simulated is deemed non-viable and eliminated.
+To execute the four evaluations outlined above, we use an elimination-based testing protocol. The configurations defined in Chapter \ref{ch:theory} are swept across the Synthetic Shapes dataset. Any architectural combination that triggers exponential gradient decay, fails to converge beyond random chance, or needs more parameters than can be reasonably simulated is deemed non-viable and eliminated.
 
-All candidate models are trained using the Adam optimizer with a categorical cross-entropy loss function. To ensure a fair, best-case comparison, hyperparameters such as learning rates and weight initialization bounds are independently tuned for each architecture.
+All candidate models are trained using the Adam optimiser with a categorical cross-entropy loss function. To ensure a fair, best-case comparison, hyperparameters such as learning rates and weight initialisation bounds are independently tuned for each architecture.
 
 Due to the $\mathcal{O}(4^N)$ memory limits of noisy emulation (the Density Matrix Wall established in Section \ref{sec:density_wall}), all quantum training is executed via exact statevector simulation using PennyLane's \texttt{lightning.qubit} device. This bypasses the memory bottleneck while maintaining mathematical fidelity for the unitary operations.
 
@@ -277,28 +281,28 @@ Every arm is run at several random initialisations, and each run is scored on th
 
 Comparing two arms means asking whether the gap between their means is larger than that spread can explain. Because arms differ in both variance and seed count, we use Welch's unequal-variance form to compute the smallest difference the design could distinguish from zero. The minimum detectable effect is reported throughout as the \textit{limit}. A difference exceeding its limit is \textit{resolved}; one falling below it is not, and the two arms are reported as statistically tied. An unresolved comparison is not evidence that two arms perform identically, only that this experiment could not separate them, with the limit stating how large a difference would have been needed.
 
-\section{Optimization Results}
+\section{Optimisation Results}
 
 \subsection{Barren Plateau Investigation}
 In unstructured quantum neural networks, gradient variance decays exponentially with respect to the number of qubits rendering models functionally untrainable.
 
-To empirically diagnose whether our candidate tensor network architectures suffer from exponential gradient decay at operational depths, we executed a variance scaling sweep up to $N=20$ qubits. For the 1D Matrix Product State (MPS), Multi-scale Entanglement Renormalization Ansatz (MERA), and our Quantum Tree Tensor Network (QTTN), we initialized the models randomly and computed the variance of the root observable's gradient with respect to the deepest leaf parameter across 100 trials, ie much much the variance decays as we move deeper into the model.
+To empirically diagnose whether our candidate tensor network architectures suffer from exponential gradient decay at operational depths, we executed a variance scaling sweep up to $N=20$ qubits. For the 1D Matrix Product State (MPS), Multi-scale Entanglement Renormalization Ansatz (MERA), and our Quantum Tree Tensor Network (QTTN), we initialised the models randomly and computed the variance of the root observable's gradient with respect to the deepest leaf parameter across 100 trials, that is, how far the gradient signal decays as it propagates back to the deepest layer of the model.
 
 As shown in Figure \ref{fig:topology_barren_plateaus}, the empirical variance did not decay exponentially for any of the networks. Instead, all three topologies closely tracked a slow, polynomial decay.
 
 \begin{figure}[hbt!]
     \centering
     \includegraphics[width=0.8\textwidth]{ch3/topology_barren_plateaus.png}
-    \caption{Empirical gradient variance scaling. All three tensor networks exhibit polynomial rather than exponential decay at the tested scales, successfully avoiding a barren plateau.}
+    \caption{Variance of the root observable's gradient with respect to the deepest leaf parameter, as a function of qubit count, for the MPS, MERA and QTTN topologies. 100 random initialisations per point, swept to $N = 20$.}
     \label{fig:topology_barren_plateaus}
 \end{figure}
 
-For the QTTN, this empirical success is theoretically supported. Literature shows \cite{pesah2021_qcnn} \cite{liu2022tnbp} that hierarchical topologies avoid barren plateaus. However, the proof does not extend to 1D MPS or standard MERA networks. Their survival in this specific diagnostic is an empirical artifact of the shallow depths and bounded scales ($N \le 20$) tested. Nonetheless, at the operational scales required for our vision task, the gradient variance of all architectures remained stable.
+For the QTTN, this empirical success is theoretically supported. Literature shows that hierarchical topologies avoid barren plateaus: Pesah et al.\ prove it for the quantum convolutional network of Cong et al.\ \cite{cong2019qcnn, pesah2021_qcnn}, and Liu et al.\ for tree tensor networks under local cost functions \cite{liu2022tnbp}. The latter condition applies here, since our readout is a set of single-wire Pauli-$Z$ marginals rather than a global observable; barren plateau behaviour is cost-function dependent, and a global measurement over the same circuit would not inherit the guarantee \cite{cerezo2021cost}. However, the proof does not extend to 1D MPS or standard MERA networks. Their survival in this specific diagnostic is an empirical artifact of the shallow depths and bounded scales ($N \le 20$) tested. Nonetheless, at the operational scales required for our vision task, the gradient variance of all architectures remained stable.
 
 
 \subsection{Ansatz and Encoding Investigation}
 
-Having established the trainability of the QTTN topology, the next phase of optimization focused on its internal node mechanics.
+Having established the trainability of the QTTN topology, the next phase of optimisation focused on its internal node mechanics.
 
 \subsubsection{Documenting the Search Space}
 \label{sec:search_space}
@@ -309,7 +313,7 @@ The diagnostic is constrained in one respect; it was executed on a downsampled $
 \begin{figure}[hbt!]
     \centering
     \includegraphics[width=1.0\textwidth]{ch3/encoding_ansatz_survey.png}
-    \caption{Node-level survey of the search space: four encodings $\times$ three ans\"{a}tze on a single 4-qubit node at $8 \times 8$, 30 seeds per configuration, noiseless. The \texttt{multi\_axis} encoding leads at every ansatz, while \texttt{amplitude} sits at the $50\%$ single-attribute ceiling.}
+    \caption{Node-level survey of the search space: four encodings $\times$ three ans\"{a}tze on a single 4-qubit node at $8 \times 8$, 30 seeds per configuration, noiseless. The dashed line marks the $50\%$ single-attribute ceiling.}
     \label{fig:encoding_ansatz_survey}
 \end{figure}
 
@@ -330,16 +334,16 @@ As shown in Figure \ref{fig:encoding_ansatz}, moving from \texttt{scalar\_ry} (1
 \begin{figure}[hbt!]
     \centering
     \includegraphics[width=1.0\textwidth]{ch3/encoding_ansatz.png}
-    \caption{Encoding and Ansatz configuration sweep on the hybrid tree ($16 \times 16$ images) across 21 seeds. The \texttt{multi\_axis} encoding yields a statistically resolved $+12.9$ point improvement.}
+    \caption{Encoding and ansatz configuration sweep on the hybrid tree ($16 \times 16$ images), 21 seeds per configuration.}
     \label{fig:encoding_ansatz}
 \end{figure}
 
-With the encoding re-established, we evaluated the parameterized ansatz, comparing the \texttt{strongly\_entangling} baseline against the structured \texttt{iqp} ansatz. The result reproduces the survey's verdict: the two ans\"{a}tze are statistically tied. The IQP ansatz achieved a mean accuracy of $80.9\%$, edging out the strongly entangling ansatz at $79.3\%$, but as shown in Figure \ref{fig:ansatz_comparison} this $+1.6$ point difference falls strictly below the statistical resolution limit ($\text{MDE} = 4.8$).
+With the encoding re-established, we evaluated the parameterised ansatz, comparing the \texttt{strongly\_entangling} baseline against the structured \texttt{iqp} ansatz. The result reproduces the survey's verdict: the two ans\"{a}tze are statistically tied. The IQP ansatz achieved a mean accuracy of $80.9\%$, edging out the strongly entangling ansatz at $79.3\%$, but as shown in Figure \ref{fig:ansatz_comparison} this $+1.6$ point difference falls strictly below the statistical resolution limit ($\text{MDE} = 4.8$).
 
 \begin{figure}[hbt!]
     \centering
     \includegraphics[width=1.0\textwidth]{ch3/ansatz_comparison.png}
-    \caption{Per-seed spread for the \texttt{strongly\_entangling} vs. \texttt{iqp} ans\"{a}tze on the hybrid tree. The difference in mean accuracy is statistically unresolved.}
+    \caption{Per-seed spread for the \texttt{strongly\_entangling} and \texttt{iqp} ans\"{a}tze on the hybrid tree, 21 seeds each.}
     \label{fig:ansatz_comparison}
 \end{figure}
 
@@ -357,7 +361,7 @@ As shown in Figure \ref{fig:readout_bottleneck}, the prediction holds. Reading $
     \centering
     % Insert the readout bottleneck / multi-pauli comparison figure here
     \includegraphics[width=0.8\textwidth]{ch3/readout_bottleneck.png}
-    \caption{Empirical validation of the readout bottleneck. Transitioning from a single marginal readout ($\langle Z \rangle$) to a multi-wire readout on the top layer artificially widens the restricted bond dimension, closing a 43-point accuracy gap caused by simulation limits.}
+    \caption{The three readout protocols of Section \ref{sec:readout_protocols} compared on the coherent tree: the single marginal $\langle Z_0 \rangle$, the root's full Bloch vector $\langle X_0 \rangle, \langle Y_0 \rangle, \langle Z_0 \rangle$, and $\langle Z \rangle$ on each of the four top-layer wires.}
     \label{fig:readout_bottleneck}
 \end{figure}
 
@@ -366,11 +370,11 @@ This is a workaround for a simulation limit. Reading the discarded qubits widens
 \subsection{Dropout and Residuals: Porting Classical Mechanisms}
 \label{sec:ablations}
 
-With the baseline node architecture resolved, we conducted a final series of evaluations to determine if we could port highly successful mechanisms from classical Deep Learning directly into the quantum tensor network. Specifically, we investigated quantum analogs for dropout regularization, residual skip connections, and explicit positional embeddings.
+With the baseline node architecture resolved, we conducted a final series of evaluations to determine if we could port highly successful mechanisms from classical Deep Learning directly into the quantum tensor network. Specifically, we investigated quantum analogs for dropout regularisation, residual skip connections, and explicit positional embeddings.
 
 We evaluated the following node-level modifications:
 \begin{enumerate}
-    \item \textbf{Quantum Dropout via Depolarizing Noise:} In classical networks, Dropout \cite{srivastava2014dropout} prevents overfitting by randomly nullifying activations. We subjected our architectures to varying depolarizing noise channels ($p$) to determine if quantum noise could act as a structural equivalent to Dropout.
+    \item \textbf{Quantum Dropout via Depolarising Noise:} In classical networks, Dropout \cite{srivastava2014dropout} prevents overfitting by randomly nullifying activations. We subjected our architectures to varying depolarising noise channels ($p$) to determine if quantum noise could act as a structural equivalent to Dropout.
     \item \textbf{Classical Residuals (\texttt{mixed\_channel}):} Inspired by ResNets \cite{he2016resnet}, this mechanism attempts to port residual skip connections into the quantum domain by allowing certain classical feature channels to bypass the quantum node entirely, preserving classical gradients.
     \item \textbf{Spatial Ancillae (\texttt{with\_ancilla}):} Allocating an auxiliary qubit to explicitly encode spatial positional embeddings.
     \item \textbf{Data Re-uploading (\texttt{reupload}):} Re-injecting classical features deep into the ansatz to artificially increase non-linearity, following the protocol established by Pérez-Salinas et al. \cite{perez_salinas_2020}.
@@ -378,22 +382,22 @@ We evaluated the following node-level modifications:
 
 These ablations were run on the hybrid tree across 30 random seeds. That architecture is what makes the noise sweep possible at all: because each node is its own four-qubit device and the levels communicate through classical measurements, no more than four qubits are ever simulated at once. The coherent tree holds all sixteen simultaneously, where the same density matrix needs $4^{16}$ entries. The noise results therefore characterise a single node rather than the assembled tower.
 
-The empirical results, shown in Figure \ref{fig:ablations_and_noise}, decisively rejected the translation of these classical mechanisms into the quantum architecture.
+The empirical results, shown in Figure \ref{fig:ablations_and_noise}, rejected the translation of these classical mechanisms into the quantum architecture.
 
 \begin{figure}[hbt!]
     \centering
     \includegraphics[width=1.0\textwidth]{ch3/ablations_and_noise.png}
-    \caption{Node-level ablations and depolarizing-noise sweeps, measured on the hybrid tree at single-node scale --- full-tree emulation of noise is infeasible at $\mathcal{O}(4^N)$. Attempts to port classical mechanisms yielded either a true null (\texttt{reupload}) or actively harmed performance (\texttt{mixed\_channel}, \texttt{with\_ancilla}) while degrading noise resilience. The ancilla result is measured on a translation-invariant task, where position barely affects the label, and does not generalise to relational settings; that case is tested separately in Chapter \ref{ch:clevr}.}
+    \caption{Node-level ablations and depolarising-noise sweeps, measured on the hybrid tree at single-node scale --- full-tree emulation of noise is infeasible at $\mathcal{O}(4^N)$. 30 seeds per arm. The ancilla arm is measured on a translation-invariant task, where position barely affects the label; the relational case is tested separately in Chapter \ref{ch:clevr}.}
     \label{fig:ablations_and_noise}
 \end{figure}
 
 The \texttt{reupload} mechanism achieved a nominal $+1.5$ point increase over the baseline; however, this fell well below the statistical resolution limit ($\text{MDE} = 3.8$), failing to justify its additional gate depth.
-The \texttt{mixed\_channel} approach, our attempt to port residual connections, actively harmed performance. Most severely, the \texttt{with\_ancilla} positional embedding triggered a catastrophic $-19.5$ point drop in accuracy. Because the Synthetic Shapes dataset evaluates a largely translation-invariant classification task, explicitly encoding positional data into a spatial ancilla provided no predictive benefit. Conversely, because each ancilla qubit doubles the required statevector dimension, it drastically increased the computational burden for zero gain.
-Finally, the noise degradation sweep revealed that the simple \texttt{baseline} architecture was more resilient to depolarizing channels than any of the  alternatives. Consequently, classical residuals and spatial ancillae were discarded. The baseline node architecture proved to be the optimal balance of accuracy, hardware efficiency, and noise resilience.
+The \texttt{mixed\_channel} approach, our attempt to port residual connections, harmed performance. The \texttt{with\_ancilla} positional embedding cost $-19.5$ points. Because the Synthetic Shapes dataset evaluates a largely translation-invariant classification task, explicitly encoding positional data into a spatial ancilla provided no predictive benefit, while each ancilla qubit doubles the required statevector dimension.
+Finally, the noise degradation sweep revealed that the plain \texttt{baseline} architecture was more resilient to depolarising channels than any of the alternatives. Classical residuals and spatial ancillae were therefore discarded: the baseline node was both the most accurate and the most noise-resilient arm tested.
 
 \section{Model Parameter Efficiency}
 
-This section compares the optimized quantum tensor network, classical tensor and neural benchmarks on parameter efficiency. The winning node configuration, the \texttt{multi\_axis} encoding paired with the \texttt{iqp} ansatz and the multi-Pauli readout, was ported into a fully coherent 16-qubit QTTN and compared against five baselines:
+This section compares the optimised quantum tensor network, classical tensor and neural benchmarks on parameter efficiency. The winning node configuration, the \texttt{multi\_axis} encoding paired with the \texttt{iqp} ansatz and the multi-Pauli readout, was ported into a fully coherent 16-qubit QTTN and compared against five baselines:
 
 \begin{enumerate}
     \item \textbf{\texttt{mlp\_reference}:} A standard, unstructured Multi-Layer Perceptron, deliberately over-provisioned to establish the accuracy ceiling of the dataset.
@@ -418,20 +422,20 @@ This section compares the optimized quantum tensor network, classical tensor and
         \texttt{mlp\_param\_matched} & 257 & $70.5 \pm 18.1$ \\
         \bottomrule
     \end{tabular}
-    \caption{Parameter efficiency on $16 \times 16$ synthetic shapes (1024 train / 64 test, scored on the mean of the last five epochs). The coherent quantum tree is the second most accurate model in the comparison at less than a third of the parameters of the model above it.}
+    \caption{Parameter efficiency on $16 \times 16$ synthetic shapes (1024 train / 64 test). Accuracy is the mean of the final five epochs, $\pm$ one standard deviation across seeds. Arms are ordered by accuracy.}
     \label{tab:model_comparison}
 \end{table}
 
-The results are given in Table \ref{tab:model_comparison} and Figure \ref{fig:model_comparison}, with the quantum cohere model surpassing in accuracy 3 of the models and tying with the 4th.
+The results are given in Table \ref{tab:model_comparison} and Figure \ref{fig:model_comparison}. The coherent quantum model outperforms three of the five baselines and ties with a fourth.
 
 \begin{figure}[hbt!]
     \centering
     \includegraphics[width=1.0\textwidth]{ch3/model_comparison.png}
-    \caption{Parameter efficiency on $16 \times 16$ synthetic shapes: accuracy by arm (left) and accuracy against parameter count on a logarithmic axis (right). The 287-parameter coherent QTTN outperforms the structurally equivalent classical tensor network despite a parameter deficit, and ties the augmented classical tree that carries residual connections and dropout. Dotted and dashed lines mark chance ($25\%$) and the single-attribute ceiling ($50\%$) respectively; error bars are one standard deviation across seeds.}
+    \caption{Parameter efficiency on $16 \times 16$ synthetic shapes: accuracy by arm (left) and accuracy against parameter count on a logarithmic axis (right). Dotted and dashed lines mark chance ($25\%$) and the single-attribute ceiling ($50\%$) respectively; error bars are one standard deviation across seeds.}
     \label{fig:model_comparison}
 \end{figure}
 
-Against \texttt{classical\_bare}, its direct structural analogue, the quantum model gains $+9.7$ points (limit $6.3$) while using $33\%$ fewer parameters. It points to the fact that under matched constraints the unitary restriction does not cost representational capacity, and on this task it appears to act as a structural regularizer rather than a handicap.
+Against \texttt{classical\_bare}, its direct structural analogue, the quantum model gains $+9.7$ points (limit $6.3$) while using $33\%$ fewer parameters. It points to the fact that under matched constraints the unitary restriction does not cost representational capacity, and on this task it appears to act as a structural regulariser rather than a handicap.
 
 Against \texttt{classical\_full} the two are \textit{tied} ($89.3$ against $88.4$). The quantum tree matches the best classical tensor network in the study while using $19\%$ fewer parameters.
 
@@ -443,8 +447,8 @@ Two qualifications belong with these numbers. First, the 999-parameter \texttt{m
 \section{Architectural Verdict}
 
 Following the diagnostics conducted across this chapter, the optimal architectural configuration of the model has been resolved.
-The fully coherent, 287-parameter Quantum Tree Tensor Network (QTTN), constructed utilizing the \texttt{multi\_axis} encoding strategy, the parameter-efficient \texttt{iqp} ansatz, and a multi-Pauli top-layer readout, has proven its trainability, performance and parameter efficiency on synthetic spatial reasoning tasks.
-Having successfully established this perception baseline, this specific quantum architecture, alongside its classical tensor controls (\texttt{classical\_bare} and \texttt{classical\_full}), will advance to the next phase of the investigation. Definitions for all three models are given in Appendix \ref{appendix:models}.
+The fully coherent, 287-parameter Quantum Tree Tensor Network (QTTN), built from the \texttt{multi\_axis} encoding, the \texttt{iqp} ansatz and a multi-Pauli top-layer readout, trains reliably on synthetic spatial reasoning tasks at fewer parameters than any classical tensor network in the comparison.
+With that perception baseline established, this quantum architecture, alongside its classical tensor controls (\texttt{classical\_bare} and \texttt{classical\_full}), will advance to the next phase of the investigation. Definitions for all three models are given in Appendix \ref{appendix:models}.
 
 
 % ==========================================
@@ -457,7 +461,7 @@ Having successfully established this perception baseline, this specific quantum 
 Having established a baseline on synthetic shapes, we now use the CLEVR dataset \cite{johnson2017clevr} to probe visual reasoning, providing complex 3D scenes populated with multiple interacting objects. Each object exhibits distinct visual attributes (colour, shape, material, size) and positioning. By deploying our surviving Quantum Tree Tensor Network (QTTN) and classical tensor controls on this dataset, we aim to answer whether quantum tensor topologies can naturally encode spatial geometry and resolve compositional binding better than unconstrained classical alternatives.
 
 \section{Methodology and Aims}
-To rigorously map the architectural limits of tensor networks, our evaluation on the CLEVR dataset is structured across an escalating hierarchy of visual reasoning. We define a three-stage progression:
+To map the architectural limits of tensor networks, our evaluation on the CLEVR dataset is structured across an escalating hierarchy of visual reasoning. We define a three-stage progression:
 \begin{enumerate}
     \item \textbf{Perception:} Scaling the models to extract the full 15-class attribute space to establish a benchmark in multi-object scenes.
     \item \textbf{Spatial Relations:} Evaluating the geometric ability of the quad-tree on explicit spatial routing tasks.
@@ -466,7 +470,7 @@ To rigorously map the architectural limits of tensor networks, our evaluation on
 
 \subsection{Dataset Adaptation: World-Scaled Cropping}
 \label{sec:crop}
-Before the models could evaluate CLEVR scenes, the data had to be processed into object crops suitable for our 16-qubit input boundary, that is, a $4 \times 4$ grid of patches. However, naive 2D bounding-box cropping introduces a problem: a physically "large" object and a "small" object will both be rescaled to fill $100\%$ of the crop window, rendering the model blind to the \texttt{size} attribute. Furthermore, perspective projection means a small object close to the camera can appear identical to a large object far away.
+Before the models could evaluate CLEVR scenes, the data had to be processed into object crops suitable for our 16-qubit input boundary, that is, a $4 \times 4$ grid of patches. However, naive 2D bounding-box cropping introduces a problem: a physically ``large'' object and a ``small'' object will both be rescaled to fill $100\%$ of the crop window, rendering the model blind to the \texttt{size} attribute. Furthermore, perspective projection means a small object close to the camera can appear identical to a large object far away.
 
 To resolve this, we create a depth-invariant, world-scaled cropping methodology governed by a global calibration constant, \texttt{CROP\_K}. The pixel width of the crop is calculated strictly as a function of the object's 3D distance from the camera:
 \begin{equation}
@@ -478,7 +482,7 @@ By scaling the crop window inversely with depth, the crop captures a constant ph
 \begin{figure}[hbt!]
     \centering
     \includegraphics[width=0.8\textwidth]{ch3/clevr_crop_calibration.png}
-    \caption{World-scaled cropping calibration (\texttt{CROP\_K} = 1470.0). By anchoring the crop size to 3D depth rather than 2D pixel bounds, physically large objects (right) consistently fill a larger fraction of the crop window than small objects (left), preserving the \texttt{size} attribute.}
+    \caption{World-scaled cropping calibration (\texttt{CROP\_K} = 1470.0). The crop side is set from the object's 3D depth rather than its 2D pixel bounds, so a physically large object (right) fills a larger fraction of the window than a small one (left).}
     \label{fig:clevr_crop}
 \end{figure}
 
@@ -494,20 +498,20 @@ The final stage of the progression targets the binding problem. Standard neural 
 
 To evaluate this, we create the Compositional Binding Probe. The models are tasked with distinguishing between scenes that contain the exact same raw features, but in swapped configurations (e.g., distinguishing a [red square, blue circle] from a [blue square, red circle]); examples are given in Appendix \ref{appendix:clevr_tasks}. Because each probe image is a composite of two objects rather than a single crop, this stage is run at $32 \times 32$ rather than the $16 \times 16$ used elsewhere in this chapter. The circuit is unchanged at 16 qubits; only the patches, and hence the classical embedding layer feeding them, are larger, which is why every model has more parameters here.
 
-If an architecture simply acts as a "bag of features" without the structural capacity to bind those features to distinct spatial locations, it will fail to separate these swapped configurations.
+If an architecture simply acts as a ``bag of features'' without the structural capacity to bind those features to distinct spatial locations, it will fail to separate these swapped configurations.
 
 \section{Perception and the Multi-Head Architecture}
 
 To execute the first stage of our evaluation, we established a perception baseline on the processed CLEVR images. Unlike the synthetic dataset in Chapter \ref{ch:synthetic} (which evaluated a single 4-class shape target), the CLEVR dataset requires the simultaneous classification of 15 distinct attribute classes across four independent dimensions: 8 colours, 3 shapes, 2 materials, and 2 sizes.
 
-To achieve this, the model was upgraded to a multi-head architecture. Instead of a single linear layer, four independent linear heads, one for each attribute dimension, were attached to the final top-layer multi-Pauli measurement of the tree. Crucially, all four heads draw from the exact same underlying quantum measurement vector. Consequently, the quantum network is forced to learn a rich, highly entangled representation capable of resolving all 15 classes simultaneously within its strict qubit constraints.
+To achieve this, the model was upgraded to a multi-head architecture. Instead of a single linear layer, four independent linear heads, one for each attribute dimension, were attached to the final top-layer multi-Pauli measurement of the tree. All four heads draw from the same underlying quantum measurement vector, so the network must resolve all 15 classes from a single statevector rather than allocating separate capacity to each attribute.
 
-Accommodating these additional classification heads increased the parameter count of the fully coherent Quantum Tree Tensor Network (QTTN) to 462 parameters. To ensure a capacity-matched comparison, the structurally faithful classical tensor control (\texttt{classical\_bare}) was tuned to 563 parameters and the optimized \texttt{classical\_full} baseline scaled to 551 parameters. An unstructured, 1186-parameter classical Multi-Layer Perceptron (\texttt{mlp\_reference}) was also included to establish the dataset's overall task difficulty ceiling.
+Accommodating these additional classification heads increased the parameter count of the fully coherent Quantum Tree Tensor Network (QTTN) to 462 parameters. To ensure a capacity-matched comparison, the structurally faithful classical tensor control (\texttt{classical\_bare}) was tuned to 563 parameters and the optimised \texttt{classical\_full} baseline scaled to 551 parameters. An unstructured, 1186-parameter classical Multi-Layer Perceptron (\texttt{mlp\_reference}) was also included to establish the dataset's overall task difficulty ceiling.
 
 \begin{figure}[hbt!]
     \centering
     \includegraphics[width=0.9\textwidth]{ch3/clevr_attributes.png}
-    \caption{Attribute extraction on $16 \times 16$ CLEVR object crops, reported per head and never averaged, at the 90-epoch budget. Dotted lines mark the majority-class floor for each head, which differs because the heads have different class counts. The multi-head readout forces the quantum architecture to resolve all 15 classes simultaneously from a single underlying statevector. Error bars are one standard deviation across seeds.}
+    \caption{Attribute extraction on $16 \times 16$ CLEVR object crops, reported per head and never averaged, at the 90-epoch budget. Dotted lines mark the majority-class floor for each head, which differs because the heads have different class counts. Error bars are one standard deviation across seeds.}
     \label{fig:clevr_attributes}
 \end{figure}
 
@@ -527,11 +531,11 @@ The empirical results of this perception evaluation are detailed in Table \ref{t
         \texttt{mlp\_reference} & 1186 & 93.1\% & 74.1\% & 84.0\% & 98.6\% \\
         \bottomrule
     \end{tabular}
-    \caption{CLEVR Perception Baseline (90 Epochs). The 462-parameter quantum model is the smallest tensor network evaluated, yet it achieves a statistically resolved $+9.7$ point win on the \texttt{shape} attribute against the larger 563-parameter \texttt{classical\_bare} control. Performance on material, size, and colour is statistically tied given the variance.}
+    \caption{CLEVR perception baseline at the 90-epoch budget. Accuracy is reported per attribute head and never averaged, since the four heads have different class counts and different majority-class floors.}
     \label{tab:perception_results}
 \end{table}
 
-This extended training exposed a structural dynamic inherent to multi-head networks: because all four heads share a single summed loss and the heads converge at very different rates, the model must "trade heads" to reach equilibrium. Training long enough for \texttt{colour} over-trains everything else. No single budget is therefore optimal for all four heads simultaneously, a limitation of the protocol rather than of either architecture, and one that applies equally to the classical arms.
+This extended training exposed a structural dynamic inherent to multi-head networks: because all four heads share a single summed loss and the heads converge at very different rates, the model must ``trade heads'' to reach equilibrium. Training long enough for \texttt{colour} over-trains everything else. No single budget is therefore optimal for all four heads simultaneously, a limitation of the protocol rather than of either architecture, and one that applies equally to the classical arms.
 
 The 462-parameter quantum model is the smallest tensor network in the comparison, operating at an 18\% parameter deficit to its structurally equivalent \texttt{classical\_bare} baseline (563 parameters). Despite this deficit, it achieved a statistically resolved $+9.7$ point win on the \texttt{shape} attribute (limit $8.6$). On the remaining three attributes (material, size, and colour), the quantum model achieved statistical parity, with gaps falling below the resolution limit imposed by seed variance.
 
@@ -539,16 +543,16 @@ The 462-parameter quantum model is the smallest tensor network in the comparison
 
 To evaluate the second stage of our progression, the models were tasked with a four-way spatial relation classification (Left, Right, Front, Behind) on two-object CLEVR crops. Because CLEVR defines these spatial relations against a camera-rotated basis, this task tests the network's ability to learn complex geometric transformations rather than simple axis heuristics. The floor for this classification is a 26.6\% majority-class baseline. Before evaluating the quantum architectures, classical controls established the viability of the task: an unstructured \texttt{mlp\_reference} achieved 65.4\%, and the 428-parameter \texttt{classical\_bare} tensor network 49.6\%.
 
-Two variants of the quantum tower are compared. In \texttt{quantum\_none} no positional embedding is explicitely present`. In \texttt{quantum\_on\_wire}, each patch carries two further learned rotation angles applied to its own wire, fixed per patch and independent of image content, so the wire acquires a signature identifying which patch it is. No extra qubits are required because nothing extra is stored: the same qubit is rotated to a different point. The trade is that a qubit's state has only two degrees of freedom, so position and content share them rather than occupying separate registers. This differs from the spatial ancilla rejected in Chapter \ref{ch:synthetic}, which gave position its own qubit and doubled the simulated state.
+Two variants of the quantum tower are compared. In \texttt{quantum\_none} no positional embedding is explicitly present. In \texttt{quantum\_on\_wire}, each patch carries two further learned rotation angles applied to its own wire, fixed per patch and independent of image content, so the wire acquires a signature identifying which patch it is. No extra qubits are required because nothing extra is stored: the same qubit is rotated to a different point. The trade is that a qubit's state has only two degrees of freedom, so position and content share them rather than occupying separate registers. This differs from the spatial ancilla rejected in Chapter \ref{ch:synthetic}, which gave position its own qubit and doubled the simulated state.
 
 While quantum training frequently collapsed to the chance floor, on the runs that successfully converged, the 462-parameter \texttt{quantum\_none} and 494-parameter \texttt{quantum\_on\_wire} models reached 46.2\% and 48.0\% respectively, both statistically tied with the \texttt{classical\_bare} control. Because the performance gaps ($-3.4$ and $-1.6$ points) fall strictly below the minimum detectable effects ($5.3$ and $5.2$), we confirm parity between the unitary quantum node and the classical CP node. These quantum arms ran at the 30-epoch budget rather than the 90 used for perception, and several converged runs were still improving when training stopped, so they are a floor on the architecture's capability rather than a ceiling; the parity result is therefore conservative.
 
-An important finding here is that \texttt{quantum\_none} carries absolutely no explicit positional parameters. Achieving parity therefore proves that the implicit geometric hierarchy of the tree topology inherently encodes spatial position. This definitively discharges the earlier failure of the spatial ancilla observed in Chapter \ref{ch:synthetic}, which was measured on a translation-invariant task and provided no signal regarding actual relational reasoning. Adding explicit position on top of that does not measurably help: \texttt{quantum\_on\_wire} scores $1.8$ points higher, against a resolution limit of $5.4$. The comparison is also confounded, since \texttt{on\_wire} carries 32 more parameters, so any advantage it did show could be capacity rather than position
+An important finding here is that \texttt{quantum\_none} carries no explicit positional parameters. Reaching parity without them indicates that the geometric hierarchy of the tree topology encodes spatial position on its own. This also discharges the earlier failure of the spatial ancilla in Chapter \ref{ch:synthetic}, which was measured on a translation-invariant task and gave no signal on relational reasoning. Adding explicit position on top of that does not measurably help: \texttt{quantum\_on\_wire} scores $1.8$ points higher, against a resolution limit of $5.4$. The comparison is also confounded, since \texttt{on\_wire} carries 32 more parameters, so any advantage it did show could be capacity rather than position.
 
 \begin{figure}[hbt!]
     \centering
     \includegraphics[width=1.0\textwidth]{ch3/clevr_relations.png}
-    \caption{Four-way spatial relation classification (Left, Right, Front, Behind) on two-object CLEVR crops, against a $26.6\%$ majority-class floor. Hatched bars report the runs that trained; solid quantum bars include the runs that collapsed to chance. On the runs that train, the quantum tower is statistically tied with \texttt{classical\_bare}, its direct structural counterpart at a comparable parameter count. \texttt{quantum\_none} carries no positional parameters, position entering only through the fixed patch-to-wire assignment.}
+    \caption{Four-way spatial relation classification (Left, Right, Front, Behind) on two-object CLEVR crops, against a $26.6\%$ majority-class floor. Hatched bars report the runs that trained; solid quantum bars include the runs that collapsed to chance.}
     \label{fig:clevr_relations2}
 \end{figure}
 
@@ -557,7 +561,7 @@ An important finding here is that \texttt{quantum\_none} carries absolutely no e
 
 While the preceding tasks established visual competency and relational geometry, neither perception nor spatial routing is compositional. To probe composition we conduct a binding probe experiment. The model is presented with two-object CLEVR composites, where each composite contains exactly one large object and one small object. The label is simply which side the large object sits on. The architecture must bind the \texttt{size} attribute to a specific spatial coordinate to resolve the task.\footnote{The binding probe relies exclusively on the \texttt{size} attribute because the perception baseline of Table \ref{tab:perception_results} proved it is the one attribute every evaluated architecture can reliably see, at $91.8$--$98.6\%$ against a $50.6\%$ floor.}
 
-Every classical architecture was evaluated against a patch-shuffled control. As detailed in Table \ref{tab:binding_results}, randomizing the spatial order of the image patches collapses every one of them to chance. This control guarantees that a naive "bag-of-features" model cannot solve the probe. The classical tensor networks successfully achieve this binding, resolving the task at 91.5\% and 93.2\%. However, they do not bind \emph{better} than an unstructured baseline: a 683-parameter \texttt{mlp\_param\_matched} architecture reaches 94.6\% with fewer parameters than any tensor-network arm.
+Every classical architecture was evaluated against a patch-shuffled control. As detailed in Table \ref{tab:binding_results}, randomising the spatial order of the image patches collapses every one of them to chance. This control guarantees that a naive ``bag-of-features'' model cannot solve the probe. The classical tensor networks do bind, resolving the task at 91.5\% and 93.2\%. However, they do not bind \emph{better} than an unstructured baseline: a 683-parameter \texttt{mlp\_param\_matched} architecture reaches 94.6\% with fewer parameters than any tensor-network arm.
 
 \begin{table}[hbt!]
     \centering
@@ -578,14 +582,14 @@ Every classical architecture was evaluated against a patch-shuffled control. As 
         \textit{chance}              & ---  & $51.2$ & $51.2$ & --- \\
         \bottomrule
     \end{tabular}
-    \caption{Compositional binding with class-conditional marginals equalised by construction. Every classical architecture falls to chance once patches are shuffled, so the task cannot be solved without binding an attribute to a position. Tensor networks bind; a 683-parameter MLP, smaller than any of them, binds slightly better. Quantum arms report the best seed and the count clearly above floor, since their distribution is bimodal and a mean would describe neither the capability nor the failure.}
+    \caption{Compositional binding, with class-conditional marginals equalised by construction. The \textit{Shuffled} column reports the same architecture on patch-shuffled inputs and \textit{Gap} the difference. The quantum arms report the best seed and the count of seeds clearly above floor rather than a mean, since their distribution is bimodal.}
     \label{tab:binding_results}
 \end{table}
 
 \begin{figure}[hbt!]
     \centering
     \includegraphics[width=1.0\textwidth]{ch3/clevr_binding.png}
-    \caption{Compositional binding, with the classical arms shown against their patch-shuffled controls (hatched) and the quantum arms shown per seed. The shuffle control collapses every classical architecture to the chance line, confirming that the task cannot be solved without binding an attribute to a position. The quantum arms are plotted as individual seeds rather than as a mean because their distribution is bimodal: a minority of initialisations separate the arrangements clearly while the remainder sit at the floor, so a mean would describe neither outcome.}
+    \caption{Compositional binding: classical arms against their patch-shuffled controls (hatched), quantum arms as individual seeds. The horizontal line marks the $51.2\%$ majority-class floor.}
     \label{fig:clevr_binding_results}
 \end{figure}
 
@@ -599,7 +603,7 @@ The tree can therefore bind using nothing but its topology. Explicit position ad
 \section{The Frozen Baseline: CLIP's Binding Geometry}
 \label{sec:clip_geometry}
 
-We ran the same probe on a frozen CLIP image encoder \cite{radford2021learning}. Rather than training a classifier on its features, we looked at how far its output moves when the image changes, because comparing outputs this way, by cosine similarity, is exactly what CLIP does when it retrieves or classifies an image. Each comparison reuses the same two objects, so only their arrangement differs. Swapping the two objects between sides moves CLIP's output by $0.0050$; replacing them with different objects moves it by $0.0654$, some thirteen times further.\footnote{Composites for this measurement are built at CLIP's native $224 \times 224$ input resolution rather than the $32 \times 32$ used for the trainable arms, since a frozen encoder cannot be re-fit to a smaller input. The construction is otherwise identical} CLIP is therefore not blind to how objects are arranged, but rearranging them registers as only $7.6\%$ of the change caused by swapping the objects themselves. On composites built the same way, a 683-parameter network tells the two arrangements apart $94.6\%$ of the time. This helps explain why such models behave like bags of words on ARO \cite{yuksekgonul2023when}.
+We ran the same probe on a frozen CLIP image encoder \cite{radford2021learning}. Rather than training a classifier on its features, we looked at how far its output moves when the image changes, because comparing outputs this way, by cosine similarity, is exactly what CLIP does when it retrieves or classifies an image. Each comparison reuses the same two objects, so only their arrangement differs. Swapping the two objects between sides moves CLIP's output by $0.0050$; replacing them with different objects moves it by $0.0654$, some thirteen times further.\footnote{Composites for this measurement are built at CLIP's native $224 \times 224$ input resolution rather than the $32 \times 32$ used for the trainable arms, since a frozen encoder cannot be re-fit to a smaller input. The construction is otherwise identical.} CLIP is therefore not blind to how objects are arranged, but rearranging them registers as only $7.6\%$ of the change caused by swapping the objects themselves. On composites built the same way, a 683-parameter network tells the two arrangements apart $94.6\%$ of the time. This helps explain why such models behave like bags of words on ARO \cite{yuksekgonul2023when}.
 
 
 % ==========================================
@@ -620,7 +624,7 @@ We pivot instead to the classical CP-TTN, which preserves the hierarchical quad-
 
 \section{The DisCoViz Architecture}
 
-To achieve true end-to-end compositional reasoning in a multimodal setting, we introduce DisCoViz, which is directly inspired from DisCoCLIP \cite{discoclip}. This architecture replaces the standard, structurally blind vision encoders utilized in traditional VLMs with our optimized Canonical Polyadic Tree Tensor Network (CP-TTN). By integrating this inherently compositional 2D vision backbone with the DisCoCat language model \cite{discocat}, DisCoViz provides a fully compositional, top-down architecture for multi-modal reasoning.
+To carry compositional structure end to end in a multimodal setting, we introduce DisCoViz, which is directly inspired from DisCoCLIP \cite{discoclip}. This architecture replaces the structurally blind vision encoder of a standard VLM with our Canonical Polyadic Tree Tensor Network (CP-TTN). Pairing that 2D vision backbone with the DisCoCat language model \cite{discocat} gives an architecture in which both towers contract along an explicit structure rather than pooling globally.
 
 Integrating the hierarchical image TTN into a shared contrastive latent space alongside a text model required solving three distinct problems: preparing patches for contraction, maintaining relational capacity during that contraction, and aligning disparate multi-modal scales.
 
@@ -628,24 +632,24 @@ Integrating the hierarchical image TTN into a shared contrastive latent space al
 Each $4 \times 4$ patch enters the tree as a bond-dimension-64 vector. Rather than flattening colour and position into a single linear map, the embedding factorises them: one learned factor contracts the three colour channels and a second contracts the sixteen pixel positions, and the two are combined by an elementwise product. This separates \textit{what} a patch contains from \textit{where} within the patch it sits, and the multiplicative combination lets the two interact without either dominating the other at initialisation.
 
 \subsection{The Inverted Funnel}
-To mitigate information bottlenecks during spatial contraction, the TTN vision backbone utilizes an "Inverted Funnel" structure. In a standard hierarchical network, compressing the spatial resolution inherently risks destroying fine-grained relational data. To prevent this, the internal bond dimension ($D$) of the TTN explicitly expands at each depth level, doubling as the spatial resolution is reduced by a factor of four ($D_{out} = 2 \times D_{in}$).
+Each level of the tree reduces the spatial resolution by a factor of four, and at a fixed bond dimension that compression is where relational detail is lost. The vision backbone therefore widens its internal bond dimension ($D$) as it contracts, doubling at each level ($D_{out} = 2 \times D_{in}$), ie  an inverted funnel.
 
-This expansion provides the expressive capacity needed to encode complex multi-linear interactions. The $16 \times 16$ grid of 256 patches contracts over four levels while the bond dimension runs $64 \to 128 \to 256 \to 512 \to 1024$. The root tensor is therefore 1024-dimensional, and a final linear projection maps it to the 512-dimensional embedding shared with the text tower. The increasing dimensionality ensures that critical spatial relationships are preserved rather than destructively pooled.
+The $16 \times 16$ grid of 256 patches contracts over four levels while the bond dimension runs $64 \to 128 \to 256 \to 512 \to 1024$. The root tensor is therefore 1024-dimensional, and a final linear projection maps it to the 512-dimensional embedding shared with the text tower. Because the bond widens faster than the arity of each merge, no level is forced to compress four children into a space the size of one.
 
 \subsection{Positional Encoding}
-The vision tower carries a learned positional embedding, one vector per patch, added to the patch representations before contraction and scaled by a learned gate. In contrast to the quantum tower where positional parameters were found to yield no benefit.
+The vision tower carries a learned positional embedding, one vector per patch, added to the patch representations before contraction and scaled by a learned gate. This is a departure from the quantum tower, where positional parameters yielded no benefit.
 
-Chapter \ref{ch:clevr} found no benefit from explicit positional encoding, but measured it on a depth-two tree over 16 patches. This tower is four levels deep over 256. Each contraction merges a patch with three siblings, so position must survive four merges rather than two and is therefore far more 'smeared' by the time it reaches the root. That is why explicit position is benefitial here where it did not before. The gate keeps the addition safe: initialised small, the network can leave the signal near zero if the topology already suffices.
+Chapter \ref{ch:clevr} found no benefit from explicit positional encoding, but measured it on a depth-two tree over 16 patches. This tower is four levels deep over 256. Each contraction merges a patch with three siblings, so position must survive four merges rather than two and is therefore far more `smeared' by the time it reaches the root. That is why explicit position earns its place here and did not before. The gate keeps the addition safe: initialised small, the network can leave the signal near zero if the topology already suffices.
 
-\subsection{Output Normalization}
+\subsection{Output Normalisation}
 The two towers produced embeddings whose norms differed by orders of magnitude, which destabilised the contrastive gradients and stalled early training runs. Both are therefore L2-normalised at their projection heads, placing image and text on a shared unit sphere.
 
 \section{The ARO Dataset and Setup}
 
-To evaluate DisCoViz, we utilized the Attribution, Relation, and Order (ARO) benchmark. ARO exposes the "bag-of-features" vulnerabilities in standard VLMs by challenging them to distinguish true captions from structurally swapped hard negatives. We evaluate on two specific tasks: \textbf{Attribution}, requiring the model to bind adjectives to specific nouns (e.g., distinguishing "a red door and a blue wall" from the hard-negative distractor "a blue door and a red wall"); and \textbf{Relation}, requiring the resolution of explicit spatial or action-based geometries (e.g., "a horse eating grass" vs. "grass eating a horse").
+To evaluate DisCoViz, we use the Attribution, Relation, and Order (ARO) benchmark. ARO exposes the ``bag-of-features'' vulnerabilities in standard VLMs by challenging them to distinguish true captions from structurally swapped hard negatives. We evaluate on two specific tasks: \textbf{Attribution}, requiring the model to bind adjectives to specific nouns (e.g., distinguishing ``a red door and a blue wall'' from the hard-negative distractor ``a blue door and a red wall''); and \textbf{Relation}, requiring the resolution of explicit spatial or action-based geometries (e.g., ``a horse eating grass'' vs. ``grass eating a horse'').
 
 
-To optimize the network for these fine-grained distinctions, the architecture is trained using a composite loss function ($L_{total} = L_{InfoNCE} + \lambda L_{Triplet}$). The InfoNCE component maintains global latent alignment across the batch by maximizing the cosine similarity ($\text{sim}$) of matching image-text pairs $(I_i, T_i)$ against all other mismatched pairs $(I_i, T_j)$:
+To optimise the network for these fine-grained distinctions, the architecture is trained using a composite loss function ($L_{total} = L_{InfoNCE} + \lambda L_{Triplet}$). The InfoNCE component maintains global latent alignment across the batch by maximising the cosine similarity ($\text{sim}$) of matching image-text pairs $(I_i, T_i)$ against all other mismatched pairs $(I_i, T_j)$:
 \begin{equation}
     L_{InfoNCE} = - \frac{1}{N} \sum_{i=1}^N \log \frac{\exp(\text{sim}(I_i, T_i) / \tau)}{\sum_{j=1}^N \exp(\text{sim}(I_i, T_j) / \tau)}
 \end{equation}
@@ -654,17 +658,17 @@ Simultaneously, the Triplet loss explicitly leverages the hard negatives provide
 \begin{equation}
     L_{Triplet} = \max(0, \text{sim}(I_i, T_{neg}) - \text{sim}(I_i, T_i) + \alpha)
 \end{equation}
-where $\alpha$ represents the margin. By prioritizing these hard-negative gradients through the $\lambda$ scaling factor, the optimizer is forced to mathematically resolve the subtle structural differences between the true captions and the specific shuffled distractors.
+where $\alpha$ represents the margin. By prioritising these hard-negative gradients through the $\lambda$ scaling factor, the optimiser is forced to mathematically resolve the subtle structural differences between the true captions and the specific shuffled distractors.
 
-Crucially, the baseline for this evaluation is \textbf{DisCoClip} \cite{discoclip}. Both DisCoViz and DisCoClip utilize the exact same compositional DisCoCat language model for text embedding, so the language-processing capacity is held constant and any performance delta originates on the vision side. DisCoClip relies on a frozen, self-attention-based CLIP Vision Transformer, whereas DisCoViz utilizes the CP-TTN.
+The baseline for this evaluation is \textbf{DisCoClip} \cite{discoclip}. Both DisCoViz and DisCoClip use the same DisCoCat language model for text embedding, so the language-processing capacity is held constant and any performance delta originates on the vision side. DisCoClip relies on a frozen, self-attention-based CLIP Vision Transformer, whereas DisCoViz uses the CP-TTN.
 
 Two things differ between those encoders. The first is architectural: CLIP applies global self-attention over a flattened sequence of patches, while the CP-TTN contracts them hierarchically in two dimensions. The second is that CLIP's tower is \textit{frozen} while the CP-TTN is \textit{trained}. A performance delta is therefore attributable to the replacement of the encoder as a whole, and not to topology alone; separating the two would require a trained non-hierarchical tower of comparable size. What the comparison does establish cleanly is that the tensor-network tower is a viable substitute for frozen CLIP in a compositional setting. No assertions can be made of the superiority, or inferiority, of attention-based mechanisms, instead only that a frozen general-purpose encoder discards the spatial information these tasks depend on, as measured directly in Section \ref{sec:clip_geometry}.
 
 \section{Compositionality Results}
 
-Following the architectural integration of the CP-TTN vision backbone with the DisCoCat language model, DisCoViz demonstrated great compositional reasoning. On the ARO benchmark, the model achieved a 77.65\% accuracy on the Attribution task and a 59.78\% accuracy on the Relation task.
+With the CP-TTN vision backbone integrated with the DisCoCat language model, DisCoViz reaches 77.65\% on ARO Attribution and 59.78\% on ARO Relation, clearly showing good compositional reasoning.
 
-To contextualize these results, DisCoViz was evaluated against both the direct DisCoClip baseline and industry-standard Vision-Language Models (Table \ref{tab:aro_results}).
+To contextualise these results, DisCoViz was evaluated against both the direct DisCoClip baseline and industry-standard Vision-Language Models (Table \ref{tab:aro_results}).
 
 \begin{table}[hbt!]
     \centering
@@ -680,22 +684,24 @@ To contextualize these results, DisCoViz was evaluated against both the direct D
         \textbf{\texttt{DisCoViz} (Ours)} & 77.65\% & \textbf{59.78\%} \\
         \bottomrule
     \end{tabular}
-    \caption{Compositional performance on the ARO benchmark. DisCoViz gains $+7.64$ and $+3.97$ points over the DisCoClip baseline, and exceeds the far larger BLIP model on the Relation task. Note that the CLIP, OpenCLIP and BLIP rows are zero-shot, whereas DisCoClip and DisCoViz are trained on the ARO training split; the rows above and below the first rule are therefore not directly comparable.}
+    \caption{Compositional performance on the ARO benchmark. The CLIP, OpenCLIP and BLIP rows are zero-shot, whereas DisCoClip and DisCoViz are trained on the ARO training split; the rows above and below the first rule are therefore not directly comparable.}
     \label{tab:aro_results}
 \end{table}
 
 The most critical comparison is between DisCoViz and the DisCoClip baseline, since these two share both the language model and the training methodology and differ only in the vision encoder. DisCoViz gains $+7.64$ points on Attribution and $+3.97$ on Relation.
 
-The improvement here is therefore not evidence that hierarchical contraction binds more effectively than the alternatives, as shown in the binding probe section\ref{sec:binding_probe}. What Section \ref{sec:clip_geometry} measured is the more likely explanation of the performance improvement: frozen CLIP's embedding moves an order of magnitude further when the objects in a scene change than when the same objects are rearranged, so the representation DisCoClip receives has already discarded most of the arrangement information its language model would need. Replacing that encoder with any tower that preserves spatial arrangement recovers the discarded signal, as is the case here.
+The improvement here is therefore not evidence that hierarchical contraction binds more effectively than the alternatives, as shown in the binding probe of Section~\ref{sec:binding_probe}. What Section \ref{sec:clip_geometry} measured is the more likely explanation of the performance improvement: frozen CLIP's embedding moves an order of magnitude further when the objects in a scene change than when the same objects are rearranged, so the representation DisCoClip receives has already discarded most of the arrangement information its language model would need. Replacing that encoder with any tower that preserves spatial arrangement recovers the discarded signal, as is the case here.
 
 DisCoViz also exceeds CLIP and OpenCLIP by a wide margin, and exceeds BLIP on Relation ($59.78\%$ against $52.90\%$) while falling slightly short on Attribution ($77.65\%$ against $78.46\%$). These three rows are zero-shot evaluations of general-purpose models, whereas DisCoViz is trained on ARO's own training split with its hard negatives in the loss, so the comparison indicates what a small, task-adapted compositional model can achieve rather than a like-for-like architectural ranking.
 
-\subsection{Non Linear Contractions}
+\subsection{Non-Linear Contractions}
 The text tower as described is multilinear: a sentence embedding is a product of its word tensors, and no number of contractions changes that. A multilinear map combines its arguments the same way whatever their values, which is a poor fit for ARO, where true and false captions contain the same words and differ only in which attaches to which. We therefore insert a gated GELU after each pairwise contraction,
 \begin{equation}
     x' = x + \gamma \cdot \mathrm{GELU}(x),
 \end{equation}
-with $\gamma$ learned. This lets a constituent's contribution depend on what its neighbours turned out to be.\begin{table}[hbt!]
+with $\gamma$ learned. This lets a constituent's contribution depend on what its neighbours turned out to be.
+
+\begin{table}[hbt!]
     \centering
     \begin{tabular}{l c c}
         \toprule
@@ -708,7 +714,7 @@ with $\gamma$ learned. This lets a constituent's contribution depend on what its
         \textbf{\texttt{DisCoViz} (non-linear)} & \textbf{80.13\%} & \textbf{60.44\%} \\
         \bottomrule
     \end{tabular}
-    \caption{Effect of non-linear contractions on ARO, evaluated on the full 8,088-pair held-out test split. The non-linear variant exceeds BLIP on both tasks.}
+    \caption{Effect of non-linear contractions on ARO, evaluated on the full 8,088-pair held-out test split. The CLIP and BLIP rows are repeated from Table \ref{tab:aro_results} for reference and are zero-shot.}
     \label{tab:nlc_results}
 \end{table}
 
@@ -739,7 +745,7 @@ COCO carries no hard negatives, so we also construct them. We swap either two no
     \label{tab:pi_sweep}
 \end{table}
 
-At $\pi = 0$ the transfer does not happen. ARO Attribution is $50.22\%$ and Relation $50.06\%$, both chance. Retrieval returns $0.02\%$ R@1, exactly the one-in-5,000 rate, so the embedding cannot rank a caption against the corpus at all. Winoground sits below its $16.67\%$ random baseline, as CLIP-class models often do \cite{thrush2022winoground}. Only SugarCrepe rises, to $71.86\%$ but most of its negatives replace a word rather, which changes the bag of words, so a model reading captions as unordered bags can score there while failing every swap. It rules out a complete training failure and no more.
+At $\pi = 0$ the transfer does not happen. ARO Attribution is $50.22\%$ and Relation $50.06\%$, both chance. Retrieval returns $0.02\%$ R@1, exactly the one-in-5,000 rate, so the embedding cannot rank a caption against the corpus at all. Winoground sits below its $16.67\%$ random baseline, as CLIP-class models often do \cite{thrush2022winoground}. Only SugarCrepe rises, to $71.86\%$, but most of its negatives replace a word rather than swap two, which changes the bag of words itself, so a model reading captions as unordered bags can score there while failing every swap. It rules out a complete training failure and no more.
 
 Increasing $\pi$ changes none of this. ARO stays within a couple of points of chance at every rate, retrieval never leaves its floor, and SugarCrepe moves by two points with no ordering by $\pi$.
 
@@ -754,6 +760,8 @@ Hard negatives are therefore not what separates the two training regimes, and no
 \section{Conclusion}
 
 This report set out to build the missing half of a quantum-inspired vision--language model. The language side already existed in DisCoCat, whose contraction follows a sentence's grammatical structure; the open question was whether an image encoder could be built on the same principle, and whether replacing its classical tensor nodes with genuine quantum unitaries costs or buys anything. We surveyed a family of candidate encoders: tree, matrix-product and MERA topologies across four data encodings and three ans\"{a}tze and narrowed them on measured evidence, and evaluated the survivor in isolation, on CLEVR, and finally as one tower of a full vision--language model.
+
+Against the three aims set out in the introduction: the first is met, with a viable encoder identified and its internals resolved on measured evidence rather than assumed. The second is met with a bounded verdict, that the unitary node is not worse than its unconstrained classical counterpart at matched capacity and is better on synthetic data, but not that it is better in general. The third is met in part. Substituting the tensor tower for frozen CLIP improves both ARO tasks, but the gain is attributable to preserving spatial arrangement rather than to any compositional advantage of hierarchical contraction, and it does not survive training on general captions.
 
 \subsection{Architecture}
 
@@ -781,8 +789,9 @@ Taken together these results support the wider scope. The tensor-network vision 
 
 \subsection{Limitations}
 
-The scale at which the \emph{quantum} claims hold is narrow. A single small image size at depth two is the only coherent configuration trained end to end, and every noise result characterizes an individual tree node rather than the assembled tower. The classical tower scales considerably further but this introduces an asymmetry since it cannot be said which are scaling limitations inherent to both or just the classical model. These are consequences of classical simulation costs rather than of the architecture. Both, along with the training instability noted above, are addressed in the future work that follows.
+The scale at which the \emph{quantum} claims hold is narrow. A single small image size at depth two is the only coherent configuration trained end to end, and every noise result characterises an individual tree node rather than the assembled tower. The classical tower scales considerably further but this introduces an asymmetry since it cannot be said which are scaling limitations inherent to both or just the classical model. These are consequences of classical simulation costs rather than of the architecture. Both, along with the training instability noted above, are addressed in the future work that follows.
 
+A second limit falls on supervision rather than scale. The vision--language result holds where the test-time distractor type is present in training and does not survive general caption data: trained on ordinary captions instead of ARO's own hard negatives, the same model returns to chance on both ARO tasks at every hard-negative rate, and retrieval stays at its floor. What the architecture is shown to do is resolve a particular kind of distractor when it is in the loss, not acquire compositional structure from captions. Whether it can do the latter is unresolved, and it is what separates this model from a working vision--language model.
 
 \section{Future Work}
 
@@ -801,9 +810,9 @@ The third experiment addresses an architectural compromise. A tree tensor networ
 Hardware would also permit whole-tree noise results. All noise results in this report characterise a \emph{single} tree node, because simulating a noisy sixteen-qubit circuit requires a density matrix of prohibitive size; on hardware noise is not emulated but enforced, so the resilience of the assembled tower could be measured directly. Similarly, the gradient-scaling study stops at twenty qubits because automatic differentiation caches a statevector at every gate, whereas sampling gradients physically would allow the polynomial-scaling claim to be tested thoroughly and allow for general claims to be made on barren plateau resilience.
 
 \subsubsection{Training Instability}
-Every limitation above is a simulation one. The most serious one is not. Most training runs collapse to chance and never recover, and that is a property of the optimisation landscape rather than of the simulator, hardware runs do not change that. Barren plateaus are not the cause. Liu et al.\ show gradient variance decaying only polynomially in tree tensor networks under local loss functions \cite{liu2022tnbp}, our own measurements agree at the widths used, and the failure pattern does not match; a plateau would flatten the landscape for every initialisation, not leave some training normally. Anschuetz and Kiani show that shallow models without barren plateaus can still be untrainable, because only a superpolynomially small fraction of their local minima lie near the global optimum \cite{anschuetz2022traps}. This matches what we see, a bimodal distribution, with one modality at chance and another able to learn.
+Every limitation above is a simulation one. The most serious one is not. Most training runs collapse to chance and never recover, and that is a property of the optimisation landscape rather than of the simulator; hardware runs do not change that. Barren plateaus are not the cause. Liu et al.\ show gradient variance decaying only polynomially in tree tensor networks under local loss functions \cite{liu2022tnbp}, our own measurements agree at the widths used, and the failure pattern does not match: a plateau would flatten the landscape for every initialisation, not leave some training normally. Anschuetz and Kiani show that shallow models without barren plateaus can still be untrainable, because only a superpolynomially small fraction of their local minima lie near the global optimum \cite{anschuetz2022traps}. This matches what we see: a bimodal distribution, with one mode at chance and another able to learn.
 
-Two approaches from that literature are worth testing. The identity-block initialisation of Grant et al.\ constrains the circuit to evaluate to the identity at the start of training, bounding its effective depth on the first update \cite{grant2019init}; we tested a near-identity variant and found no measurable effect, which is consistent with a trap-dominated rather than plateau-dominated landscape. More promising is \emph{warm-starting from a classical tensor network}: Rudolph et al.\ train a matrix product state classically, transfer it into a parametrized circuit, and report gradient magnitudes that remain stable where randomly initialised circuits decay exponentially \cite{rudolph2023pretraining}. This is particularly fitting in our case. Rudolph et al.\ transfer between two different architectures, whereas our classical CP tree shares the quantum tower's topology exactly differing only in that its nodes are unconstrained contractions rather than unitaries. It is trained on the same data and converges reliably, so it is available as a starting point.
+Two approaches from that literature are worth testing. The identity-block initialisation of Grant et al.\ constrains the circuit to evaluate to the identity at the start of training, bounding its effective depth on the first update \cite{grant2019init}; we tested a near-identity variant and found no measurable effect, which is consistent with a trap-dominated rather than plateau-dominated landscape. More promising is \emph{warm-starting from a classical tensor network}: Rudolph et al.\ train a matrix product state classically, transfer it into a parameterised circuit, and report gradient magnitudes that remain stable where randomly initialised circuits decay exponentially \cite{rudolph2023pretraining}. Murota and Kobori report the same for tree tensor networks specifically, transferring a classically pre-trained TTN into a quantum classifier and recovering trainability at widths where random initialisation fails \cite{murota2025ttn}. This is particularly fitting in our case. Rudolph et al.\ transfer between two different architectures, whereas our classical CP tree shares the quantum tower's topology exactly differing only in that its nodes are unconstrained contractions rather than unitaries. It is trained on the same data and converges reliably, so it is available as a starting point.
 
 \subsection{Towards a Fully Quantum Vision--Language Model}
 
@@ -817,7 +826,7 @@ A second difficulty is more fundamental. Thanasilp et al.\ show that quantum ker
 Alternatives exist and each trades one difficulty for another. A Hadamard test recovers the real part of the overlap and therefore preserves sign, at the cost of a controlled operation. A small trained circuit could take both registers and emit a score directly, avoiding a fixed metric but introducing another variational object to optimise. The present design, measuring both towers and comparing classically, remains a viable candidate, since it is cheap and preserves the sign.
 
 \subsubsection{Matching the two output spaces}
-A second problem is structural, and follows directly from what makes the language model attractive. In DisCoCat the contraction topology is determined by the sentence's grammatical structure rather than by a fixed layout, so different sentences induce different circuits and, in general, different output register widths. Any similarity computed by state overlap requires both states to inhabit the same Hilbert space. It is also a problem the classical pipeline never had to confront due to the well-curated ARO dataset. Solutions to this problem would either involve abandoning the expressivness of the text model in favor of a fixed output shape, or designing a versatile projection layer.
+A second problem is structural, and follows directly from what makes the language model attractive. In DisCoCat the contraction topology is determined by the sentence's grammatical structure rather than by a fixed layout, so different sentences induce different circuits and, in general, different output register widths. Any similarity computed by state overlap requires both states to inhabit the same Hilbert space. It is also a problem the classical pipeline never had to confront due to the well-curated ARO dataset. Solutions to this problem would either involve abandoning the expressiveness of the text model in favour of a fixed output shape, or designing a versatile projection layer.
 
 % =============================================
 % 9. BIBLIOGRAPHY / REFERENCES
