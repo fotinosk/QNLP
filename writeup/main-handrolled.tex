@@ -246,7 +246,7 @@ This is why the two widenings are predicted to behave differently. Reading more 
 The multi-wire protocol is therefore a workaround for a simulation limit rather than a design choice. It widens the effective bond dimension only at the very top of the tree. Were a larger bond affordable (passing $k$ qubits per bond, giving $\chi = 2^k$) the tree would carry the information upward properly and a reading of the root register alone would suffice.
 
 
-\chapter{Topological Optimization (Synthetic Data)}
+\chapter{Topological Optimization}
 \label{ch:synthetic}
 
 \section{Dataset and Aims}
@@ -271,6 +271,11 @@ To execute the four evaluations outlined above, we use an elimination-based test
 All candidate models are trained using the Adam optimizer with a categorical cross-entropy loss function. To ensure a fair, best-case comparison, hyperparameters such as learning rates and weight initialization bounds are independently tuned for each architecture.
 
 Due to the $\mathcal{O}(4^N)$ memory limits of noisy emulation (the Density Matrix Wall established in Section \ref{sec:density_wall}), all quantum training is executed via exact statevector simulation using PennyLane's \texttt{lightning.qubit} device. This bypasses the memory bottleneck while maintaining mathematical fidelity for the unitary operations.
+
+\subsection{Reporting Comparisons}
+Every arm is run at several random initialisations, and each run is scored on the mean of its final five epochs rather than a single final value, which removes most of the epoch-to-epoch noise. An arm is therefore summarised by a mean and a spread across seeds.
+
+Comparing two arms means asking whether the gap between their means is larger than that spread can explain. Because arms differ in both variance and seed count, we use Welch's unequal-variance form to compute the smallest difference the design could distinguish from zero. The minimum detectable effect is reported throughout as the \textit{limit}. A difference exceeding its limit is \textit{resolved}; one falling below it is not, and the two arms are reported as statistically tied. An unresolved comparison is not evidence that two arms perform identically, only that this experiment could not separate them, with the limit stating how large a difference would have been needed.
 
 \section{Optimization Results}
 
