@@ -53,6 +53,7 @@ SUGARCREPE_COMPILED_COLUMNS = [
     ("true_diagram", "true_symbols", "true_caption", "true_path"),
     ("false_diagram", "false_symbols", "false_caption", "false_path"),
 ]
+SVO_PROBES_COMPILED_COLUMNS = [("diagram", "symbols", "caption", "path")]
 
 
 # ---------------------------------------------------------------------------
@@ -432,6 +433,116 @@ def evaluate_sugarcrepe(
 
 
 # ---------------------------------------------------------------------------
+# SVO-Probes (mirror of ARO/SugarCREPE: fixed caption, true/false IMAGE)
+# ---------------------------------------------------------------------------
+
+_SVO_SUBSETS = ["subj_neg", "verb_neg", "obj_neg"]
+
+
+def evaluate_svo_probes(
+    model: ContrastiveVLM,
+    device: torch.device,
+    batch_size: int,
+    parquet: Path | None = None,
+) -> dict[str, dict]:
+    """SVO-Probes pos/neg-image accuracy, stratified by subject/verb/object subset.
+
+    Each row has one caption and two candidate images (true = the SVO-Probes
+    positive image, false = the negative that differs in subject, verb, or
+    object). A row contributes to every subset flag it carries (subj_neg,
+    verb_neg, obj_neg), matching Winoground-by-tag's multi-label convention.
+    """
+    parquet = parquet or constants.datasets_path / "svo_test_probes.parquet"
+    non_linear = model.text_model.non_linear_contractions
+    size = image_model_hyperparams.image_size
+
+    ds = VLMDataset(
+        parquet,
+        image_columns=["true_local_image_path", "false_local_image_path"],
+        compiled_columns=SVO_PROBES_COMPILED_COLUMNS,
+        image_transform=_make_transform(size),
+        use_non_linear_contractions=non_linear,
+    )
+    loader = _make_loader(ds, batch_size, vlm_collate_fn)
+    known = set(model.text_model.sym2weight.keys())
+
+    correct_by_subset: dict[str, list[bool]] = defaultdict(list)
+    n_skipped = 0
+
+    with torch.no_grad():
+        for batch in loader:
+            captions = batch["caption"]
+
+            valid = [i for i in range(len(captions)) if all(s in known for s in captions[i][1])]
+            n_skipped += len(captions) - len(valid)
+            if not valid:
+                continue
+
+            true_images = batch["true_local_image_path"][valid].to(device)
+            false_images = batch["false_local_image_path"][valid].to(device)
+            caps = [captions[i] for i in valid]
+
+            true_out = model(true_images, caps)
+            false_out = model(false_images, caps)
+
+            pos = F.cosine_similarity(true_out["true_caption_embeddings"], true_out["image_embeddings"])
+            neg = F.cosine_similarity(false_out["true_caption_embeddings"], false_out["image_embeddings"])
+            correct = (pos > neg).tolist()
+            finite = (torch.isfinite(pos) & torch.isfinite(neg)).tolist()
+
+            for j, i in enumerate(valid):
+                if not finite[j]:
+                    n_skipped += 1
+                    continue
+                subsets = [s for s in _SVO_SUBSETS if bool(batch[s][i])]
+                for s in subsets:
+                    correct_by_subset[s].append(bool(correct[j]))
+                correct_by_subset["overall"].append(bool(correct[j]))
+
+    def _acc(xs):
+        return sum(xs) / len(xs) if xs else float("nan")
+
+    results = {subset: {"n": len(vals), "hard_neg_acc": _acc(vals)} for subset, vals in correct_by_subset.items()}
+    if n_skipped:
+        logger.warning(f"SVO-Probes: skipped {n_skipped} rows with unknown/NaN symbols.")
+        results.setdefault("overall", {"n": 0, "hard_neg_acc": float("nan")})["n_skipped"] = n_skipped
+    return results
+
+
+def evaluate_svo(
+    model: ContrastiveVLM,
+    device: torch.device,
+    batch_size: int,
+    probes_parquet: Path | None = None,
+    swap_parquet: Path | None = None,
+) -> dict[str, dict | None]:
+    """SVO-Probes (subject/verb/object hard-neg image accuracy) + SVO-Swap
+    (fixed image, true/swapped caption — reuses evaluate_sugarcrepe directly
+    since it's the same fixed-image/varying-caption shape)."""
+
+    def _guard(name: str, fn):
+        try:
+            return fn()
+        except Exception as e:
+            logger.warning(f"{name}: eval skipped ({type(e).__name__}: {e})")
+            return None
+
+    return {
+        "svo_probes": _guard("SVO-Probes", lambda: evaluate_svo_probes(model, device, batch_size, probes_parquet)),
+        "svo_swap": _guard(
+            "SVO-Swap",
+            lambda: evaluate_sugarcrepe(
+                model,
+                device,
+                batch_size,
+                subset="svo_swap",
+                parquet=swap_parquet or constants.datasets_path / "svo_swap_eval.parquet",
+            ),
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
@@ -534,10 +645,12 @@ def log_banner(title: str, info: dict) -> None:
     logger.info(sep)
 
 
-def print_full_report(retrieval: dict | None, benchmarks: dict, info: dict | None = None) -> None:
+def print_full_report(
+    retrieval: dict | None, benchmarks: dict, info: dict | None = None, svo: dict | None = None
+) -> None:
     """Print one contiguous, copy-pasteable block with the model info and every
     metric: retrieval, Winoground (overall + per-tag), ARO (attribution/relation/
-    overall), and SugarCREPE (full / ++)."""
+    overall), SugarCREPE (full / ++), and — when supplied — SVO-Probes/SVO-Swap."""
     sep = "=" * 72
     log = logger.info
     log(sep)
@@ -592,6 +705,27 @@ def print_full_report(retrieval: dict | None, benchmarks: dict, info: dict | Non
             log(f"  {name:<10} acc={sc['hard_neg_acc']:.4f}  evaluated={sc['n_evaluated']}  skipped={sc['n_skipped']}")
         else:
             log(f"  {name:<10} (unavailable)")
+
+    if svo is not None:
+        log("-" * 72)
+        probes = svo.get("svo_probes")
+        log("SVO-Probes (hard-neg image acc by subset)")
+        if probes:
+            log(f"  {'subset':<12}{'N':>7}{'acc':>9}")
+            for subset in [*sorted(k for k in probes if k != "overall"), "overall"]:
+                r = probes[subset]
+                log(f"  {subset:<12}{r['n']:>7}{r['hard_neg_acc']:>9.4f}")
+        else:
+            log("  (unavailable)")
+
+        swap = svo.get("svo_swap")
+        log("SVO-Swap (hard-neg caption acc)")
+        if swap:
+            log(
+                f"  acc      : {swap['hard_neg_acc']:.4f}  evaluated={swap['n_evaluated']}  skipped={swap['n_skipped']}"
+            )
+        else:
+            log("  (unavailable)")
     log(sep)
 
 
