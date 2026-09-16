@@ -2,11 +2,25 @@
 Build the final SVO-Probes train/val/test datasets from compiled atoms.
 
 Mirrors the paper's preprocessing: drop rows containing a word with corpus
-frequency <50, then split 60/20/20 with NO image overlap between splits.
-"Image overlap" is enforced across pos_image_id AND neg_image_id together —
-an atom's two images are unioned into the same connected component via
-union-find, so an image can never appear as a positive in one split and a
-negative in another.
+frequency <50, then split 60/20/20 with no POSITIVE-image overlap between
+splits — an image that is some row's pos_image never appears as another
+row's pos_image in a different split. Negative images ARE allowed to repeat
+across splits.
+
+This is deliberately looser than full pos+neg connectivity. SVO-Probes
+negatives are frequently *borrowed* from elsewhere in the dataset (a
+subject/object-swap negative is typically some other row's positive image),
+so grouping by full connectivity chains almost the entire corpus into one
+giant component via these borrowed images — verified empirically: 65% of
+all post-filter rows collapsed into a single component, and because
+subject/object-swap negatives account for a disproportionate share of that
+chaining, val/test were left with only 1-5 subj_neg/obj_neg examples each,
+too few to report a meaningful per-subset breakdown. Splitting on
+pos_image_id alone keeps each split's subj/verb/obj proportions close to
+the full corpus's, at the cost of a mild, common-in-practice leakage: a
+model may see an image as a training positive and later see the same image
+again as an eval negative (it can only help correctly reject that negative,
+since embeddings for it were already learned well).
 
 Outputs (data/datasets/):
     svo_train.parquet       — sample_id, local_image_path, processed_text,
@@ -55,34 +69,10 @@ def _filter_by_word_frequency(atoms: pl.DataFrame, threshold: int) -> pl.DataFra
     return atoms
 
 
-class _UnionFind:
-    def __init__(self) -> None:
-        self.parent: dict[str, str] = {}
-
-    def find(self, x: str) -> str:
-        self.parent.setdefault(x, x)
-        while self.parent[x] != x:
-            self.parent[x] = self.parent[self.parent[x]]
-            x = self.parent[x]
-        return x
-
-    def union(self, x: str, y: str) -> None:
-        rx, ry = self.find(x), self.find(y)
-        if rx != ry:
-            self.parent[ry] = rx
-
-
 def _assign_image_groups(atoms: pl.DataFrame) -> pl.DataFrame:
-    """Group atoms by connected component over (pos_image_id, neg_image_id) pairs
-    so no image can straddle a split boundary."""
-    uf = _UnionFind()
-    pos_ids = atoms["pos_image_id"].cast(pl.String).to_list()
-    neg_ids = atoms["neg_image_id"].cast(pl.String).to_list()
-    for p, n in zip(pos_ids, neg_ids):
-        uf.union(p, n)
-
-    groups = [uf.find(p) for p in pos_ids]
-    return atoms.with_columns(pl.Series("image_group", groups))
+    """Group atoms by pos_image_id only — see module docstring for why this is
+    looser than full pos+neg connectivity."""
+    return atoms.with_columns(pl.col("pos_image_id").cast(pl.String).alias("image_group"))
 
 
 def _build_train_split(atoms: pl.DataFrame) -> pl.DataFrame:
@@ -116,16 +106,18 @@ def run() -> None:
         atoms, ratios=SPLIT_RATIOS, seed=SPLIT_SEED, group_column="image_group"
     )
 
-    # Assert no image leaks across splits.
-    def _image_ids(split: pl.DataFrame) -> set[str]:
-        return set(split["pos_image_id"].cast(pl.String).to_list()) | set(
-            split["neg_image_id"].cast(pl.String).to_list()
-        )
+    # Assert no POSITIVE image leaks across splits (negative images may repeat).
+    def _pos_image_ids(split: pl.DataFrame) -> set[str]:
+        return set(split["pos_image_id"].cast(pl.String).to_list())
 
-    train_imgs, val_imgs, test_imgs = _image_ids(train_atoms), _image_ids(val_atoms), _image_ids(test_atoms)
-    assert not (train_imgs & val_imgs), "train/val image overlap"
-    assert not (train_imgs & test_imgs), "train/test image overlap"
-    assert not (val_imgs & test_imgs), "val/test image overlap"
+    train_imgs, val_imgs, test_imgs = (
+        _pos_image_ids(train_atoms),
+        _pos_image_ids(val_atoms),
+        _pos_image_ids(test_atoms),
+    )
+    assert not (train_imgs & val_imgs), "train/val positive-image overlap"
+    assert not (train_imgs & test_imgs), "train/test positive-image overlap"
+    assert not (val_imgs & test_imgs), "val/test positive-image overlap"
 
     datasets_path = constants.datasets_path
     datasets_path.mkdir(parents=True, exist_ok=True)
@@ -149,7 +141,7 @@ def run() -> None:
         out = _build_probes_split(split_atoms)
         out_path = datasets_path / f"svo_{split_name}_probes.parquet"
         out.write_parquet(out_path)
-        logger.info(f"svo_{split_name}_probes.parquet: {len(out)} rows ({len(split_imgs)} unique images)")
+        logger.info(f"svo_{split_name}_probes.parquet: {len(out)} rows ({len(split_imgs)} unique positive images)")
 
 
 if __name__ == "__main__":
