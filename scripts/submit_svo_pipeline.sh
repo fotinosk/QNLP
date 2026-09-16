@@ -5,7 +5,7 @@
 #$ -S /bin/bash
 #$ -j y
 #$ -N svo_preprocess
-#$ -pe smp 8
+#$ -pe smp 2
 #$ -R y
 #$ -cwd
 #$ -o /SAN/intelsys/discoviz/fotinos/QNLP/job_outputs/

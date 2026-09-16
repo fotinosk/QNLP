@@ -11,21 +11,19 @@ from qnlp.core.data_engine.processing.pipeline import Pipeline
 schema_step = SchemaMappingStep(column_mapping={"corrected_sentence": "processed_text"})
 remove_dots_step = RemoveTrailingDotsStep(text_column="processed_text")
 lemma_step = LemmatizeStep(text_column="processed_text")
-# max_workers matches submit_svo_pipeline.sh's `#$ -pe smp 8` — the default of 2
-# would leave 6 of the 8 reserved cores idle. worker_batch_size is small relative
-# to the ~8.4k unique SVO captions so batches balance evenly across workers
-# instead of a few workers each getting one huge batch.
-#
-# For a much bigger speedup, run scripts/submit_svo_compile_array.sh FIRST — it
-# shards the unique captions across an SGE job array (many small/medium nodes
-# in parallel, which schedules faster than one big multi-core request) and
-# pre-populates the LMDB cache. This step then just re-checks the cache, which
-# is nearly free once that's done.
+# max_workers matches submit_svo_pipeline.sh's `#$ -pe smp 2`. Kept deliberately
+# small: scripts/submit_svo_compile_array.sh should run FIRST, sharding the
+# unique captions across an SGE job array (many small nodes in parallel, which
+# schedules far faster than one big multi-core request) and pre-populating the
+# LMDB cache — at which point this step is just a cache-hit pass over rows that
+# are already compiled, so it doesn't need many workers of its own. A bigger
+# `-pe smp` request here mainly means a longer wait in the scheduler queue for
+# no benefit once the cache is warm.
 ccg_parsing_step = CCGCompilerStep(
     lmdb_path=constants.lmdb_path,
     bond_dim=constants.bond_dim,
     embedding_dim=constants.embedding_dim,
-    max_workers=8,
+    max_workers=2,
     worker_batch_size=200,
 )
 unification_step = UnifyEinsumRankStep()
