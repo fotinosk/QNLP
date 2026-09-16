@@ -17,6 +17,11 @@ transitive clause the tree always decomposes as:
 The CSV's `subj`/`obj` single-word columns are still used for the human/animal
 WordNet check (they're already the lemmatized head noun).
 
+Only draws from the test split (data/datasets/svo_test_probes.parquet's
+sample_ids) — SVO-Swap is a held-out eval set, so building it from the full
+manifest would leak: a swap pair's image could otherwise be one the model
+already saw as a training positive. Must run AFTER prepare_datasets.py.
+
 Output: data/datasets/svo_swap_eval.parquet in the SugarCREPE-compatible
 schema (sample_id, local_image_path, true_diagram, true_symbols, true_path,
 false_diagram, false_symbols, false_path) — reusable by evaluate_sugarcrepe.
@@ -202,7 +207,15 @@ def _asdict_symbol(sym) -> dict:
 
 def run() -> None:
     manifest = pl.read_parquet(constants.atlases_path / "svo" / "data_manifest.parquet")
-    logger.info(f"Loaded {len(manifest)} SVO manifest rows.")
+
+    # Restrict to the test split only — SVO-Swap is a held-out eval set, and
+    # building it from the full manifest would leak: a swap pair's image could
+    # be one the model already saw as a training positive.
+    test_probes = pl.read_parquet(constants.datasets_path / "svo_test_probes.parquet")
+    test_sample_ids = set(test_probes["sample_id"].to_list())
+    n_before = len(manifest)
+    manifest = manifest.filter(pl.col("sample_id").is_in(test_sample_ids))
+    logger.info(f"Restricted to test split: {n_before} -> {len(manifest)} manifest rows.")
 
     parser = BobcatParser(verbose="suppress")
     text_processor = _build_text_processor()
