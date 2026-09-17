@@ -1,8 +1,9 @@
 """
 Build the final SVO-Probes train/val/test datasets from compiled atoms.
 
-Mirrors the paper's preprocessing: drop rows containing a word with corpus
-frequency <50, then split 60/20/20 with no POSITIVE-image overlap between
+Drop rows containing a word with corpus frequency below WORD_FREQ_THRESHOLD
+(originally 50, matching the paper; lowered to recover more training rows —
+see the constant's comment), then split 60/20/20 with no POSITIVE-image overlap between
 splits — an image that is some row's pos_image never appears as another
 row's pos_image in a different split. Negative images ARE allowed to repeat
 across splits.
@@ -45,7 +46,15 @@ from qnlp.utils.logging import setup_logger
 
 logger = setup_logger(log_name="svo_prepare_datasets")
 
-WORD_FREQ_THRESHOLD = 50
+WORD_FREQ_THRESHOLD = 10
+# Was 50, matching the original paper. Every clean training run has landed
+# at chance regardless of architecture/loss/hyperparameters (see
+# SVO_EXPERIMENTS.md), and SVO's training set is ~7x smaller than ARO's
+# (the only config with a validated result). Lowering to 10 recovers 14,284
+# of 17,782 enriched rows (vs 9,107 at 50) — a real ~57% increase in
+# available training data, while each surviving word still occurs at least
+# 10 times (SVO's vocabulary is far smaller than COCO's, so this is a much
+# milder relaxation than the number alone suggests).
 SPLIT_RATIOS = (0.6, 0.2, 0.2)
 SPLIT_SEED = 42
 _WORD_RE = re.compile(r"[a-z']+")
