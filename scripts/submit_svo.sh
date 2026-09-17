@@ -40,7 +40,10 @@ export PYTHONPYCACHEPREFIX=$CACHE_DIR/pycache
 export XDG_CACHE_HOME=$CACHE_DIR/.xdg_cache
 
 # --- Experiment config (SVO_ML_ prefix — see qnlp/scripts/svo/config.py) ---
-export SVO_ML_USE_NON_LINEAR_CONTRACTIONS=true
+# No overrides here: config.py's defaults ARE the current baseline. Pass
+# -v SVO_ML_<FIELD>=<value> to qsub for one-off deviations instead of
+# hardcoding them here, so this script can't silently shadow config.py
+# again the way SVO_ML_USE_NON_LINEAR_CONTRACTIONS=true did.
 export SVO_ML_BATCH_SIZE=128
 
 # --- Reduce fragmentation from CUDA allocations ---
