@@ -448,8 +448,17 @@ per the correction above, not a deviation from it.
 correction, silently overriding config.py's fixed default via the
 environment. Removed that line from the script (commit `adff7ca`).
 Relaunched clean as **job 7426745** — verified in its logged config banner
-(`use_non_linear_contractions: False, use_alignment_head: False`).
-**Results:** _(pending)_
+(`use_non_linear_contractions: False, use_alignment_head: False`; no
+`nonlinear_gate` metric appears anywhere in its logs, confirming NLC is
+genuinely off this time).
+**Results:** Early-stopped at epoch 17 (best epoch 5, val hard_neg_acc
+0.533). SVO-Probes overall **0.4983** (subj 0.4914 / verb 0.4884 / obj
+0.5299), SVO-Swap **0.5270**. At chance on both. This is the properly
+corrected, legacy-faithful config (no head, no NLC, trained/evaluated
+directly on SVO's own hard negatives) — and it performs no better than
+any prior variant. The overfitting signature is identical: train
+hard_neg_acc climbed steadily past 0.68 by epoch 7 while val never
+sustained improvement past epoch 5.
 
 ### 12. svo_final — job 7426704, superseded by 7426746 (corrected baseline + triplet_weight=100)
 **Script:** `submit_svo.sh` with `SVO_ML_TRIPLET_WEIGHT=100`, otherwise
@@ -461,4 +470,41 @@ corrected config, rather than the pre-correction one experiment 7 used.
 Relaunched clean as **job 7426746** — verified config banner shows
 `use_non_linear_contractions: False, triplet_weight: 100.0,
 use_alignment_head: False`.
-**Results:** _(pending)_
+**Results:** Early-stopped at epoch 12. SVO-Probes overall **0.5073**
+(subj 0.5201 / verb 0.5154 / obj 0.4751), SVO-Swap **0.5541**. Still at
+chance; diluting triplet_weight doesn't help on the corrected config
+either, consistent with experiment 7's finding on the pre-correction one.
+
+## Status as of 2026-09-17
+
+Every clean (uncontaminated) run to date, sorted:
+
+| Exp | Config vs. baseline | SVO-Probes | SVO-Swap |
+|---|---|---|---|
+| 11 | corrected baseline (legacy-faithful) | 0.4983 | 0.5270 |
+| 1  | old in-batch arch, no hard negatives | 0.5134 | 0.7692 |
+| 2  | + longer patience | 0.5190 | 0.5962 |
+| 5  | + alignment_weight=1000 | 0.5156 | **0.8269** |
+| 12 | corrected baseline + triplet_weight=100 | 0.5073 | 0.5541 |
+| 7  | pre-correction + triplet_weight=100 | *(pending — not yet run on corrected config)* | |
+| 10 | pre-correction + triplet_weight=10 | *(killed pre-completion, superseded)* | |
+| 6  | pre-correction ARO-matched (head=true, NLC=true) | 0.4826 | 0.6216 |
+| 9  | reproduction of 6 | 0.4849 | 0.5135 |
+| 8  | pre-correction, no head, NLC=true | 0.5157 | 0.4730 |
+
+Target: ~0.83 / ~0.94. **Every single configuration tried — old and new
+architecture, with and without hard negatives, with and without a
+learnable head, with and without NLC, across a wide triplet_weight range,
+alignment-weight range, capacity range, and regularization range — lands
+within noise of chance (0.48-0.52) on SVO-Probes.** SVO-Swap has shown more
+movement (0.47-0.83) but no config has approached target there either.
+This breadth of negative results across truly orthogonal levers is itself
+informative: it argues against any single hyperparameter or architectural
+choice being the bottleneck, and increasingly points at either (a)
+insufficient training data (5,421-5,437 rows) for this model family to
+generalize on this task, or (b) something structural we haven't yet
+isolated (e.g. a data-quality issue in the SVO pairs themselves, or a
+mismatch between what the compiled CCG diagrams can represent and what
+the task needs). Next investigative step should probably target
+data-quality/data-sufficiency questions directly rather than further
+hyperparameter search.
