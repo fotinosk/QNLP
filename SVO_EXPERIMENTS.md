@@ -119,6 +119,13 @@ variable is expensive relative to the signal, and the three effects are
 expected to compound rather than conflict.
 **Note:** did *not* try widening `bond_dim` — already ruled out in the
 COCO campaign, did not help there.
+**Observations (through epoch 29, still running):** Reduced capacity and
+higher regularization did NOT help — if anything, train accuracy reached
+89.1% by epoch 29 (highest of any run so far) while val stayed flat at
+chance (0.005-0.007) the entire time. This was the strongest evidence yet
+that the problem isn't capacity or regularization: it's the total absence
+of hard negatives during training (only in-batch random negatives), which
+motivated the architecture switch in experiment 6.
 **Results:** _(pending)_
 
 ### 4. svo_final — job 7426189 (alignment loss, isolated)
@@ -148,4 +155,45 @@ contrastive/hard-negative signal becomes negligible by comparison. Tests
 from experiment 4's moderate weight, on the hypothesis that in-batch
 negative mining itself (not just capacity) may be a driver of the
 memorization seen in experiments 1-2.
+**Results:** Early-stopped at epoch 12. SVO-Probes overall 0.5156 (subj
+0.5106 / verb 0.5161 / obj 0.5184) — no better than baseline, extreme
+alignment weighting doesn't fix the image-discrimination task. SVO-Swap
+**0.8269** — best SVO-Swap result so far (though n=52, noisy). Consistent
+with alignment loss being a per-sample *caption-image* similarity signal:
+it can plausibly sharpen basic caption-image plausibility (helping reject
+a wildly different swapped caption) without adding anything that helps
+rank two visually similar candidate images against the same caption.
+
+### 6. svo_final — job 7426202 (match legacy ARO architecture)
+**Script:** `submit_svo.sh`, no env overrides — `SVOExperimentConfig`
+rewritten to match `qnlp/scripts/aro_contrastive/config.py` field-for-field:
+`embedding_dim=512, bond_dim=10, batch_size=128, text_lr=0.001,
+image_lr=0.00005, text_weight_decay=0.001, image_weight_decay=0.05,
+head_lr=0.001, head_weight_decay=0.001, max_epochs=100, patience=10,
+temperature=0.07 (fixed), triplet_weight=40000.0, triplet_margin=0.2,
+distance=cosine`.
+**Rationale:** Experiments 1-3 all show the same overfitting signature
+regardless of capacity, regularization, or LR — strong evidence the actual
+problem is architectural, not tuning: training so far has only ever used
+plain in-batch InfoNCE, i.e. *zero explicit hard negatives during
+training* despite SVO-Probes being a hard-negative benchmark by
+construction. The legacy ARO pipeline (`qnlp/scripts/aro_contrastive/`,
+78% hard_neg_accuracy reported in `llm/model_evolution.md`) trains directly
+on `(anchor, positive, negative)` triples via InfoNCE + a heavily-weighted
+(`triplet_weight=40000`) triplet margin loss — COCO's config was never
+built for this since COCO has no hard negatives.
+**Implementation:** new `ImageContrastiveLoss`
+(`qnlp/core/training/losses/image_contrastive.py`) mirrors ARO's
+`ContrastiveLoss` with image/caption roles swapped (SVO's hard negative is
+the image, not the caption); new `SVOHardNegStep`
+(`qnlp/scripts/svo/step.py`) mirrors `AROContrastiveStep`, running two
+forward passes (one per candidate image) since `ContrastiveVLM.forward`
+only embeds one image against up to two captions. Training now happens
+directly on `svo_train_probes.parquet` (true/false image triples, 5,437
+rows) instead of positive-only pairs — the same shape already used for
+val/test evaluation. Monitor metric switched from `accuracy` to
+`hard_neg_acc` to match ARO's convention. Model architecture itself
+(EinsumModel + TTNImageModel + ContrastiveVLM) is unchanged — confirmed
+identical to what `aro_contrastive/run.py` uses; only the loss, step, data
+shape, and hyperparameters changed.
 **Results:** _(pending)_
