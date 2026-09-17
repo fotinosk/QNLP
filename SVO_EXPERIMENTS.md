@@ -620,3 +620,19 @@ larger-dataset) config has a slower-but-better convergence curve that
 patience=10 cut off prematurely, given `max_epochs=100` leaves plenty of
 room.
 **Results:** _(pending)_
+
+## Fallback plan (agreed 2026-09-17): sanity-check on ARO itself
+
+If experiments 13-15 don't show anything promising, next step is to run
+our current SVO pipeline's implementation (`ImageContrastiveLoss`,
+`SVOHardNegStep`, corrected config) **against ARO's own data**
+(`aro_train/val/test.parquet`, already on the cluster) rather than
+continuing to guess on SVO. This checks a different thing than everything
+above: whether our *implementation* is faithful to the legacy recipe,
+independent of whether SVO's specific data/scale can ever reach the
+target. If our code reproduces something close to 78% hard_neg_accuracy on
+ARO, that rules out an implementation bug and confirms the SVO gap really
+is about SVO's data (scale, quality, or task difficulty). If it doesn't
+reproduce 78% on ARO either, that points at a remaining implementation
+divergence we haven't found yet, independent of SVO entirely. Not started
+yet — no action needed until the current round of experiments concludes.
