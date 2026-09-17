@@ -116,3 +116,20 @@ expected to compound rather than conflict.
 **Note:** did *not* try widening `bond_dim` — already ruled out in the
 COCO campaign, did not help there.
 **Results:** _(pending)_
+
+### 4. svo_final — job 7426189 (alignment loss, isolated)
+**Script:** `submit_svo.sh` with `SVO_ML_ALIGNMENT_WEIGHT=0.5`, otherwise
+identical to experiment 1's baseline config (embedding_dim=256, default
+LRs/weight_decay, max_epochs=50, patience=10).
+**Rationale:** `alignment_weight` (weight of the per-sample cosine
+alignment loss relative to InfoNCE) was hardcoded to 0.0 in `run.py` —
+newly exposed as a config field (`SVO_ML_ALIGNMENT_WEIGHT`) so it could be
+tried. Deliberately isolated against the unmodified baseline rather than
+combined with experiment 3's capacity/regularization changes, to get a
+clean read on what this term does on its own before combining levers.
+**Caution:** a *warmup* schedule for this (weight 0.5 for the first 5
+epochs, then presumably dropped) caused embedding collapse in the COCO
+campaign (modality_gap → 1.0, R@1 random). A constant weight held
+throughout training is a different, untested experiment — watch for the
+same collapse signature (modality_gap climbing to ~1.0) early on.
+**Results:** _(pending)_
