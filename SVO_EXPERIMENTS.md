@@ -239,4 +239,25 @@ val/test evaluation. Monitor metric switched from `accuracy` to
 (EinsumModel + TTNImageModel + ContrastiveVLM) is unchanged — confirmed
 identical to what `aro_contrastive/run.py` uses; only the loss, step, data
 shape, and hyperparameters changed.
-**Results:** _(pending)_
+**Valid** — trained and evaluated entirely on split B, no cross-split
+contamination (unlike experiments 3-4).
+**Observations:** Train `hard_neg_acc` climbed fast and cleanly (0.52 →
+0.84 by epoch 10), but val `hard_neg_acc` never moved off chance the
+entire run (0.522 at epoch 1 — also the best epoch — drifting between
+0.48-0.53 through epoch 10). Early-stopped at epoch 11 (best=epoch 1,
+patience=10).
+**Results:** SVO-Probes overall **0.4826** (subj 0.4569 / verb 0.4971 /
+obj 0.4677) — the *worst* clean SVO-Probes result of any run so far,
+slightly below chance. SVO-Swap 0.6216.
+**Conclusion:** giving the model explicit hard negatives during training
+(matching ARO exactly) did not fix generalization — it just gave the model
+a very effective way to memorize the *specific* negative shown per
+training example (hence the clean, fast train-accuracy climb) without any
+of that transferring to held-out images. This suggests the core problem is
+more fundamental than "missing hard negatives": most likely insufficient
+training data (5,437 rows) for this model's capacity (~5M combined
+text+image params) to generalize, regardless of loss formulation. Next
+candidates: the `AlignmentHead`'s own learnable parameters (~525K total,
+identical in ARO — not yet tested as an ablation), or accepting that this
+architecture/dataset-size combination may not close the gap to the
+83%/94% targets without either more data or a smaller model.
