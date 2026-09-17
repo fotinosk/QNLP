@@ -508,3 +508,53 @@ mismatch between what the compiled CCG diagrams can represent and what
 the task needs). Next investigative step should probably target
 data-quality/data-sufficiency questions directly rather than further
 hyperparameter search.
+
+## Data investigation (2026-09-17)
+
+Three concrete checks, moving off pure hyperparameter search per the
+conclusion above.
+
+**1. Training-set scale vs. ARO — large, direct explanation.** Checked
+ARO's actual compiled dataset: `aro_train.parquet` has **36,585 rows**
+(`aro_val.parquet` 8,000, `aro_test.parquet` 8,088) — roughly **7x** larger
+than SVO's ~5,400-5,437 training rows. The 78% hard_neg_accuracy recipe was
+validated at a scale we cannot match, since SVO-Probes' full benchmark is a
+fixed size after the word-frequency filter and split. This is a strong,
+simple candidate explanation for the gap that doesn't require any further
+architecture/loss tuning to test — it's just a hard data ceiling.
+
+**2. Image corruption — ruled out.** Every training log is full of
+"Corrupt JPEG data" warnings, which had been treated as background noise.
+Sampled 500 images across `images/`+`images_old/` and decoded each fully
+via PIL (`.load()`, not just header inspection): **zero decode failures**,
+zero tiny/degenerate images, healthy resolution distribution (median
+1067×900, min 173×160). The warnings are harmless libjpeg trailing-byte
+complaints tolerated by PIL; not a real data-quality issue.
+
+**3. Manual pair inspection — negative difficulty is highly inconsistent.**
+Pulled and viewed several real (caption, pos_image, neg_image) triples:
+- *"The player fumbles the ball."* (verb_neg): positive shows a basketball
+  scramble for a loose ball; negative shows an unrelated tennis serve —
+  completely different sport, trivially easy to distinguish.
+- *"A woman sits on a balcony."* (obj_neg): both positive and negative show
+  a woman sitting outdoors in a similar stock-photo pose, differing only in
+  setting (balcony railing vs. open field) — genuinely subtle, a real test
+  of scene grounding.
+
+That the model has never sustained val hard_neg_acc above ~0.53 across any
+run — including on trivially-easy pairs like the tennis/basketball example
+— suggests the failure isn't really about the *hardest* negatives being
+too hard. It looks more like the model isn't learning any reliable general
+image-caption grounding at all, consistent with the memorization signature
+already characterized (train separates cleanly, val does not).
+
+**Working conclusion:** the ~7x data-scale gap vs. ARO is probably the
+single largest, most defensible explanation for why this recipe hasn't
+closed the gap to target on SVO-Probes specifically, and it's not a gap
+further hyperparameter search can close. Worth deciding explicitly whether
+to (a) report this as a data-scale-limited result, (b) explore ways to
+expand effective training signal (e.g. data augmentation, synthetic
+negative generation, or relaxing the word-frequency filter threshold to
+recover more rows), or (c) treat the SVO-Swap task (which has shown real
+movement, up to 0.83) as the more tractable target given its much smaller
+demands.
