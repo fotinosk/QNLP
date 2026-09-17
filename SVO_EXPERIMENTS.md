@@ -261,3 +261,18 @@ candidates: the `AlignmentHead`'s own learnable parameters (~525K total,
 identical in ARO — not yet tested as an ablation), or accepting that this
 architecture/dataset-size combination may not close the gap to the
 83%/94% targets without either more data or a smaller model.
+
+### 7. svo_final — job 7426415 (triplet_weight=100)
+**Script:** `submit_svo.sh` with `SVO_ML_TRIPLET_WEIGHT=100`, otherwise
+identical to experiment 6.
+**Rationale:** At `triplet_weight=40000`, the triplet term (~0.1-0.3) totally
+swamps `infonce_loss` (~5-6) — effectively the model is only ever trained
+against ONE FIXED (caption, false_image) pair per training row, every
+single epoch, since the InfoNCE term's diverse in-batch random negatives
+contribute negligible gradient by comparison. That's a plausible
+memorization mechanism distinct from "not enough data": the model never
+sees varied negatives for a given caption. `triplet_weight=100` puts the
+two terms on comparable scale (100 * 0.2 ≈ 20 vs infonce ~5-6), so the
+diverse in-batch signal should actually contribute alongside the explicit
+hard negative.
+**Results:** _(pending)_
