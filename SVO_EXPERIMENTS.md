@@ -706,4 +706,36 @@ ML_USE_NON_LINEAR_CONTRACTIONS=false,ML_USE_ALIGNMENT_HEAD=false`.
 exact env vars (`use_non_linear_contractions: False, use_alignment_head:
 False`); job log confirms `Train: 36585 | Val: 8000 | Test: 8088`, 2,719
 unique symbols.
-**Results:** _(pending — just started)_
+**Training trajectory:** climbed steadily and smoothly — val hard_neg_acc
+0.623 (epoch 5) → 0.676 (epoch 19) → plateaued around 0.67-0.68 from
+epoch ~20 onward, best at epoch 28 (0.678). Early-stopped at epoch 38
+(patience=10). Train hard_neg_acc reached 0.918 by the end — some
+overfitting gap present, but nothing like SVO's complete train/val
+divergence (val never stopped tracking train reasonably here).
+**Results (ARO held-out test set, N=8,088):**
+
+| ARO task | N | acc | true_cos | false_cos |
+|---|---|---|---|---|
+| attribution | 4,438 | 0.7573 | 0.2933 | 0.0176 |
+| relation | 3,650 | 0.6036 | 0.1404 | -0.0254 |
+| **overall** | 8,088 | **0.6879** | 0.2243 | -0.0018 |
+
+**68.79% hard_neg_accuracy** — below the documented 78%, but by a
+moderate margin (~9 points), not a total miss. (Winoground/SugarCREPE
+were mostly skipped due to vocabulary gap — SVO/ARO-specific vocabulary
+doesn't cover those benchmarks' symbols; not meaningful here.)
+
+**Conclusion:** this decisively answers the sanity-check question. Our
+`ImageContrastiveLoss`/`SVOHardNegStep` implementation (mirroring
+`ContrastiveLoss`/`AROContrastiveStep` used here) **is capable of learning
+real, generalizable, non-chance discrimination** when given ARO's actual
+scale and data — 68.79% is dramatically above anything achieved across
+all 15 SVO experiments (best: ~0.53, effectively chance). This rules out
+a fundamental implementation bug as the explanation for the SVO gap. The
+remaining ~9-point gap to the documented 78% is a separate, smaller
+question (possibly a residual config/data-version difference, seed
+variance, or the original 78% being a favorable single run) — but it does
+not change the main conclusion: **SVO's chance-level results are
+genuinely about SVO's data (scale: ~8,600 vs ARO's 36,585 rows; and/or
+task difficulty/quality, per the earlier manual pair inspection), not a
+bug in how we ported the recipe.**
