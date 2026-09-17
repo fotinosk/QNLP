@@ -63,6 +63,32 @@ class SVOHardNegStep:
             metrics["false_cosine_mean"] = neg_sim.mean()
             metrics["hard_neg_acc"] = (pos_sim > neg_sim).float().mean()
 
+            # Discrimination-within-batch check: near-zero std means the model
+            # assigns almost the same true/false similarity to every example in
+            # this batch — i.e. it isn't discriminating AT ALL for this batch,
+            # a different (and more diagnostic) failure than "discriminating
+            # the wrong way". Complements the mean-only metrics above, which
+            # can't distinguish "no discrimination" from "systematic wrong-way
+            # discrimination".
+            if pos_sim.numel() > 1:
+                metrics["true_cosine_std"] = pos_sim.std()
+                metrics["false_cosine_std"] = neg_sim.std()
+
+            # Anisotropic-collapse check: mean off-diagonal pairwise cosine
+            # similarity among this batch's (already L2-normalised) true-image
+            # and caption embeddings. If this climbs toward 1.0 on val while
+            # staying lower on train, embeddings are collapsing into a narrow
+            # cone that can still satisfy the one specific triplet trained on
+            # per example, without preserving the general discriminative
+            # structure needed to generalise to held-out pairs.
+            B = outputs["true_image_embeddings"].shape[0]
+            if B > 1:
+                img_n = outputs["true_image_embeddings"]
+                cap_n = outputs["caption_embeddings"]
+                off_diag = ~torch.eye(B, dtype=torch.bool, device=img_n.device)
+                metrics["image_pairwise_cos_mean"] = (img_n @ img_n.t())[off_diag].mean()
+                metrics["caption_pairwise_cos_mean"] = (cap_n @ cap_n.t())[off_diag].mean()
+
             gate = getattr(model.text_model, "nonlinear_gate", None)
             if gate is not None:
                 metrics["nonlinear_gate"] = gate.detach()

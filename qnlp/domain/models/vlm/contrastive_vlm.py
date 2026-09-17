@@ -46,6 +46,21 @@ class MLPProjectionHead(nn.Module):
         return F.normalize(self.net(x), dim=-1)
 
 
+class NoOpHead(nn.Module):
+    """
+    Skips the learnable projection entirely — just L2-normalises the backbone
+    output. Used to ablate AlignmentHead/MLPProjectionHead's own learnable
+    parameters (~dim²+dim per modality) as a source of overfitting, distinct
+    from the backbone's own capacity.
+    """
+
+    def __init__(self, dim: int | None = None):
+        super().__init__()
+
+    def forward(self, x):
+        return F.normalize(x, dim=-1)
+
+
 class ContrastiveVLM(nn.Module):
     """
     Model wrapper for contrastive VLM training.
@@ -62,12 +77,16 @@ class ContrastiveVLM(nn.Module):
         image_model: TTNImageModel,
         embedding_dim: int,
         use_mlp_head: bool = False,
+        use_projection_head: bool = True,
     ):
         super().__init__()
         self.text_model = text_model
         self.image_model = image_model
         self.embedding_dim = embedding_dim
-        head_cls = MLPProjectionHead if use_mlp_head else AlignmentHead
+        if not use_projection_head:
+            head_cls = NoOpHead
+        else:
+            head_cls = MLPProjectionHead if use_mlp_head else AlignmentHead
         self.image_head = head_cls(embedding_dim)
         self.text_head = head_cls(embedding_dim)
 

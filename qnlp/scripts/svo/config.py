@@ -36,5 +36,8 @@ class SVOExperimentConfig(BaseSettings):
     distance: Literal["cosine", "euclidean"] = "cosine"
 
     use_mlp_head: bool = False
+    # False ablates AlignmentHead's own learnable params (~dim²+dim per
+    # modality) — see qnlp/domain/models/vlm/contrastive_vlm.py::NoOpHead.
+    use_alignment_head: bool = True
 
     model_config = SettingsConfigDict(env_prefix="SVO_ML_")
