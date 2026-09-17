@@ -14,10 +14,43 @@ checkpoint dir (`runs/checkpoints/svo_probes/`), own script
 
 Random baseline for SVO-Probes accuracy: 0.50 (binary pos/neg image choice).
 
-**Target numbers to beat: ~83% SVO-Probes, ~94% SVO-Swap.** Current best
-(experiment 1, job 7426179) is 51.3% / 76.9% — a large gap, consistent with
-the severe overfitting documented below rather than a ceiling on the
-architecture itself.
+**Target numbers to beat: ~83% SVO-Probes, ~94% SVO-Swap.**
+
+## ⚠ Data-versioning bug that invalidated two runs (found & fixed 2026-09-17)
+
+`split_by_groups` (`qnlp/core/data_engine/dataset_creator/dataset_generator.py`)
+shuffled `atoms[group_column].unique().to_list()` directly. Polars'
+`.unique()` does not guarantee stable output order, so the "same seed"
+shuffle was silently **non-reproducible across reruns** — confirmed in
+practice: rerunning `prepare_datasets.py` with the same `seed=42` changed
+the SVO test split's row count (1790→1786) and swap-pair count (52→74).
+
+This caused real train/test contamination for **experiments 3 and 4**
+(jobs 7426186, 7426189): both started training against one split
+realization (call it split A), then `prepare_datasets.py` was rerun
+mid-training (to build `svo_train_probes.parquet` for experiment 6) and
+produced a *different* split (B) — overwriting `svo_test_probes.parquet`
+and `svo_swap_eval.parquet` on disk. Both jobs' final evaluation ran
+*after* that rerun, so they were scored against split B's test set while
+having trained on split A's train set — some "test" images were very
+likely images the model had already trained on as positives. This is the
+actual explanation for their inflated scores (77-90%, in the target
+ballpark) — **not a real result**. Their in-training val metrics (flat at
+chance the entire time, before any resplit) are the reliable signal for
+those two runs, not the final eval numbers below.
+
+**Fix:** sort `unique_ids` before shuffling, making the split fully
+deterministic for a given seed regardless of `.unique()`'s internal
+ordering. This is a shared utility (also used by COCO/ARO/Winoground) —
+low-risk, only changes *which* valid partition a seed produces.
+
+Job 7426202 (experiment 6) is unaffected — it started training entirely
+after the resplit and both trains and evaluates against the same split B
+throughout. No pipeline rerun happened while it was in flight. It is the
+first trustworthy read on the ARO-matched architecture. The data pipeline
+will be rerun once more (with the fix, producing a final canonical split C)
+after 7426202 finishes, so it isn't disturbed mid-run — any further
+comparisons should wait for runs trained AND evaluated post-fix.
 
 ---
 
@@ -126,7 +159,13 @@ chance (0.005-0.007) the entire time. This was the strongest evidence yet
 that the problem isn't capacity or regularization: it's the total absence
 of hard negatives during training (only in-batch random negatives), which
 motivated the architecture switch in experiment 6.
-**Results:** _(pending)_
+**Results:** ⚠ **INVALID — see the data-versioning bug above.** Final eval
+reported SVO-Probes overall 0.7968 / SVO-Swap 0.7973, but this run trained
+against split A and was evaluated (after `prepare_datasets.py` was rerun
+mid-run) against split B — likely train/test contamination, not a real
+result. The trustworthy signal from this run is its own in-training val
+metrics: flat at chance (0.005-0.007) through epoch 29, consistent with
+every other pre-fix run.
 
 ### 4. svo_final — job 7426189 (alignment loss, isolated)
 **Script:** `submit_svo.sh` with `SVO_ML_ALIGNMENT_WEIGHT=0.5`, otherwise
@@ -143,7 +182,11 @@ epochs, then presumably dropped) caused embedding collapse in the COCO
 campaign (modality_gap → 1.0, R@1 random). A constant weight held
 throughout training is a different, untested experiment — watch for the
 same collapse signature (modality_gap climbing to ~1.0) early on.
-**Results:** _(pending)_
+**Results:** ⚠ **INVALID — see the data-versioning bug above.** Same issue
+as experiment 3: trained against split A, evaluated against split B after
+the mid-run resplit (final eval reported 0.7671 / 0.8919). No collapse
+signature was observed in-training, but the final numbers cannot be
+trusted either way.
 
 ### 5. svo_final — job 7426191 (alignment loss, extreme weight)
 **Script:** `submit_svo.sh` with `SVO_ML_ALIGNMENT_WEIGHT=1000`, otherwise
