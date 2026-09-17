@@ -712,30 +712,38 @@ epoch ~20 onward, best at epoch 28 (0.678). Early-stopped at epoch 38
 (patience=10). Train hard_neg_acc reached 0.918 by the end — some
 overfitting gap present, but nothing like SVO's complete train/val
 divergence (val never stopped tracking train reasonably here).
-**Results (ARO held-out test set, N=8,088):**
+**Results (ARO held-out test set, N=8,088), compared against the
+documented per-task targets (attribution 78%, relation 59% — the
+"78% hard_neg_accuracy" figure in `llm/model_evolution.md` is the
+attribution-task number, not an aggregate; the earlier version of this
+entry incorrectly compared our aggregate against it):**
 
-| ARO task | N | acc | true_cos | false_cos |
-|---|---|---|---|---|
-| attribution | 4,438 | 0.7573 | 0.2933 | 0.0176 |
-| relation | 3,650 | 0.6036 | 0.1404 | -0.0254 |
-| **overall** | 8,088 | **0.6879** | 0.2243 | -0.0018 |
+| ARO task | N | acc | target | diff | true_cos | false_cos |
+|---|---|---|---|---|---|---|
+| attribution | 4,438 | 0.7573 | 0.78 | -0.023 | 0.2933 | 0.0176 |
+| relation | 3,650 | 0.6036 | 0.59 | **+0.014** | 0.1404 | -0.0254 |
+| overall | 8,088 | 0.6879 | — | — | 0.2243 | -0.0018 |
 
-**68.79% hard_neg_accuracy** — below the documented 78%, but by a
-moderate margin (~9 points), not a total miss. (Winoground/SugarCREPE
-were mostly skipped due to vocabulary gap — SVO/ARO-specific vocabulary
-doesn't cover those benchmarks' symbols; not meaningful here.)
+Per-task, this is essentially a match: attribution lands 2.3 points under
+target, relation lands 1.4 points *over* target. This is a much stronger
+reproduction of the legacy result than the aggregate number suggested.
+(Winoground/SugarCREPE were mostly skipped due to vocabulary gap —
+SVO/ARO-specific vocabulary doesn't cover those benchmarks' symbols; not
+meaningful here.)
 
 **Conclusion:** this decisively answers the sanity-check question. Our
 `ImageContrastiveLoss`/`SVOHardNegStep` implementation (mirroring
-`ContrastiveLoss`/`AROContrastiveStep` used here) **is capable of learning
-real, generalizable, non-chance discrimination** when given ARO's actual
-scale and data — 68.79% is dramatically above anything achieved across
-all 15 SVO experiments (best: ~0.53, effectively chance). This rules out
-a fundamental implementation bug as the explanation for the SVO gap. The
-remaining ~9-point gap to the documented 78% is a separate, smaller
-question (possibly a residual config/data-version difference, seed
-variance, or the original 78% being a favorable single run) — but it does
-not change the main conclusion: **SVO's chance-level results are
+`ContrastiveLoss`/`AROContrastiveStep` used here) **reproduces the
+documented legacy result on ARO to within ~2 points per task** —
+dramatically above anything achieved across all 15 SVO experiments (best:
+~0.53, effectively chance). This rules out a fundamental implementation
+bug as the explanation for the SVO gap: **SVO's chance-level results are
 genuinely about SVO's data (scale: ~8,600 vs ARO's 36,585 rows; and/or
 task difficulty/quality, per the earlier manual pair inspection), not a
 bug in how we ported the recipe.**
+
+SVO's own granular breakdown (subj_neg/verb_neg/obj_neg, the direct
+analogue of ARO's attribution/relation split) is already reported in
+every SVO experiment above via `evaluate_svo_probes` — this was built
+specifically to match the original SVO-Probes paper's per-category
+reporting.
