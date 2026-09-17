@@ -15,7 +15,14 @@ class SVOExperimentConfig(BaseSettings):
     embedding_dim: int = 512
     bond_dim: int = 10
 
-    use_non_linear_contractions: bool = True
+    # False, not True — `aro_contrastive/config.py`'s current default of True
+    # postdates the actual validated ARO result (78% hard_neg_accuracy, "v1 —
+    # ARO Contrastive Baseline" in llm/model_evolution.md): NLC is never
+    # mentioned anywhere in that changelog, and EinsumModel's own class
+    # default is non_linear_contractions=False. NLC was added later for the
+    # COCO campaign and appears to have been carried into ARO's config
+    # without re-validating v1's result under it.
+    use_non_linear_contractions: bool = False
 
     batch_size: int = 128
     text_lr: float = 0.001
