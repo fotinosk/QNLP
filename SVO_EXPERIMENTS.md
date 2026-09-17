@@ -605,3 +605,18 @@ experiment 2) — still far below target and within a plausible noise band,
 but a small step in the right direction. Can't yet isolate whether this
 came from the extra data, the capacity/regularization change, or both —
 needs experiment 13's result (same data, standard config) for comparison.
+Best checkpoint was epoch 10, out of 20 run (patience=10 stopped it there).
+
+### 15. svo_final — job 7427418 (experiment 14 config, patience=40)
+**Script:** `submit_svo.sh` with the same overrides as experiment 14
+(`SVO_ML_EMBEDDING_DIM=128, SVO_ML_IMAGE_LR=0.0001,
+SVO_ML_TEXT_WEIGHT_DECAY=0.01, SVO_ML_IMAGE_WEIGHT_DECAY=0.15`) plus
+`SVO_ML_PATIENCE=40`.
+**Rationale:** Experiment 14 stopped at epoch 20 (best was epoch 10,
+patience=10). Longer patience alone didn't help the *old* config back in
+experiment 2, but that's a different architecture/regularization regime —
+worth checking whether this specific (regularized, smaller-capacity,
+larger-dataset) config has a slower-but-better convergence curve that
+patience=10 cut off prematurely, given `max_epochs=100` leaves plenty of
+room.
+**Results:** _(pending)_
