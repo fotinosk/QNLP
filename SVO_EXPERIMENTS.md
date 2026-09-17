@@ -438,17 +438,27 @@ config (`use_alignment_head=true`, and briefly also NLC=true before that
 fix). Not worth letting finish on a config we no longer believe is right;
 superseded by experiment 11.
 
-### 11. svo_final — job 7426702 (corrected baseline)
+### 11. svo_final — job 7426702, superseded by 7426745 (corrected baseline)
 **Script:** `submit_svo.sh`, no env overrides — the corrected default
 config (`use_non_linear_contractions=false, use_alignment_head=false`,
 otherwise identical to experiment 6). This *is* the new current baseline
 per the correction above, not a deviation from it.
+**Status:** Job 7426702 was killed — `submit_svo.sh` itself had a hardcoded
+`export SVO_ML_USE_NON_LINEAR_CONTRACTIONS=true` left over from before the
+correction, silently overriding config.py's fixed default via the
+environment. Removed that line from the script (commit `adff7ca`).
+Relaunched clean as **job 7426745** — verified in its logged config banner
+(`use_non_linear_contractions: False, use_alignment_head: False`).
 **Results:** _(pending)_
 
-### 12. svo_final — job 7426704 (corrected baseline + triplet_weight=100)
+### 12. svo_final — job 7426704, superseded by 7426746 (corrected baseline + triplet_weight=100)
 **Script:** `submit_svo.sh` with `SVO_ML_TRIPLET_WEIGHT=100`, otherwise
 identical to experiment 11 (the corrected baseline).
 **Rationale:** Re-runs experiment 7's dose-response test (diluting the
 fixed-negative-per-row signal relative to InfoNCE) now on top of the
 corrected config, rather than the pre-correction one experiment 7 used.
+**Status:** Job 7426704 killed for the same reason as experiment 11.
+Relaunched clean as **job 7426746** — verified config banner shows
+`use_non_linear_contractions: False, triplet_weight: 100.0,
+use_alignment_head: False`.
 **Results:** _(pending)_
