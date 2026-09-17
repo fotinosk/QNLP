@@ -338,7 +338,12 @@ otherwise identical to experiment 6 (triplet_weight=40000).
 **Rationale:** Isolates the AlignmentHead's own learnable parameters as a
 capacity/overfitting source, independent of backbone size (already
 explored in experiment 3) or loss formulation (experiments 4-7).
-**Results:** _(pending)_
+**Results:** Early-stopped at epoch 22. SVO-Probes overall 0.5157 (subj
+0.5431 / verb 0.5010 / obj 0.5299) — marginally above baseline (0.4826) but
+still within the chance-level noise band we've seen across configs.
+SVO-Swap 0.4730 — worse than baseline (0.6216). Net: removing the
+AlignmentHead's ~525K params doesn't meaningfully help Probes and hurts
+Swap. Doesn't move the baseline.
 
 ### 9. svo_final — job 7426423 (diagnostics baseline rerun)
 **Script:** `submit_svo.sh`, no env overrides — identical config to
@@ -382,3 +387,11 @@ for this one particular caption." Strong empirical support for the
 rationale behind experiment 7 (`triplet_weight=100`, diluting this
 fixed-negative-per-row signal relative to InfoNCE's diverse in-batch
 negatives).
+
+### 10. svo_final — job 7426649 (triplet_weight=10)
+**Script:** `submit_svo.sh` with `SVO_ML_TRIPLET_WEIGHT=10`, otherwise
+identical to experiment 6.
+**Rationale:** Extends experiment 7's dose-response test one step further
+down (100 → 10) rather than assuming one value is enough to characterize
+the effect — mapping the curve, not just checking a single point.
+**Results:** _(pending)_
