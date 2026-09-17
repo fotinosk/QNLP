@@ -585,7 +585,14 @@ training happened). Note: the submit script's "Job finished successfully"
 message is misleading here — it doesn't check the Python process's exit
 code, so a crashed run still prints that banner. Relaunched clean as
 **job 7427395**.
-**Results:** _(pending)_
+**Results:** Early-stopped at epoch 27. SVO-Probes overall **0.5103**
+(subj 0.4392 / verb 0.5312 / obj 0.5098), SVO-Swap **0.4952**. This is the
+clean isolation point: same 8,609-row dataset as experiment 14, standard
+config. Experiment 14's numbers (0.5305/0.5810) are modestly but
+consistently higher on both metrics — suggesting the capacity/
+regularization change contributes something beyond the extra data alone,
+though the gap is small enough that it warrants multiple seeds before
+treating it as conclusive rather than noise.
 
 ### 14. svo_final — job 7427094 (reduced capacity + regularization, larger dataset)
 **Script:** `submit_svo.sh` with `SVO_ML_EMBEDDING_DIM=128,
