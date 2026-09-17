@@ -14,6 +14,11 @@ checkpoint dir (`runs/checkpoints/svo_probes/`), own script
 
 Random baseline for SVO-Probes accuracy: 0.50 (binary pos/neg image choice).
 
+**Target numbers to beat: ~83% SVO-Probes, ~94% SVO-Swap.** Current best
+(experiment 1, job 7426179) is 51.3% / 76.9% — a large gap, consistent with
+the severe overfitting documented below rather than a ceiling on the
+architecture itself.
+
 ---
 
 ## Data pipeline
