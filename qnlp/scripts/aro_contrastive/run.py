@@ -98,7 +98,9 @@ def run():
 
     text_model = EinsumModel(symbols, sizes, non_linear_contractions=nlc).to(device)
     image_model = TTNImageModel(cfg.embedding_dim).to(device)
-    model = ContrastiveVLM(text_model, image_model, embedding_dim=cfg.embedding_dim).to(device)
+    model = ContrastiveVLM(
+        text_model, image_model, embedding_dim=cfg.embedding_dim, use_projection_head=cfg.use_alignment_head
+    ).to(device)
 
     loss_fn = ContrastiveLoss(
         temperature=cfg.temperature,
@@ -109,25 +111,24 @@ def run():
 
     step = AROContrastiveStep(loss_fn=loss_fn, device=device)
 
-    optimizer = torch.optim.AdamW(
-        [
-            {
-                "params": text_model.parameters(),
-                "lr": cfg.text_lr,
-                "weight_decay": cfg.text_weight_decay,
-            },
-            {
-                "params": image_model.parameters(),
-                "lr": cfg.image_lr,
-                "weight_decay": cfg.image_weight_decay,
-            },
-            {
-                "params": list(model.image_head.parameters()) + list(model.text_head.parameters()),
-                "lr": cfg.head_lr,
-                "weight_decay": cfg.head_weight_decay,
-            },
-        ]
-    )
+    param_groups = [
+        {
+            "params": text_model.parameters(),
+            "lr": cfg.text_lr,
+            "weight_decay": cfg.text_weight_decay,
+        },
+        {
+            "params": image_model.parameters(),
+            "lr": cfg.image_lr,
+            "weight_decay": cfg.image_weight_decay,
+        },
+    ]
+    # NoOpHead (use_alignment_head=False) has no parameters - AdamW errors on
+    # an empty param group, so only add it when there's something to train.
+    head_params = list(model.image_head.parameters()) + list(model.text_head.parameters())
+    if head_params:
+        param_groups.append({"params": head_params, "lr": cfg.head_lr, "weight_decay": cfg.head_weight_decay})
+    optimizer = torch.optim.AdamW(param_groups)
 
     params = {
         **cfg.model_dump(),

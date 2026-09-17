@@ -33,4 +33,13 @@ class ExperimentConfig(BaseSettings):
     triplet_margin: float = 0.2
     distance: Literal["cosine", "euclidean"] = "cosine"
 
+    # Default True preserves existing behavior for this pipeline's ongoing
+    # work (dataset-suffix path ablations etc). The TRUE legacy script that
+    # produced the documented 78% hard_neg_accuracy
+    # (qnlp/discoviz/trainers/unfrozen/train_aro_clean.py) has no learnable
+    # head at all - set to False via -v ML_USE_ALIGNMENT_HEAD=false for a
+    # faithful legacy-matching run. See qnlp/scripts/svo/config.py for the
+    # full archaeology behind this.
+    use_alignment_head: bool = True
+
     model_config = SettingsConfigDict(env_prefix="ML_")

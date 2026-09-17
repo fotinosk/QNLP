@@ -35,8 +35,11 @@ export PYTHONPYCACHEPREFIX=$CACHE_DIR/pycache
 export XDG_CACHE_HOME=$CACHE_DIR/.xdg_cache
 
 # --- Experiment config (matches ARO ExperimentConfig defaults) ---
+# No hardcoded NLC override here anymore: it silently blocked overriding via
+# `qsub -v ML_USE_NON_LINEAR_CONTRACTIONS=...` (export always wins over -v).
+# Pass -v ML_USE_NON_LINEAR_CONTRACTIONS=false / ML_USE_ALIGNMENT_HEAD=false
+# for a legacy-faithful run instead of hardcoding it here.
 export ML_BOND_DIM=10
-export ML_USE_NON_LINEAR_CONTRACTIONS=true
 export ML_BATCH_SIZE=128
 
 # --- Contraction-path ablation: select dataset variant via -v ML_DATASET_SUFFIX=_rtl ---
@@ -69,7 +72,13 @@ echo "========================================="
 cd $PROJECT_DIR
 
 $PYTHON -m qnlp.scripts.aro_contrastive.run
+STATUS=$?
 
 echo "========================================="
-echo "Job finished successfully at $(date)"
+if [ $STATUS -eq 0 ]; then
+    echo "Job finished successfully at $(date)"
+else
+    echo "Job FAILED (exit code $STATUS) at $(date)"
+fi
 echo "========================================="
+exit $STATUS
