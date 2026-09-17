@@ -558,3 +558,36 @@ negative generation, or relaxing the word-frequency filter threshold to
 recover more rows), or (c) treat the SVO-Swap task (which has shown real
 movement, up to 0.83) as the more tractable target given its much smaller
 demands.
+
+## Round 2: recover more training data (2026-09-17)
+
+Acted on option (b) above rather than stopping. Lowered
+`WORD_FREQ_THRESHOLD` 50 → 10 in `qnlp/scripts/svo/prepare_datasets.py`
+(job 7427077 regenerated the data): **svo_train 8,609 rows** (up from
+5,421-5,437), **svo_val 2,908**, **svo_test 2,767** — total 14,284,
+matching the predicted count exactly. Splits still land at ~60/20/20
+(60.3/20.4/19.4%), subj/verb/obj proportions still track the corpus in
+both val (18.0/58.7/23.5%) and test (17.5/60.3/22.2%), and zero
+positive-image overlap across any split pair. SVO-Swap grew to 105 pairs
+(from 74). Still ~4.25x smaller than ARO's 36,585, but a real 57% increase
+over the previous training set.
+
+### 13. svo_final — job 7427093 (corrected baseline, larger dataset)
+**Script:** `submit_svo.sh`, no env overrides, trained on the
+threshold=10 dataset (8,609 train rows).
+**Rationale:** Re-tests the corrected baseline (experiment 11) on the
+recovered data, isolating the data-volume variable specifically.
+**Results:** _(pending)_
+
+### 14. svo_final — job 7427094 (reduced capacity + regularization, larger dataset)
+**Script:** `submit_svo.sh` with `SVO_ML_EMBEDDING_DIM=128,
+SVO_ML_IMAGE_LR=0.0001, SVO_ML_TEXT_WEIGHT_DECAY=0.01,
+SVO_ML_IMAGE_WEIGHT_DECAY=0.15`, on the larger dataset.
+**Rationale:** Retests experiment 3's "reduce capacity + more
+regularization" hypothesis — previously only tested on the old,
+now-removed in-batch-only architecture, and only with contaminated final
+results — cleanly, on the current corrected architecture and the larger
+dataset. Two variables (architecture correctness + data volume) changed at
+once relative to experiment 3, but that experiment's own result was never
+valid to begin with, so there's no clean prior number to hold fixed.
+**Results:** _(pending)_
