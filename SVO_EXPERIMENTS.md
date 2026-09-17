@@ -444,3 +444,11 @@ config (`use_non_linear_contractions=false, use_alignment_head=false`,
 otherwise identical to experiment 6). This *is* the new current baseline
 per the correction above, not a deviation from it.
 **Results:** _(pending)_
+
+### 12. svo_final — job 7426704 (corrected baseline + triplet_weight=100)
+**Script:** `submit_svo.sh` with `SVO_ML_TRIPLET_WEIGHT=100`, otherwise
+identical to experiment 11 (the corrected baseline).
+**Rationale:** Re-runs experiment 7's dose-response test (diluting the
+fixed-negative-per-row signal relative to InfoNCE) now on top of the
+corrected config, rather than the pre-correction one experiment 7 used.
+**Results:** _(pending)_
