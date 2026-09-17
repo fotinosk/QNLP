@@ -70,7 +70,13 @@ echo "========================================="
 cd $PROJECT_DIR
 
 $PYTHON -m qnlp.scripts.svo.run
+STATUS=$?
 
 echo "========================================="
-echo "Job finished successfully at $(date)"
+if [ $STATUS -eq 0 ]; then
+    echo "Job finished successfully at $(date)"
+else
+    echo "Job FAILED (exit code $STATUS) at $(date)"
+fi
 echo "========================================="
+exit $STATUS

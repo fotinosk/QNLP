@@ -577,6 +577,14 @@ over the previous training set.
 threshold=10 dataset (8,609 train rows).
 **Rationale:** Re-tests the corrected baseline (experiment 11) on the
 recovered data, isolating the data-volume variable specifically.
+**Status:** Job 7427093 crashed immediately on model construction with
+`RuntimeError: CUDA error: CUDA-capable device(s) is/are busy or
+unavailable` — transient GPU contention on a shared node, not a code or
+data bug (never got past `EinsumModel(...).to(device)`, before any
+training happened). Note: the submit script's "Job finished successfully"
+message is misleading here — it doesn't check the Python process's exit
+code, so a crashed run still prints that banner. Relaunched clean as
+**job 7427395**.
 **Results:** _(pending)_
 
 ### 14. svo_final — job 7427094 (reduced capacity + regularization, larger dataset)
@@ -590,4 +598,10 @@ results — cleanly, on the current corrected architecture and the larger
 dataset. Two variables (architecture correctness + data volume) changed at
 once relative to experiment 3, but that experiment's own result was never
 valid to begin with, so there's no clean prior number to hold fixed.
-**Results:** _(pending)_
+**Results:** Early-stopped at epoch 20. SVO-Probes overall **0.5305**
+(subj 0.5423 / verb 0.5180 / obj 0.5554), SVO-Swap **0.5810**. Best
+SVO-Probes result of any clean run to date (previous best: 0.5190,
+experiment 2) — still far below target and within a plausible noise band,
+but a small step in the right direction. Can't yet isolate whether this
+came from the extra data, the capacity/regularization change, or both —
+needs experiment 13's result (same data, standard config) for comparison.
