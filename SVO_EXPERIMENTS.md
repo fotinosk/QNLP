@@ -133,3 +133,15 @@ campaign (modality_gap → 1.0, R@1 random). A constant weight held
 throughout training is a different, untested experiment — watch for the
 same collapse signature (modality_gap climbing to ~1.0) early on.
 **Results:** _(pending)_
+
+### 5. svo_final — job 7426191 (alignment loss, extreme weight)
+**Script:** `submit_svo.sh` with `SVO_ML_ALIGNMENT_WEIGHT=1000`, otherwise
+identical to experiment 4 (baseline config).
+**Rationale:** At weight=1000, `loss = infonce_loss + 1000 * alignment_loss`
+is almost entirely dominated by the alignment term (range [0,2]) — InfoNCE's
+contrastive/hard-negative signal becomes negligible by comparison. Tests
+"pure per-sample alignment, no contrastive pressure" as a distinct point
+from experiment 4's moderate weight, on the hypothesis that in-batch
+negative mining itself (not just capacity) may be a driver of the
+memorization seen in experiments 1-2.
+**Results:** _(pending)_
