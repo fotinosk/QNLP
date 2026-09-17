@@ -626,7 +626,24 @@ worth checking whether this specific (regularized, smaller-capacity,
 larger-dataset) config has a slower-but-better convergence curve that
 patience=10 cut off prematurely, given `max_epochs=100` leaves plenty of
 room.
-**Results:** _(pending)_
+**Results:** Ran the full 100 epochs (never early-stopped — val monitor
+metric kept finding new bests at epochs 1, 2, 11, 14, 40, 57, and finally
+67). Final checkpoint (epoch 67): SVO-Probes overall **0.5150** (subj
+0.5031 / verb 0.5078 / obj 0.5440), SVO-Swap **0.4000** — *worse* than
+experiment 14's epoch-10 checkpoint (0.5305/0.5810) on the exact same
+config, just trained longer.
+
+**Important finding:** the val monitor metric (`hard_neg_acc` on
+`svo_val_probes.parquet`) improving at later epochs did **not** translate
+to a better held-out test result — if anything, the opposite. This is
+strong evidence that at the current performance level, "which checkpoint
+looks best by val metric" is dominated by noise rather than tracking real
+generalization improvement: both epoch 10 and epoch 67 are wandering
+within the same chance-level band (0.40-0.58 across both metrics observed
+so far), and early stopping picking a *later* epoch doesn't reliably pick
+a *better* one. Reinforces (independently, on a new architecture) the
+same lesson from experiment 2: **longer patience does not help here** —
+it just changes which noisy point in the band gets selected.
 
 ## Fallback plan (agreed 2026-09-17): sanity-check on ARO itself
 
@@ -643,3 +660,14 @@ is about SVO's data (scale, quality, or task difficulty). If it doesn't
 reproduce 78% on ARO either, that points at a remaining implementation
 divergence we haven't found yet, independent of SVO entirely. Not started
 yet — no action needed until the current round of experiments concludes.
+
+**Trigger condition reached (2026-09-17).** Experiments 13-15 are complete:
+recovering ~57% more training data (13/14 comparison) gave a small,
+plausibly-real edge from the capacity/regularization change, but nothing
+approaching target; letting that same config run the full 100 epochs
+(15) produced a *worse* result than stopping early, confirming the
+remaining gap isn't a convergence/patience issue either. Best SVO-Probes
+result across all 15 experiments remains ~0.53, essentially chance. Next
+step per the agreed fallback plan: run this implementation against ARO's
+own data to check whether it's a code-fidelity issue or genuinely an
+SVO-specific data/scale ceiling.
