@@ -97,7 +97,11 @@ monotonically (5.25 → 8.50). Confirms more patience alone does not help;
 the model is not lacking training time, it's lacking generalisation
 capacity/regularisation for this dataset size. Best checkpoint still epoch
 6 (val acc 0.0126, essentially identical to experiment 1's best).
-**Final results:** _(pending — job still running as of this entry)_
+**Final results:** Early-stopped at epoch 26. SVO-Probes overall 0.5190
+(subj 0.5046 / verb 0.5123 / obj 0.5479) — essentially unchanged from
+experiment 1, confirming more patience alone does not help. SVO-Swap 0.5962
+(down from experiment 1's 0.7692 — noisy given n=52, attributable to which
+epoch's checkpoint happened to be selected as best, not a real trend).
 
 ### 3. svo_final — job 7426186 (reduced capacity + more regularization)
 **Script:** `submit_svo.sh` with `SVO_ML_EMBEDDING_DIM=128,

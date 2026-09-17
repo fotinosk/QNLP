@@ -136,8 +136,14 @@ def run() -> None:
 
     # Eval-shape parquets (true/false image pairs): the actual SVO-Probes
     # benchmark accuracy, computed for val (mid-training sanity check) and test
-    # (final reported number).
-    for split_name, split_atoms, split_imgs in [("val", val_atoms, val_imgs), ("test", test_atoms, test_imgs)]:
+    # (final reported number). Also built for train — the ARO-style hard-negative
+    # training step (SVOHardNegStep) trains directly on this shape, matching the
+    # legacy ARO pipeline's explicit-triplet training rather than in-batch-only.
+    for split_name, split_atoms, split_imgs in [
+        ("train", train_atoms, train_imgs),
+        ("val", val_atoms, val_imgs),
+        ("test", test_atoms, test_imgs),
+    ]:
         out = _build_probes_split(split_atoms)
         out_path = datasets_path / f"svo_{split_name}_probes.parquet"
         out.write_parquet(out_path)

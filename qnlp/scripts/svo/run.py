@@ -1,12 +1,19 @@
 """
 SVO-Probes contrastive training.
 
-Trains the same architecture as coco_multi_caption (EinsumModel + TTNImageModel
-+ ContrastiveVLM, fixed temperature, no hard-negative mining) but on SVO-Probes
-positive pairs only. Model-selection (early stopping) uses plain in-batch
-contrastive accuracy on the val split. The benchmark that actually matters —
-SVO-Probes pos/neg-image accuracy (by subject/verb/object subset) and
-SVO-Swap — is computed once at the end via `evaluate_svo`.
+Matches the legacy ARO training setup (qnlp/scripts/aro_contrastive/), not
+the newer COCO-style one — COCO is ~70x larger than SVO's training set and
+has no hard negatives at all, so its plain in-batch-InfoNCE config doesn't
+transfer. ARO is a small, explicit-hard-negative benchmark much closer to
+SVO-Probes in scale and shape. Same model architecture as COCO/ARO
+(EinsumModel + TTNImageModel + ContrastiveVLM) — only the loss, training
+step, and hyperparameters differ.
+
+Trains directly on (caption, true_image, false_image) triplets — the same
+probes-shape parquet the final SVO-Probes/SVO-Swap benchmark uses — via
+InfoNCE (in-batch negatives) plus a heavily-weighted triplet margin loss on
+the explicit hard negative (mirrors AROContrastiveStep, with image/caption
+roles swapped since SVO's hard negative is on the image side).
 
 Fully independent of the COCO pipeline: own dataset, own checkpoint dir, own
 benchmark battery. Not evaluated against Winoground/ARO/SugarCREPE.
@@ -16,12 +23,10 @@ from datetime import datetime
 
 import mlflow
 import torch
-from torch import Tensor
 from torchvision import transforms
 
 from qnlp.constants import constants
-from qnlp.core.training.batch_utils import drop_nonfinite_rows
-from qnlp.core.training.losses.single_caption import SingleCaptionLoss
+from qnlp.core.training.losses.image_contrastive import ImageContrastiveLoss
 from qnlp.core.training.trainer import Trainer
 from qnlp.discoviz.models.einsum_model import EinsumModel
 from qnlp.discoviz.models.image_model import TTNImageModel, image_model_hyperparams
@@ -30,6 +35,7 @@ from qnlp.domain.datasets.dataset import collect_symbol_sizes
 from qnlp.domain.models.vlm.contrastive_vlm import ContrastiveVLM
 from qnlp.scripts.coco_multi_caption.evaluate import evaluate_svo, log_banner, print_full_report
 from qnlp.scripts.svo.config import SVOExperimentConfig
+from qnlp.scripts.svo.step import SVOHardNegStep
 from qnlp.utils.logging import setup_logger
 from qnlp.utils.mlflow_utils import setup_mlflow_run
 from qnlp.utils.seeding import set_seed
@@ -40,42 +46,9 @@ EXPERIMENT_NAME = "svo_probes"
 logger = setup_logger(log_name=EXPERIMENT_NAME)
 
 DATASETS_PATH = constants.datasets_path
+IMAGE_COLUMNS = ["true_local_image_path", "false_local_image_path"]
 COMPILED_COLUMNS = [("diagram", "symbols", "caption", "path")]
 SYMBOL_COLS = ["symbols"]
-
-
-class SVOCaptionStep:
-    """Plain symmetric InfoNCE training step — identical shape to COCO's
-    SimpleCaptionStep, kept local since it's small and SVO's step-metric
-    conventions (nonlinear_gate logging) may diverge over time."""
-
-    def __init__(self, loss_fn: SingleCaptionLoss, device: torch.device):
-        self.loss_fn = loss_fn
-        self.device = device
-
-    def __call__(self, model, batch: dict, train: bool) -> tuple[Tensor, dict]:
-        images = batch["local_image_path"].to(self.device)
-        outputs = model(images, batch["caption"])
-
-        loss_inputs = {
-            "image_embeddings": outputs["image_embeddings"],
-            "caption_embeddings": outputs["true_caption_embeddings"],
-        }
-        loss_inputs, n_dropped = drop_nonfinite_rows(loss_inputs, list(loss_inputs))
-
-        if loss_inputs["image_embeddings"].shape[0] == 0:
-            return torch.zeros((), device=self.device, requires_grad=True), {}
-
-        loss, metrics = self.loss_fn(loss_inputs)
-
-        if n_dropped:
-            metrics["n_skipped"] = images.new_tensor(float(n_dropped))
-
-        gate = getattr(model.text_model, "nonlinear_gate", None)
-        if gate is not None:
-            metrics["nonlinear_gate"] = gate.detach()
-
-        return loss, metrics
 
 
 def run():
@@ -90,9 +63,9 @@ def run():
     logger.info(f"  device: {device}")
     logger.info("========================================")
 
-    TRAIN_PARQUET = DATASETS_PATH / "svo_train.parquet"
-    VAL_PARQUET = DATASETS_PATH / "svo_val.parquet"
-    TEST_PARQUET = DATASETS_PATH / "svo_test.parquet"
+    TRAIN_PARQUET = DATASETS_PATH / "svo_train_probes.parquet"
+    VAL_PARQUET = DATASETS_PATH / "svo_val_probes.parquet"
+    TEST_PARQUET = DATASETS_PATH / "svo_test_probes.parquet"
 
     size = image_model_hyperparams.image_size
     transform = transforms.Compose(
@@ -109,6 +82,7 @@ def run():
         batch_size=cfg.batch_size,
         train_transform=transform,
         val_transform=transform,
+        image_columns=IMAGE_COLUMNS,
         compiled_columns=COMPILED_COLUMNS,
         use_non_linear_contractions=cfg.use_non_linear_contractions,
     )
@@ -130,8 +104,13 @@ def run():
         device
     )
 
-    loss_fn = SingleCaptionLoss(temperature=cfg.temperature, alignment_weight=cfg.alignment_weight).to(device)
-    step = SVOCaptionStep(loss_fn=loss_fn, device=device)
+    loss_fn = ImageContrastiveLoss(
+        temperature=cfg.temperature,
+        triplet_weight=cfg.triplet_weight,
+        triplet_margin=cfg.triplet_margin,
+        distance=cfg.distance,
+    ).to(device)
+    step = SVOHardNegStep(loss_fn=loss_fn, device=device)
 
     optimizer = torch.optim.AdamW(
         [
@@ -177,7 +156,7 @@ def run():
             train_loader=train_loader,
             val_loader=val_loader,
             test_loader=test_loader,
-            monitor_metric="accuracy",
+            monitor_metric="hard_neg_acc",
             minimize_metric=False,
             checkpoint_path=checkpoint_path,
             max_epochs=cfg.max_epochs,
