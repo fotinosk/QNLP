@@ -671,3 +671,39 @@ result across all 15 experiments remains ~0.53, essentially chance. Next
 step per the agreed fallback plan: run this implementation against ARO's
 own data to check whether it's a code-fidelity issue or genuinely an
 SVO-specific data/scale ceiling.
+
+## ARO sanity check (2026-09-17)
+
+**Purpose:** isolate implementation correctness from SVO-specific
+data/scale/quality issues, per the fallback plan above. Runs the same
+loss/step design our SVO pipeline uses (`ImageContrastiveLoss`/
+`SVOHardNegStep` mirror `qnlp/scripts/aro_contrastive/`'s `ContrastiveLoss`/
+`AROContrastiveStep`, which is already correctly shaped for ARO's
+caption-side hard negatives) directly on ARO's own 36,585-row dataset, with
+the true legacy config (no NLC, no learnable head), to check whether it
+reproduces something near the documented 78% hard_neg_accuracy. If yes,
+the SVO gap is genuinely about SVO's data. If no, there's a remaining
+implementation divergence independent of SVO.
+
+**Setup fixes required first:** `qnlp/scripts/aro_contrastive/` had the
+same two bugs already found and fixed in `qnlp/scripts/svo/`:
+`use_non_linear_contractions` defaults to `True` (not the legacy value),
+and `submit_aro_contrastive.sh` hardcoded `export
+ML_USE_NON_LINEAR_CONTRACTIONS=true`, which silently blocks any `-v`
+override (`export` always wins). Fixed conservatively — since this
+pipeline has its own ongoing use (dataset-suffix path ablations) —by
+restoring the ability to override rather than changing the default, and
+adding a new `use_alignment_head` field (default `True`, preserving
+existing behavior) that can be set `False` via `-v
+ML_USE_ALIGNMENT_HEAD=false` for a legacy-faithful run. Also fixed the
+same empty-optimizer-param-group issue (`NoOpHead` has no parameters) and
+the same misleading always-prints-success submit script bug.
+
+### 16. aro_contrastive — job 7428516 (legacy-faithful config on ARO's own data)
+**Script:** `submit_aro_contrastive.sh` with `-v
+ML_USE_NON_LINEAR_CONTRACTIONS=false,ML_USE_ALIGNMENT_HEAD=false`.
+**Verified:** both settings confirmed to resolve correctly with these
+exact env vars (`use_non_linear_contractions: False, use_alignment_head:
+False`); job log confirms `Train: 36585 | Val: 8000 | Test: 8088`, 2,719
+unique symbols.
+**Results:** _(pending — just started)_
