@@ -23,13 +23,16 @@ is a single, named deviation from it, and the baseline only moves when a
 deviation demonstrably beats it. This replaces the earlier more ad-hoc
 practice of comparing against whichever prior run seemed most relevant.
 
-**Current baseline: experiment 6's config** (the ARO-matched hard-negative
-architecture — `embedding_dim=512, bond_dim=10, batch_size=128,
-text_lr=0.001, image_lr=0.00005, text_weight_decay=0.001,
-image_weight_decay=0.05, head_lr=0.001, head_weight_decay=0.001,
+**Current baseline (updated 2026-09-17 — see correction below): the
+ARO-matched hard-negative architecture with corrected defaults**
+(`embedding_dim=512, bond_dim=10, batch_size=128, text_lr=0.001,
+image_lr=0.00005, text_weight_decay=0.001, image_weight_decay=0.05,
 max_epochs=100, patience=10, temperature=0.07, triplet_weight=40000.0,
-triplet_margin=0.2, distance=cosine, use_alignment_head=true`), not the
-older in-batch-only one from experiment 1. Chosen because:
+triplet_margin=0.2, distance=cosine, use_non_linear_contractions=false,
+use_alignment_head=false`), not the older in-batch-only one from
+experiment 1, and not experiment 6's original config (which had
+`use_alignment_head=true` — that was matching a drifted, unvalidated
+config, corrected in the section below). Chosen because:
 - It's the only config with independent precedent of working at all — ARO
   itself reportedly reached ~78% hard_neg_acc with this recipe on a
   similarly-scaled hard-negative benchmark. The in-batch-only config was
@@ -47,6 +50,42 @@ Honest caveat: by raw current numbers, experiment 6 itself (0.4826 probes /
 and prior validation, not "currently winning" — probes accuracy is at
 chance either way, so there's no real loss, and swap has room to move as
 triplet_weight/alignment-head get tuned.
+
+## ⚠ Baseline correction: matched the wrong ARO reference (found 2026-09-17)
+
+Experiments 6-10 all used `qnlp/scripts/aro_contrastive/config.py`'s
+*current* values as "the legacy ARO config" — but that pipeline has drifted
+from the actual result. Git archaeology (`git log --follow` on
+`aro_contrastive/config.py` and `run.py`) traced the documented 78%
+hard_neg_accuracy to the **true** legacy script,
+`qnlp/discoviz/trainers/unfrozen/train_aro_clean.py`, which differs in two
+ways that matter:
+
+- **No learnable projection head at all.** Raw `image_model(images)` /
+  `text_model(captions)` outputs go straight into the loss — no
+  `ContrastiveVLM`, no `AlignmentHead`, no `head_lr`/`head_weight_decay`.
+  Those were added later when the pipeline was ported/refactored into
+  `aro_contrastive/`.
+- **Trains and evaluates directly on ARO's own data** (via
+  `get_aro_dataloader`) — confirming this, not COCO. (An earlier version of
+  this doc briefly floated a COCO-training theory based on an initial port
+  draft of `aro_contrastive/` having a misleadingly COCO-named parquet
+  path — that was wrong; corrected here.)
+- Predates `non_linear_contractions` entirely, consistent with the
+  earlier NLC fix below.
+
+One historical difference that does NOT need fixing: `train_aro_clean.py`
+never ran the modern CCG-compilation `Pipeline` (with its
+`filter_2d_outputs`/`UnifyEinsumRankStep` rank-unification), but checking
+our own job logs confirms this filter has dropped **zero** SVO rows across
+every run — `LemmatizeStep` already guarantees rank-1 diagram outputs, so
+this difference isn't costing us anything in practice.
+
+**Fix:** `use_alignment_head` default flipped to `False` (previously an
+*ablation hypothesis* tested in experiment 8 — now a confirmed match to
+the actual validated setup), alongside the earlier
+`use_non_linear_contractions=False` fix. **Baseline updated accordingly —
+see below.**
 
 ## ⚠ Data-versioning bug that invalidated two runs (found & fixed 2026-09-17)
 
@@ -394,4 +433,14 @@ identical to experiment 6.
 **Rationale:** Extends experiment 7's dose-response test one step further
 down (100 → 10) rather than assuming one value is enough to characterize
 the effect — mapping the curve, not just checking a single point.
+**Status:** Killed before completion — was running with the pre-correction
+config (`use_alignment_head=true`, and briefly also NLC=true before that
+fix). Not worth letting finish on a config we no longer believe is right;
+superseded by experiment 11.
+
+### 11. svo_final — job TBD (corrected baseline)
+**Script:** `submit_svo.sh`, no env overrides — the corrected default
+config (`use_non_linear_contractions=false, use_alignment_head=false`,
+otherwise identical to experiment 6). This *is* the new current baseline
+per the correction above, not a deviation from it.
 **Results:** _(pending)_
