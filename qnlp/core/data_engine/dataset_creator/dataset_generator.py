@@ -323,8 +323,15 @@ def split_by_groups(
 
     group_column defaults to "sample_id". Pass a different column (e.g.
     "pair_id") for datasets where the natural grouping differs from sample_id.
+
+    Sorted before shuffling: polars' `.unique()` does not guarantee a stable
+    output order, so an unsorted list here would make the "same seed" shuffle
+    silently non-reproducible across reruns — confirmed in practice (SVO's
+    split changed shape between two runs with the same seed=42, which meant
+    a model trained on one run's train split could show up "tested" against
+    a different run's test split).
     """
-    unique_ids = atoms[group_column].unique().to_list()
+    unique_ids = sorted(atoms[group_column].unique().to_list())
     train_ids, val_ids, test_ids = _split_ids(unique_ids, ratios, seed)
 
     return (
