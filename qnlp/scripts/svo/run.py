@@ -130,7 +130,7 @@ def run():
         device
     )
 
-    loss_fn = SingleCaptionLoss(temperature=cfg.temperature, alignment_weight=0.0).to(device)
+    loss_fn = SingleCaptionLoss(temperature=cfg.temperature, alignment_weight=cfg.alignment_weight).to(device)
     step = SVOCaptionStep(loss_fn=loss_fn, device=device)
 
     optimizer = torch.optim.AdamW(

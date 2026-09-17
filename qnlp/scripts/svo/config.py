@@ -24,4 +24,11 @@ class SVOExperimentConfig(BaseSettings):
     temperature: float = 0.07  # fixed — not passed to the optimizer
     use_mlp_head: bool = False
 
+    # Weight of the per-sample cosine alignment loss relative to InfoNCE.
+    # 0.0 = InfoNCE only (COCO's canonical setting, and this file's prior
+    # default). A *warmup* schedule for this (weight>0 for a few epochs then
+    # dropped) caused embedding collapse in the COCO campaign — a constant
+    # weight held throughout training is a different, untested experiment.
+    alignment_weight: float = 0.0
+
     model_config = SettingsConfigDict(env_prefix="SVO_ML_")
