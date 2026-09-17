@@ -438,7 +438,7 @@ config (`use_alignment_head=true`, and briefly also NLC=true before that
 fix). Not worth letting finish on a config we no longer believe is right;
 superseded by experiment 11.
 
-### 11. svo_final — job TBD (corrected baseline)
+### 11. svo_final — job 7426702 (corrected baseline)
 **Script:** `submit_svo.sh`, no env overrides — the corrected default
 config (`use_non_linear_contractions=false, use_alignment_head=false`,
 otherwise identical to experiment 6). This *is* the new current baseline
