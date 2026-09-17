@@ -344,4 +344,41 @@ explored in experiment 3) or loss formulation (experiments 4-7).
 **Script:** `submit_svo.sh`, no env overrides — identical config to
 experiment 6, rerun purely to capture the new diagnostic metrics above for
 a like-for-like comparison against experiment 8.
-**Results:** _(pending)_
+**Results:** Early-stopped at epoch 16. SVO-Probes overall 0.4849 (subj
+0.4540 / verb 0.4836 / obj 0.5149), SVO-Swap 0.5135 — reproduces
+experiment 6's chance-level result almost exactly (0.4826/0.6216), so that
+outcome wasn't a fluke of one run's random init.
+
+**Diagnostic finding (specific mechanism identified).** At epoch 16:
+
+| | train | val |
+|---|---|---|
+| hard_neg_acc | 0.906 | 0.508 (chance) |
+| true_cosine_mean | 0.568 | 0.304 |
+| false_cosine_mean | 0.272 | 0.301 |
+| true/false_cosine_std | 0.13 / 0.18 | 0.20 / 0.20 |
+| image_pairwise_cos_mean | 0.19 | 0.20 |
+| caption_pairwise_cos_mean | 0.50 | 0.53 |
+
+On train, true/false separate clearly (0.568 vs 0.272). On val they are
+statistically indistinguishable (0.304 vs 0.301) at every epoch from ~3
+onward — climbing together early, then plateauing together, never
+diverging. This is "no discrimination between true/false for unseen
+pairs" — distinct from "discriminating the wrong way." Val cosine std
+(~0.20, not near zero) shows the model does distinguish different
+examples from each other, ruling out total embedding collapse to a single
+point. Pairwise similarity (0.19-0.20 images, 0.50-0.53 captions) isn't
+near 1.0 either, ruling out severe anisotropic collapse (captions are
+more tightly clustered than images, worth noting, but neither is fully
+degenerate).
+
+**Conclusion:** the triplet loss is doing exactly what it's told — push
+the *specific* false image shown per training row away, pull the
+*specific* true image closer — but every training row sees the *same
+fixed* false image every single epoch, so the model has no incentive to
+learn a transferable "what makes an image match this caption" feature. It
+only needs to remember "this one particular alternative image is wrong
+for this one particular caption." Strong empirical support for the
+rationale behind experiment 7 (`triplet_weight=100`, diluting this
+fixed-negative-per-row signal relative to InfoNCE's diverse in-batch
+negatives).
