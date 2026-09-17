@@ -276,3 +276,40 @@ two terms on comparable scale (100 * 0.2 ≈ 20 vs infonce ~5-6), so the
 diverse in-batch signal should actually contribute alongside the explicit
 hard negative.
 **Results:** _(pending)_
+
+## Diagnostics added (2026-09-17)
+
+Two precisely-scoped additions to `SVOHardNegStep`'s per-batch metrics,
+chosen to distinguish specific generalization-failure mechanisms rather
+than log broadly:
+- `true_cosine_std` / `false_cosine_std` — near-zero means the model isn't
+  discriminating AT ALL for that batch, distinct from "discriminating the
+  wrong way" (which the existing mean-only metrics can't tell apart).
+- `image_pairwise_cos_mean` / `caption_pairwise_cos_mean` — mean
+  off-diagonal cosine similarity among a batch's own embeddings. Climbing
+  toward 1.0 on val while staying lower on train would indicate
+  anisotropic embedding collapse (embeddings crowd into a narrow cone that
+  still satisfies the one specific triplet trained on per example, without
+  preserving general discriminative structure) as the mechanism, rather
+  than plain data/capacity insufficiency.
+
+Also added: `use_alignment_head` config flag (`ContrastiveVLM`'s new
+`NoOpHead` — plain `F.normalize`, no learnable params — as a third head
+option alongside `AlignmentHead`/`MLPProjectionHead`), to ablate the
+head's own ~dim²+dim learnable parameters per modality (~525K total at
+embedding_dim=512) as a capacity source neither the COCO nor ARO campaigns
+ever tested removing.
+
+### 8. svo_final — job 7426422 (no AlignmentHead)
+**Script:** `submit_svo.sh` with `SVO_ML_USE_ALIGNMENT_HEAD=false`,
+otherwise identical to experiment 6 (triplet_weight=40000).
+**Rationale:** Isolates the AlignmentHead's own learnable parameters as a
+capacity/overfitting source, independent of backbone size (already
+explored in experiment 3) or loss formulation (experiments 4-7).
+**Results:** _(pending)_
+
+### 9. svo_final — job 7426423 (diagnostics baseline rerun)
+**Script:** `submit_svo.sh`, no env overrides — identical config to
+experiment 6, rerun purely to capture the new diagnostic metrics above for
+a like-for-like comparison against experiment 8.
+**Results:** _(pending)_
