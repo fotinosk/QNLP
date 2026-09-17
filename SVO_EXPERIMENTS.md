@@ -16,6 +16,38 @@ Random baseline for SVO-Probes accuracy: 0.50 (binary pos/neg image choice).
 
 **Target numbers to beat: ~83% SVO-Probes, ~94% SVO-Swap.**
 
+## Baseline protocol (adopted 2026-09-17)
+
+Going forward: one fixed **current baseline** config, every new experiment
+is a single, named deviation from it, and the baseline only moves when a
+deviation demonstrably beats it. This replaces the earlier more ad-hoc
+practice of comparing against whichever prior run seemed most relevant.
+
+**Current baseline: experiment 6's config** (the ARO-matched hard-negative
+architecture — `embedding_dim=512, bond_dim=10, batch_size=128,
+text_lr=0.001, image_lr=0.00005, text_weight_decay=0.001,
+image_weight_decay=0.05, head_lr=0.001, head_weight_decay=0.001,
+max_epochs=100, patience=10, temperature=0.07, triplet_weight=40000.0,
+triplet_margin=0.2, distance=cosine, use_alignment_head=true`), not the
+older in-batch-only one from experiment 1. Chosen because:
+- It's the only config with independent precedent of working at all — ARO
+  itself reportedly reached ~78% hard_neg_acc with this recipe on a
+  similarly-scaled hard-negative benchmark. The in-batch-only config was
+  never validated anywhere; it was just a reasonable-sounding starting
+  guess for SVO specifically.
+- The in-batch-only architecture already absorbed four single-variable
+  attempts (longer patience, capacity+regularization, two alignment-weight
+  values) without closing the gap to target — plausibly near its ceiling.
+- Experiments 7-9 are already single deviations from this exact config, so
+  this formalizes rather than restarts the current investigation.
+
+Honest caveat: by raw current numbers, experiment 6 itself (0.4826 probes /
+0.6216 swap) is worse than the in-batch architecture's best result
+(experiment 5: 0.5156 / 0.8269). Baseline choice is about future headroom
+and prior validation, not "currently winning" — probes accuracy is at
+chance either way, so there's no real loss, and swap has room to move as
+triplet_weight/alignment-head get tuned.
+
 ## ⚠ Data-versioning bug that invalidated two runs (found & fixed 2026-09-17)
 
 `split_by_groups` (`qnlp/core/data_engine/dataset_creator/dataset_generator.py`)
