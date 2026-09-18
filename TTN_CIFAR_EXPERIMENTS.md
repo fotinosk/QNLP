@@ -706,3 +706,71 @@ would mean something different this time: not "the metric missed it" but
 "the tree destroys whatever the embedding hands it, regardless of
 quality." Either outcome sharpens the case for C3 as the next real
 target.
+
+### ✅ First result to clear the document's gate (job 7431014)
+
+| config | TTN test_acc | vs. logreg floor (0.3771) |
+|---|---|---|
+| no fixes (job 7430561) | 0.0983 | -0.279 |
+| + A1 (job 7430647) | 0.1591 | -0.218 |
+| **+ A1 + B1 (job 7431014)** | **0.4968** | **+0.120** |
+| cnn (context) | 0.7830 | — |
+| resnet18 (context) | ~0.75-0.76 (job still running, contended node) | — |
+
+**TTN beats the raw-pixel logistic regression floor for the first time in
+this entire investigation** — by nearly 12 points, not marginally. This
+is the document's explicit, stated gate (`>0.40`) and it is now cleared.
+
+**TTN never early-stopped.** It ran the full 40 epochs with `patience=8`
+never triggering — val accuracy was still climbing at the end (0.4842 at
+epoch 25 → 0.4916 at epoch 40, no plateau), unlike every previous TTN run
+in this document, which either sat flat at chance or (with A1 alone)
+plateaued and triggered early stopping well before the epoch budget. This
+strongly suggests the run is capacity/schedule-limited, not converged —
+more epochs, a longer patience, or a learning-rate schedule are likely to
+extract more, not less.
+
+**Reconciling this with the trace's prediction.** The pre-training trace
+showed B1's output at essential chance (kNN cons 0.1061, Gram corr 0.0249)
+after the quadtree layers ran their course — which read as "the tree
+destroys whatever the embedding hands it, regardless of quality." That
+was a prediction about a *fixed, untrained* representation, and it was
+wrong as a predictor of *trainability* — exactly the same way A1's
+unchanged trace undersold its real training-time value. The mechanism is
+probably the same in both cases: gradient descent doesn't just read out
+the random-init representation, it reshapes the whole tower (quadtree
+tensors included) jointly with the classifier head, and a well-conditioned
+starting point at the embedding (B1) evidently gives that joint
+optimisation something far more useful to work with than mean cosine or
+even Gram-corr/kNN-at-init can predict. **The lesson for this document
+going forward: no trace-only metric, however much better than mean
+cosine, is a substitute for actually training** — traces are for cheap
+triage between candidate fixes, not for declaring a fix dead.
+
+**This does not retire C3.** The trace evidence that the quadtree
+decays a well-conditioned input is still real and still measured
+directly — it just doesn't mean what "decays it to chance" seemed to
+mean for trainability. C3 could still be the difference between 0.50 and
+CNN's 0.78; it just isn't gating whether TTN can learn *at all* anymore,
+which was the open question this whole document was scoped to answer.
+
+**Recommendation, in order:**
+1. **Immediate, cheap:** re-run this exact config with more epochs /
+   higher patience (e.g. `--epochs 100 --patience 20`) before concluding
+   anything about where TTN's ceiling is — the current 0.4968 is very
+   likely an undercount given it never plateaued.
+2. **Then, in parallel or after:** revisit Stage C3 anyway, now as a
+   "how much further can this go" question rather than "can it learn at
+   all." Concrete first C3 experiment: measure the kurtosis of `merged`
+   (the 4-way product inside `CPQuadRankLayer.forward`) per layer, on a
+   forward pass through the *trained* B1 checkpoint from job 7431014
+   (more informative than random init, now that init-time measurements
+   have twice undersold real training outcomes) — this tells us whether
+   the heavy-tailed-product concern is actually present in the model that
+   achieved 0.4968, before designing a fix for it.
+3. Re-run the A4/A5 ablations on top of A1+B1 using the corrected
+   Gram-corr/kNN trace (not yet done under the new metric) — cheap, and
+   the "Methodology changes this forces" section above already flagged
+   this as open.
+
+Not implemented yet — recommendations pending confirmation.
