@@ -437,11 +437,33 @@ unchanged with A1 alone:**
 
 A1 is a real, verified defect and a correct fix on its own terms (it's
 the canonical TN-isometric prescription and is worth keeping regardless),
-but it is **not** the mechanism behind the collapse this document is
-chasing. Full CIFAR-10 training with A1 applied launched as job 7430647
-for a complete accuracy record, but the trace result already predicts it
-won't move the needle much — logged here as a negative result, not left
-untested.
+and it is **not** the mechanism behind the random-init collapse this
+document is chasing (the trace above shows that clearly) — but the actual
+training result (job 7430647, same 32×32/patch=2 config as job 7430561's
+baseline, identical everything else) says more than the trace predicted:
+
+| arch | test_acc, baseline (no A1) | test_acc, + A1 | majority |
+|---|---|---|---|
+| **ttn** | **0.0983** | **0.1591** | 0.1000 |
+| cnn | 0.7883 | 0.7875 | 0.1000 |
+| resnet18 | 0.7547 | 0.7643 | 0.1000 |
+| logreg | 0.3771 | 0.3771 (identical — not touched by A1) | 0.1000 |
+
+**Correction to the prediction above: A1 does have a measurable, real
+effect.** TTN's loss dropped below `ln(10)` for the first time across any
+run in this document (2.30 → ~2.20-2.23) instead of sitting frozen
+exactly at chance, and test accuracy nearly doubled relative to majority
+baseline's margin (from -0.2 points, i.e. *below* majority, to +5.9
+points over it). The random-init spread trace looking unchanged was
+measuring the wrong thing: A1 doesn't change the *immediate* feature
+representation at init, but it plausibly improves *gradient conditioning*
+during training (isometric per-node tensors keep gradient norms
+comparable across nodes and layers; the old init's forced inter-node
+orthogonality with Frobenius-norm-1 blocks likely produced very uneven,
+poorly-scaled gradients). This is a real, if modest, positive result —
+worth keeping A1 as a baseline improvement going forward — but TTN is
+still roughly **2.4x below the logistic-regression floor** and nowhere
+near CNN/ResNet18, so Stage A's gate is still failed decisively.
 
 ### A4 (mean-centre input) and A5 (pos_scale=0): also do not fix it
 
@@ -485,3 +507,43 @@ the load-bearing hypotheses rather than one candidate among several. A2
 init) — worth including as a control in whatever training run tests C3/B1,
 but is not expected to be the primary mechanism given traces above are
 dropout-independent (eval mode) and still show the collapse.
+
+### Recommendation: B1 next, not C3
+
+Both remaining candidates target the same crash point (bilinear product →
+quadtree layer 0-1), but they differ a lot in how well-specified and cheap
+they are to actually try:
+
+- **B1 (fixed cos/sin local feature map)** has a complete, concrete recipe
+  already written in this document: replace `c_feat * p_feat` with
+  `φ(x) = [cos(πx/2), sin(πx/2)]` applied per pixel/channel, then one
+  learned linear map from the per-patch φ-stack into `bond_dim`. This is a
+  self-contained change to `TTNImageModel.__init__`/`forward`'s patch
+  embedding section only — comparable in size and risk to the A1 fix
+  already shipped today — and it directly replaces the one part of the
+  pipeline this document independently flagged as degenerate (`c_feat *
+  p_feat` is a rank-1 quadratic form built from two learned linear
+  projections of the *same* patch). It's also immediately testable with
+  the exact same harness used all day: spread trace first (cheap, minutes,
+  tells us if the layer 0→1 crash survives), then the same
+  `submit_ttn_cifar_corrected.sh` training run if the trace looks better.
+- **C3 (product-tree normalisation)** is comparatively open-ended — the
+  document's own language is "worth measuring the kurtosis... and
+  considering log-domain accumulation or explicit per-node
+  canonicalisation instead," i.e. a diagnosis-then-design task, not a
+  fix with a recipe. It may well be the deeper explanation (the RMS-norm
+  + 4-way-product structure is unchanged by B1), but starting there means
+  spending time deciding what to try before there's anything to test.
+
+**Recommend B1 next.** It is cheaper, already fully specified, stays
+strictly within the multilinear constraint (fixed map, no learned
+non-linearity — the standard angle-encoding analogue), and there's a real
+chance it also *helps* C3's problem indirectly: a bounded, inhomogeneous
+feature map (cos/sin, unlike an unconstrained bilinear product) is much
+less likely to produce the heavy-tailed activations that make repeated
+multiplicative combination collapse variance in the first place. If B1's
+spread trace still crashes at layer 0→1 with a well-conditioned input,
+that would be strong, clean evidence that C3's mechanism is real and
+independent of the feature map — sharpening rather than wasting the next
+step either way. Not implemented yet — this is a recommendation, pending
+confirmation.
