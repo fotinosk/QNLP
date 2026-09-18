@@ -94,7 +94,10 @@ class TTNImageModel(nn.Module):
         for i in range(self.depth):
             # Pruning: Remove residuals from Layer 0 & 1 to force feature learning
             use_res = True if i > 1 else False
-            gain = gains[i]
+            # gains only has hand-tuned values for the first 4 layers (the
+            # depth every prior config used); deeper trees (e.g. B2's
+            # per-pixel leaves, depth 5) fall back to the untuned default.
+            gain = gains[i] if i < len(gains) else 1.0
 
             self.layers.append(
                 CPQuadRankLayer(
