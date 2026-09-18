@@ -31,10 +31,19 @@ class CPQuadRankLayer(nn.Module):
         self._initialize()
 
     def _initialize(self):
+        # nn.init.orthogonal_ on a 3D [num_nodes, rank, in_dim] tensor flattens
+        # dims [1:], so it orthogonalises NODES against each other (each node's
+        # whole [rank, in_dim] block becomes one unit-norm "row") rather than
+        # giving each node its own semi-orthogonal [rank, in_dim] matrix. That
+        # leaves every node a heavily down-scaled random projection (Frobenius
+        # norm 1 over the whole block, not per-row) instead of a canonical-form
+        # TTN tensor. Fix: orthogonalise each node's own matrix individually —
+        # the standard TN-canonical (isometric tensor) prescription. See
+        # TTN_CIFAR_EXPERIMENTS.md Stage A1.
         with torch.no_grad():
-            for f in [self.factor_tl, self.factor_tr, self.factor_bl, self.factor_br]:
-                nn.init.orthogonal_(f)
-            nn.init.orthogonal_(self.factor_out)
+            for f in [self.factor_tl, self.factor_tr, self.factor_bl, self.factor_br, self.factor_out]:
+                for i in range(f.shape[0]):
+                    nn.init.orthogonal_(f[i])
 
     def _rms_norm(self, t, eps=1e-6):
         # Normalizes across the Bond/Rank dimension to keep energy at 1.0
