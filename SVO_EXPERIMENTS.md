@@ -936,3 +936,34 @@ cannot.
 5. Reframing: SVO-Swap is caption-side and is where this architecture can
    legitimately show results (0.61 with the ARO warm start). SVO-Probes
    becomes a vision-bottleneck negative result backed by the ablation above.
+
+## Direct image-tower fix attempt (2026-09-18)
+
+Rather than spending compute on the frozen-CLIP diagnostic control (item 3
+above — deferred, not run), went straight at fixing the from-scratch
+TTNImageModel itself, per the three concrete defects item 4 already
+identified: `image_lr=5e-5` is very low for a tower training from scratch,
+there was **zero image augmentation** (`qnlp/scripts/svo/run.py` used the
+identical transform for train and val — confirmed by reading the code, not
+assumed), and `triplet_weight=40000` with a near-static image tower lets
+the loss get satisfied almost entirely by moving the caption embedding away
+from the false image, never requiring the image tower to encode anything
+useful.
+
+**Fixes applied:**
+- `qnlp/scripts/svo/run.py`: train transform now
+  `RandomResizedCrop(scale=(0.8,1.0)) → ColorJitter → RandomHorizontalFlip →
+  Normalize` (val stays `Resize → Normalize`, unchanged). `RandomResizedCrop`
+  handles SVO's widely varying native image sizes (173×160 to 1067×900+, per
+  the earlier data investigation) directly. This is a real code fix, not a
+  tunable default — applies to every future SVO run regardless of other
+  config.
+- Launched via `-v` overrides (not new config.py defaults, pending
+  validation): `SVO_ML_IMAGE_LR=0.001` (was 0.00005) and
+  `SVO_ML_TRIPLET_WEIGHT=100` (was 40000). Note triplet_weight=100 was
+  already tried alone in experiments 7/12 without effect — but always on top
+  of the zero-augmentation, near-frozen-image-tower setup, so it never got a
+  real test of "does the image tower learn something once it's actually
+  allowed to move meaningfully." This run tests the combination, not a
+  repeat.
+- _(results pending)_

@@ -106,7 +106,22 @@ def run():
     TEST_PARQUET = DATASETS_PATH / "svo_test_probes.parquet"
 
     size = image_model_hyperparams.image_size
-    transform = transforms.Compose(
+    # Train/val previously used the IDENTICAL transform (no augmentation at all) — a
+    # real gap, not a deliberate legacy-matching choice: ARO's own image tower never
+    # needed to learn anything (see SVO_EXPERIMENTS.md's "image tower is the
+    # bottleneck" finding), so its transform was never a validated reference either
+    # way. RandomResizedCrop handles SVO's widely varying native image sizes
+    # (173x160 to 1067x900+) directly, forcing the tower to learn features robust to
+    # scale/crop instead of memorising exact pixel layouts.
+    train_transform = transforms.Compose(
+        [
+            transforms.RandomResizedCrop(size, scale=(0.8, 1.0)),
+            transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ]
+    )
+    val_transform = transforms.Compose(
         [
             transforms.Resize((size, size)),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
@@ -118,8 +133,8 @@ def run():
         val_parquet=VAL_PARQUET,
         test_parquet=TEST_PARQUET,
         batch_size=cfg.batch_size,
-        train_transform=transform,
-        val_transform=transform,
+        train_transform=train_transform,
+        val_transform=val_transform,
         image_columns=IMAGE_COLUMNS,
         compiled_columns=COMPILED_COLUMNS,
         use_non_linear_contractions=cfg.use_non_linear_contractions,
