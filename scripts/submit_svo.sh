@@ -63,6 +63,7 @@ echo "Running on: $(hostname)"
 echo "Using Python: $PYTHON"
 echo "Batch size: $SVO_ML_BATCH_SIZE"
 echo "Non-linear: $SVO_ML_USE_NON_LINEAR_CONTRACTIONS"
+echo "Pretrained checkpoint: $SVO_ML_PRETRAINED_CHECKPOINT"
 
 echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
 echo "========================================="

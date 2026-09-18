@@ -48,4 +48,19 @@ class SVOExperimentConfig(BaseSettings):
     # qnlp/domain/models/vlm/contrastive_vlm.py::NoOpHead.
     use_alignment_head: bool = False
 
+    # Optional path to an aro_contrastive checkpoint (same architecture, same
+    # embedding_dim/bond_dim) to warm-start from, instead of training from
+    # random init. Motivation: ARO's own training set (36,585 rows) is ~4x
+    # SVO's (~8,600), and the same loss/step design reproduces the documented
+    # legacy ARO result almost exactly (see SVO_EXPERIMENTS.md's "ARO sanity
+    # check") — so a model that has already learned ARO's hard-negative
+    # image/text discrimination may need much less of SVO's small training
+    # set to adapt, versus learning discrimination from scratch. The
+    # image_model transfers in full (identical architecture/shapes). The
+    # text_model (EinsumModel) is per-symbol/per-word, so only symbols
+    # (words, with matching CCG type/shape) that appear in both ARO's and
+    # SVO's vocabularies transfer; the rest stay randomly initialised. None
+    # disables this and trains from scratch as before.
+    pretrained_checkpoint: str | None = None
+
     model_config = SettingsConfigDict(env_prefix="SVO_ML_")

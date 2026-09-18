@@ -51,6 +51,44 @@ COMPILED_COLUMNS = [("diagram", "symbols", "caption", "path")]
 SYMBOL_COLS = ["symbols"]
 
 
+def _warm_start_from_aro(text_model: EinsumModel, image_model: TTNImageModel, checkpoint_path: str, device) -> None:
+    """Load an aro_contrastive checkpoint's image tower in full, and transfer
+    text-tower symbols (words) that exist in both vocabularies with matching
+    shape. See SVOExperimentConfig.pretrained_checkpoint for the rationale."""
+    logger.info(f"Warm-starting from ARO checkpoint: {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    state_dict = checkpoint["model_state_dict"]
+
+    image_sd = {k[len("image_model.") :]: v for k, v in state_dict.items() if k.startswith("image_model.")}
+    image_model.load_state_dict(image_sd, strict=True)
+    logger.info("Image tower: loaded in full from ARO checkpoint.")
+
+    text_sd: dict = {}
+    for k, v in state_dict.items():
+        if k in ("symbols_list", "sizes_list", "non_linear_contractions"):
+            text_sd[k] = v
+        elif k.startswith("text_model."):
+            text_sd[k[len("text_model.") :]] = v
+    pretrained_symbols = list(text_sd["symbols_list"])
+    pretrained_sizes = list(text_sd["sizes_list"])
+    pretrained_text = EinsumModel(pretrained_symbols, pretrained_sizes)
+    pretrained_text.load_state_dict(text_sd, strict=True)
+
+    common_symbols = [
+        sym
+        for sym in text_model.symbols
+        if sym in pretrained_text.sym2weight
+        and pretrained_text.sym2weight[sym].shape == text_model.sym2weight[sym].shape
+    ]
+    common_tensors = [pretrained_text.sym2weight[sym].detach().clone() for sym in common_symbols]
+    text_model.set_weights(common_symbols, common_tensors)
+    logger.info(
+        f"Text tower: transferred {len(common_symbols)}/{len(text_model.symbols)} symbols "
+        f"(SVO vocab) found in ARO's {len(pretrained_symbols)}-symbol vocab with matching shape; "
+        "remaining symbols kept at random init."
+    )
+
+
 def run():
     cfg = SVOExperimentConfig()
     set_seed()
@@ -100,6 +138,10 @@ def run():
 
     text_model = EinsumModel(symbols, sizes, non_linear_contractions=cfg.use_non_linear_contractions).to(device)
     image_model = TTNImageModel(cfg.embedding_dim).to(device)
+
+    if cfg.pretrained_checkpoint:
+        _warm_start_from_aro(text_model, image_model, cfg.pretrained_checkpoint, device)
+
     model = ContrastiveVLM(
         text_model,
         image_model,
