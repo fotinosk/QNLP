@@ -1118,7 +1118,20 @@ actioned; this replaces the architectural part of item 4):
 Still ruled out, unchanged: wider `bond_dim`, and further sweeps of the
 kind experiments 1-15 already covered.
 
-## Supervised capacity probe (2026-09-18) — decisive
+## Supervised capacity probe (2026-09-18) — ⚠ see TTN_CIFAR_EXPERIMENTS.md correction below
+
+**Correction (2026-09-18, same day):** the CIFAR-10 result logged in this
+section was measured with `TTNClassifier` reading `TTNImageModel`'s
+**L2-normalised** output before the linear classifier head — a real defect
+(a TN classifier's output magnitude can carry class signal that L2-norm
+discards) caught during `TTN_CIFAR_EXPERIMENTS.md` Stage 0.2 and fixed
+there (`TTNImageModel.forward` gained `normalize: bool`, `TTNClassifier`
+now reads the raw pre-norm output). The "decisive" framing below and its
+conclusion should be treated as **provisional pending re-measurement**,
+tracked in `TTN_CIFAR_EXPERIMENTS.md` rather than duplicated here — that
+document is now the source of truth for the image-tower capacity
+investigation and its follow-up (Stages 0-D). This section is left as the
+original entry for the historical record of when/why the probe was built.
 
 Removes every other suspect at once: no text tower, no CCG, no
 contrastive/triplet loss. `qnlp/discoviz/diagnostic/ttn_supervised_probe.py`

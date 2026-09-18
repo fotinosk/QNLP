@@ -74,7 +74,14 @@ class TTNImageModel(nn.Module):
         self.final_norm = nn.LayerNorm(in_dim)
         self.head = nn.Linear(in_dim, self.embedding_dim)
 
-    def forward(self, x):
+    def forward(self, x, normalize: bool = True):
+        # normalize=False exposes the pre-L2-norm head output. Contrastive
+        # training (every caller elsewhere) wants the default: cosine
+        # similarity is scale-invariant so L2-norm is free there. A
+        # classification probe is NOT scale-invariant — a TN classifier's
+        # output magnitude can carry class signal — so
+        # qnlp/discoviz/diagnostic/ttn_supervised_probe.py reads the raw
+        # head output instead. See TTN_CIFAR_EXPERIMENTS.md Stage 0.2.
         # 1. Bilinear Patch Mapping
         # [b, c, (h p1), (w p2)] -> [b, n, c, p]
         patches = rearrange(x, "b c (h p1) (w p2) -> b (h w) c (p1 p2)", p1=self.patch_size, p2=self.patch_size)
@@ -102,4 +109,4 @@ class TTNImageModel(nn.Module):
         x = self.final_norm(x)
         x = self.head(x)
 
-        return nn.functional.normalize(x, p=2, dim=-1)
+        return nn.functional.normalize(x, p=2, dim=-1) if normalize else x

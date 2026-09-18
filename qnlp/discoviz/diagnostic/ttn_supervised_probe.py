@@ -68,7 +68,14 @@ SVO_IMAGE_DIRS = [SVO_DIR / "images", SVO_DIR / "images_old"]
 
 class TTNClassifier(nn.Module):
     """TTNImageModel (the exact tower used in every SVO/ARO/COCO contrastive
-    run) + a plain linear classifier on top. Nothing else."""
+    run) + a plain linear classifier on top. Nothing else.
+
+    Reads the PRE-L2-normalisation head output (normalize=False) — see
+    TTN_CIFAR_EXPERIMENTS.md Stage 0.2. Contrastive training only ever
+    needs the L2-normalised embedding (cosine similarity is scale
+    invariant); a softmax classifier is not scale-invariant, and a TN
+    classifier's output magnitude can carry class signal that L2-norm
+    would discard before the linear head ever sees it."""
 
     def __init__(self, num_classes: int, embedding_dim: int = 128):
         super().__init__()
@@ -76,7 +83,7 @@ class TTNClassifier(nn.Module):
         self.classifier = nn.Linear(embedding_dim, num_classes)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.classifier(self.backbone(x))
+        return self.classifier(self.backbone(x, normalize=False))
 
 
 class SmallCNN(nn.Module):
@@ -277,6 +284,44 @@ def train_and_eval(
     return {"arch": arch, "test_acc": test_acc, "majority_baseline": majority, "params": n_params}
 
 
+def run_overfit_gate(
+    arch: str,
+    train_ds: Dataset,
+    num_classes: int,
+    device,
+    n: int,
+    epochs: int,
+    batch_size: int,
+    lr: float,
+) -> dict:
+    """Stage 0.3 (TTN_CIFAR_EXPERIMENTS.md): can this model memorise a tiny
+    fixed subset at all? No val/test, no early stopping, no augmentation
+    (the datasets built above already apply none). Failing to reach ~100%
+    train accuracy on n=500 examples indicates an optimisation/conditioning
+    problem, not a capacity problem — a different fix than a val number
+    near chance would suggest on its own."""
+    g = torch.Generator().manual_seed(0)
+    idx = torch.randperm(len(train_ds), generator=g)[:n].tolist()
+    subset = Subset(train_ds, idx)
+    loader = DataLoader(subset, batch_size=batch_size, shuffle=True, num_workers=2)
+
+    model = _build_model(arch, num_classes).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=0.0)
+
+    best_acc = 0.0
+    for epoch in range(1, epochs + 1):
+        train_loss, train_acc = _run_epoch(model, loader, optimizer, device, train=True)
+        best_acc = max(best_acc, train_acc)
+        if epoch % 10 == 0 or epoch == epochs or train_acc >= 0.999:
+            logger.info(f"[{arch}] overfit-{n} epoch {epoch:03d} loss={train_loss:.4f} train_acc={train_acc:.4f}")
+        if train_acc >= 0.999:
+            logger.info(f"[{arch}] overfit-{n} gate PASSED at epoch {epoch} (train_acc={train_acc:.4f})")
+            return {"arch": arch, "overfit_n": n, "final_train_acc": train_acc, "epochs_used": epoch, "passed": True}
+
+    logger.info(f"[{arch}] overfit-{n} gate FAILED after {epochs} epochs (best train_acc={best_acc:.4f})")
+    return {"arch": arch, "overfit_n": n, "final_train_acc": best_acc, "epochs_used": epochs, "passed": False}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dataset", choices=["cifar10", "svo", "both"], default="both")
@@ -288,6 +333,14 @@ def main() -> None:
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--patience", type=int, default=6)
     parser.add_argument("--data-root", type=str, default="data/cifar10")
+    parser.add_argument(
+        "--overfit-n",
+        type=int,
+        default=0,
+        help="Stage 0.3 gate: if >0, subsample this many train examples per dataset and check whether the "
+        "model can memorise them (~100%% train acc), skipping val/test/early-stopping entirely.",
+    )
+    parser.add_argument("--overfit-epochs", type=int, default=200)
     args = parser.parse_args()
 
     set_seed()
@@ -306,30 +359,45 @@ def main() -> None:
             f"classes={num_classes} train={len(train_ds)} val={len(val_ds)} test={len(test_ds)} ==="
         )
         for arch in archs:
-            r = train_and_eval(
-                arch,
-                train_ds,
-                val_ds,
-                test_ds,
-                num_classes,
-                device,
-                args.epochs,
-                args.batch_size,
-                args.lr,
-                args.patience,
-            )
+            if args.overfit_n > 0:
+                r = run_overfit_gate(
+                    arch, train_ds, num_classes, device, args.overfit_n, args.overfit_epochs, args.batch_size, args.lr
+                )
+            else:
+                r = train_and_eval(
+                    arch,
+                    train_ds,
+                    val_ds,
+                    test_ds,
+                    num_classes,
+                    device,
+                    args.epochs,
+                    args.batch_size,
+                    args.lr,
+                    args.patience,
+                )
             r["dataset"] = dataset_name
             results.append(r)
 
     sep = "=" * 70
     logger.info(sep)
-    logger.info("SUPERVISED CAPACITY PROBE — FINAL RESULTS")
-    logger.info(sep)
-    logger.info(f"{'dataset':<10}{'arch':<12}{'test_acc':>10}{'majority':>10}{'params':>14}")
-    for r in results:
-        logger.info(
-            f"{r['dataset']:<10}{r['arch']:<12}{r['test_acc']:>10.4f}{r['majority_baseline']:>10.4f}{r['params']:>14,}"
-        )
+    if args.overfit_n > 0:
+        logger.info("OVERFIT GATE — FINAL RESULTS")
+        logger.info(sep)
+        logger.info(f"{'dataset':<10}{'arch':<12}{'passed':>8}{'train_acc':>12}{'epochs':>8}")
+        for r in results:
+            logger.info(
+                f"{r['dataset']:<10}{r['arch']:<12}{str(r['passed']):>8}"
+                f"{r['final_train_acc']:>12.4f}{r['epochs_used']:>8}"
+            )
+    else:
+        logger.info("SUPERVISED CAPACITY PROBE — FINAL RESULTS")
+        logger.info(sep)
+        logger.info(f"{'dataset':<10}{'arch':<12}{'test_acc':>10}{'majority':>10}{'params':>14}")
+        for r in results:
+            logger.info(
+                f"{r['dataset']:<10}{r['arch']:<12}{r['test_acc']:>10.4f}{r['majority_baseline']:>10.4f}{r['params']:>14,}"
+            )
     logger.info(sep)
 
 
