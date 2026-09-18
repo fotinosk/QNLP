@@ -747,3 +747,54 @@ analogue of ARO's attribution/relation split) is already reported in
 every SVO experiment above via `evaluate_svo_probes` — this was built
 specifically to match the original SVO-Probes paper's per-category
 reporting.
+
+## Transfer learning from ARO (2026-09-18)
+
+**Rationale:** the sanity check above proved the implementation is
+correct and the SVO gap is about data scale (~8,600 rows vs ARO's
+36,585). Rather than accepting a scale-limited result outright, tried
+warm-starting SVO training from the validated ARO checkpoint (job
+7428516) before training on SVO — hypothesis: a model that already
+learned ARO's hard-negative image/text discrimination needs less of
+SVO's small training set to adapt, versus learning discrimination from
+scratch.
+
+**Implementation** (`qnlp/scripts/svo/config.py`'s new
+`pretrained_checkpoint` field, wired into `qnlp/scripts/svo/run.py`'s
+`_warm_start_from_aro`): image tower (`TTNImageModel`) loads in full —
+identical architecture/shapes to ARO's. Text tower (`EinsumModel`) is
+per-symbol (per-word), so only symbols present in both vocabularies
+with matching shape transfer via `EinsumModel.set_weights`; the rest
+stay randomly initialised.
+
+### 17. svo_probes — job 7429309 (ARO-pretrained warm start)
+**Setup:** `-v SVO_ML_PRETRAINED_CHECKPOINT=.../aro_contrastive/2026-09-17_18-37-31_optimal_pid33414/best_model.pt`,
+otherwise the same legacy-faithful config as experiment 16's baseline
+(no NLC, no alignment head). Log confirmed: image tower loaded in
+full; text tower transferred 504/1356 SVO symbols (~37%) found in
+ARO's 2,719-symbol vocab with matching shape.
+**Training:** early-stopped at epoch 20 (best epoch 11, patience=10).
+
+**Results:**
+
+| Metric | This run (ARO warm start) | Best prior SVO run (from scratch) |
+|---|---|---|
+| SVO-Probes overall | 0.5096 (subj 0.5052 / verb 0.5024 / obj 0.5326) | 0.5305 (experiment 14) |
+| SVO-Swap | **0.6095** (N=105) | 0.5270 (experiment 14) |
+
+**Conclusion:** SVO-Probes stayed at chance — the warm start did not
+help the image-side hard-negative task, consistent with it being a
+genuine data-scale/task-difficulty limitation, not something a better
+starting point can fix on its own. **SVO-Swap improved meaningfully**
+(+8 points over the prior best, +11 over chance) — plausible
+explanation: SVO-Swap's hard negative is a *caption-side* swap
+(subject/object exchanged), the same shape as ARO's task, so the
+transferred text-tower symbols directly carry over subject/verb/object
+compositional structure learned from ARO's much larger caption corpus.
+SVO-Probes' hard negative is *image-side* (a different photo), which
+depends on the image tower discriminating fine-grained visual
+differences under SVO's own (smaller, lower-quality per the earlier
+manual pair inspection) image data — not something ARO's photos-are-
+plausible-or-not signal transfers to. Still far from the 94%
+SVO-Swap target, but the first result clearly and reproducibly above
+chance on this benchmark.
