@@ -247,8 +247,10 @@ much of the quantum-inspired motivation survives:
 
 ```
 0  harness: CIFAR-10 @32x32, verify probe isn't reading L2-normalised output,
-   overfit-500 gate, spread trace                              [blocks all]
-A1 per-node isometric init (verified defect)                   [hours]
+   overfit-500 gate, spread trace                              [DONE — see Results]
+   -> verdict: TTN 0.0983 vs logreg 0.3771, majority 0.1000. Fails the
+      gate cleanly. Proceed to Stage A.
+A1 per-node isometric init (verified defect)                   [hours] <- NEXT
 A2 dropout 0.3 -> 0                                            [minutes]
 A4 dataset mean-centring                                       [minutes]
 A5 pos_scale = 0 ablation                                      [minutes]
@@ -353,12 +355,58 @@ random-init signal is lost). Not yet run: the actual bug-fixed CIFAR-10
 accuracy number against the >0.40 logistic-regression bar — that's the
 next step before deciding whether to proceed to Stage A's specific fixes.
 
-### Corrected full CIFAR-10 run, pending
+### Corrected full CIFAR-10 run — decisive, still a clean fail (job 7430561)
 
-The original CIFAR-10 result in `SVO_EXPERIMENTS.md` (TTN 0.1136) predates
-the Stage 0.2 fix and used 64×64 images. Launching a clean re-run at
-32×32/patch=2 (matching this document's target config) with the
-normalize=False fix in place, plus a raw-pixel logistic regression
-baseline (`--arch logreg`, added to `ttn_supervised_probe.py`) to check
-against this document's explicit bar (`TTN must beat raw-pixel logistic
-regression, ~0.40`) rather than only the 0.10 majority baseline.
+Same config as the spread trace/overfit gate (32×32, patch_size=2), with
+the Stage 0.2 `normalize=False` fix in place, `--epochs 40 --patience 8`,
+plus the new raw-pixel logistic regression baseline:
+
+| arch | test_acc | majority_baseline | params |
+|---|---|---|---|
+| **ttn** | **0.0983** | 0.1000 | 2,281,376 |
+| cnn | 0.7883 | 0.1000 | 391,946 |
+| resnet18 | 0.7547 | 0.1000 | 11,181,642 |
+| **logreg (raw pixels)** | **0.3771** | 0.1000 | 30,730 |
+
+TTN's train/val loss sat flat at exactly `ln(10) = 2.303` for all 13
+epochs before early stopping — the normalize fix changed nothing
+observable. **TTN scores below its own majority baseline and dramatically
+below the raw-pixel logistic regression floor (0.0983 vs 0.3771).** This
+is precisely the failure condition this document defined up front: *"If
+the tower cannot beat a linear model on raw pixels, it is not encoding
+anything a tensor network is uniquely doing, and that itself is the
+result."* Logreg landing at 0.3771 also validates the document's recalled
+~0.40 figure empirically rather than leaving it as an unverified citation.
+
+**Resolves an apparent tension with the overfit-500 gate.** That gate
+passed (TTN memorises 500 fixed points in 130 epochs), which could read as
+contradicting a flat-chance result here. It doesn't: 500 points is a
+regime where enough gradient steps let the model brute-force memorise
+specific examples even from a poorly-conditioned start; the full 45,000-row
+training set with a realistic epoch budget (13 before early stopping)
+demands actual generalisable structure, and the spread-trace finding
+(random-init representation is ~indistinguishable across images by the
+output layer, 0.0037 pairwise cosine) means there is essentially no
+signal for the classifier head to work with early in training, and not
+enough steps at this scale to escape that regime. Both gates are
+consistent with the same underlying mechanism: **a badly-conditioned
+random-init representation**, not an outright absence of representational
+capacity (Stage 0's overfit gate) but a practical one at real training
+scale (this result).
+
+**Stage 0 verdict: proceed to Stage A.** The gate this document sets
+(`does it beat raw-pixel logistic regression, ~0.40?`) has a clean,
+unambiguous answer: no, by a wide margin (0.10 vs 0.38). Per the
+document's own ordering, this is not yet grounds for a Stage B
+representational rewrite — Stage A's cheap, well-motivated defects (A1
+per-node isometric init being the highest-suspicion item, A4 dataset
+mean-centring given the 0.1754→0.0069 pairwise-cosine effect already
+measured at the pixel stage) haven't been tried yet, and both connect
+directly to the conditioning story this stage's results support.
+
+**Note:** the SVO top-20 object classification numbers logged earlier in
+`SVO_EXPERIMENTS.md`'s "Supervised capacity probe" section (job 7430493:
+TTN 0.1424 / CNN 0.3928 / ResNet18 0.3242, all vs. majority 0.1304) were
+run *before* the Stage 0.2 fix and at 64×64, not 32×32 — same caveat as
+the original CIFAR-10 number. Not re-run yet; lower priority than CIFAR-10
+since this document's scope is specifically the CIFAR-10 gate.
