@@ -24,6 +24,20 @@ class ImageModelSettings(BaseSettings):
     # CIFAR-10 capacity probe; SVO/ARO/COCO keep today's behaviour unless
     # explicitly opted in via IMAGE_MODEL_USE_B1_FEATURE_MAP=true.
     use_b1_feature_map: bool = False
+    # Stage A1 (default True, the verified fix). False reproduces the
+    # original defective per-node init, kept only for the parallel batch
+    # plan's row 2 ablation (B1 alone vs A1+B1).
+    use_isometric_init: bool = True
+    # Stage A4 (default False): batch-mean-center the ~[0,1] pixel values
+    # right before the (fixed or bilinear) patch embedding. Uses batch
+    # statistics, not precomputed dataset statistics -- a direct, cheap
+    # proxy matching what tower_spread_trace.py's --mean-center ablation
+    # already measured, not a claim of the exact "dataset mean" phrasing
+    # in the original Stage A4 write-up.
+    mean_center_input: bool = False
+    # Stage A5 (default False): zero the positional embedding's
+    # contribution entirely, regardless of the learned pos_scale value.
+    zero_pos_scale: bool = False
 
 
 image_model_hyperparams = ImageModelSettings()
@@ -41,6 +55,8 @@ class TTNImageModel(nn.Module):
         num_patches = num_patches_side**2
 
         self.use_b1_feature_map = image_model_hyperparams.use_b1_feature_map
+        self.mean_center_input = image_model_hyperparams.mean_center_input
+        self.zero_pos_scale = image_model_hyperparams.zero_pos_scale
         if self.use_b1_feature_map:
             # Stage B1: fixed angle encoding phi(x) = [cos(pi*x/2), sin(pi*x/2)],
             # x in [0,1], applied per raw pixel value -- the quantum-inspired
@@ -89,6 +105,7 @@ class TTNImageModel(nn.Module):
                     dropout_p=image_model_hyperparams.dropout,
                     use_residual=use_res,
                     gain_factor=gain,
+                    use_isometric_init=image_model_hyperparams.use_isometric_init,
                 )
             )
             current_nodes //= 4
@@ -110,6 +127,9 @@ class TTNImageModel(nn.Module):
             # intensities, apply the fixed angle encoding per pixel, then one
             # learned linear map from the per-patch phi-stack into bond_dim.
             x01 = (x * self._pixel_std + self._pixel_mean).clamp(0.0, 1.0)
+            if self.mean_center_input:
+                # Stage A4: batch-mean-centre before the feature map.
+                x01 = (x01 - x01.mean(dim=0, keepdim=True)).clamp(-1.0, 1.0)
             patches = rearrange(x01, "b c (h p1) (w p2) -> b (h w) c (p1 p2)", p1=self.patch_size, p2=self.patch_size)
             phi = torch.stack([torch.cos(math.pi / 2 * patches), torch.sin(math.pi / 2 * patches)], dim=-1)
             x = self.feature_proj(phi.flatten(2))
@@ -124,7 +144,8 @@ class TTNImageModel(nn.Module):
             x = c_feat * p_feat  # Bilinear Interaction
 
         # 2. Add Gated Position
-        x = x + (self.positional_embedding * self.pos_scale)
+        pos_scale = 0.0 if self.zero_pos_scale else self.pos_scale  # Stage A5
+        x = x + (self.positional_embedding * pos_scale)
 
         # 3. Tree Contraction
         current_grid_dim = int(math.sqrt(x.shape[1]))

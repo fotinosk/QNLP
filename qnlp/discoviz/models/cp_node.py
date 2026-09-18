@@ -7,12 +7,23 @@ class CPQuadRankLayer(nn.Module):
     Optimized Quadtree Layer with Internal Factor Normalization.
     """
 
-    def __init__(self, num_nodes, in_dim, out_dim, rank, dropout_p=0.0, use_residual=True, gain_factor=1.0):
+    def __init__(
+        self,
+        num_nodes,
+        in_dim,
+        out_dim,
+        rank,
+        dropout_p=0.0,
+        use_residual=True,
+        gain_factor=1.0,
+        use_isometric_init=True,
+    ):
         super().__init__()
         self.num_nodes = num_nodes
         self.rank = rank
         self.dropout_p = dropout_p
         self.use_residual = use_residual
+        self.use_isometric_init = use_isometric_init
 
         # Factor weights: [Nodes, Rank, Input_Dim]
         self.factor_tl = nn.Parameter(torch.empty(num_nodes, rank, in_dim))
@@ -37,13 +48,21 @@ class CPQuadRankLayer(nn.Module):
         # giving each node its own semi-orthogonal [rank, in_dim] matrix. That
         # leaves every node a heavily down-scaled random projection (Frobenius
         # norm 1 over the whole block, not per-row) instead of a canonical-form
-        # TTN tensor. Fix: orthogonalise each node's own matrix individually —
-        # the standard TN-canonical (isometric tensor) prescription. See
-        # TTN_CIFAR_EXPERIMENTS.md Stage A1.
+        # TTN tensor. Fix (Stage A1, default on): orthogonalise each node's own
+        # matrix individually — the standard TN-canonical (isometric tensor)
+        # prescription. use_isometric_init=False reproduces the original
+        # (verified-defective) behaviour, kept only so Stage A1 can be
+        # ablated against A1+B1 with everything else held fixed — see
+        # TTN_CIFAR_EXPERIMENTS.md's parallel batch plan, row 2.
         with torch.no_grad():
-            for f in [self.factor_tl, self.factor_tr, self.factor_bl, self.factor_br, self.factor_out]:
-                for i in range(f.shape[0]):
-                    nn.init.orthogonal_(f[i])
+            factors = [self.factor_tl, self.factor_tr, self.factor_bl, self.factor_br, self.factor_out]
+            if self.use_isometric_init:
+                for f in factors:
+                    for i in range(f.shape[0]):
+                        nn.init.orthogonal_(f[i])
+            else:
+                for f in factors:
+                    nn.init.orthogonal_(f)
 
     def _rms_norm(self, t, eps=1e-6):
         # Normalizes across the Bond/Rank dimension to keep energy at 1.0
