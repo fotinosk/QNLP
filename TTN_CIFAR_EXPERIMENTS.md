@@ -76,6 +76,11 @@ Nothing below is interpretable without this.
    trace already showed the 64×64 tower separates images fine at init
    (pairwise cos 0.146) and collapses to 0.9984 after ARO training. Watch
    whether CIFAR training collapses it the same way.
+   **⚠ Superseded as a decision metric** — mean pairwise cosine is
+   degenerate near 0 (reads the same for a faithful embedding and for
+   noise). Use Gram correlation + kNN class consistency instead; see
+   "B1 confirmed, and the damage localised" in Results. Mean cosine stays
+   useful only as a collapse detector (pairwise → 1.0).
 
 ---
 
@@ -250,17 +255,26 @@ much of the quantum-inspired motivation survives:
    overfit-500 gate, spread trace                              [DONE — see Results]
    -> verdict: TTN 0.0983 vs logreg 0.3771, majority 0.1000. Fails the
       gate cleanly. Proceed to Stage A.
-A1 per-node isometric init (verified defect)                   [hours] <- NEXT
+A1 per-node isometric init (verified defect)                   [DONE]
+   -> real gain: TTN 0.0983 -> 0.1591. Keep. Still fails the >0.40 gate.
 A2 dropout 0.3 -> 0                                            [minutes]
-A4 dataset mean-centring                                       [minutes]
-A5 pos_scale = 0 ablation                                      [minutes]
+A4 dataset mean-centring                                       [re-check]
+A5 pos_scale = 0 ablation                                      [re-check]
+   -> A1/A4/A5 verdicts were judged on a degenerate metric; re-run them
+      under Gram-corr/kNN before treating them as closed (see below).
 A3 re-derive layer gains after A1                              [hours]
-B1 cos/sin local feature map + constant channel  <- main event [1-2 days]
+B1 cos/sin local feature map + constant channel  <- NEXT       [1-2 days]
+   -> CONFIRMED by the structure trace: the bilinear product `c*p` drops
+      Gram corr 0.982 -> 0.112 and kNN class consistency 0.171 -> 0.131 in
+      one operation, before the tree runs. B1 replaces exactly that step.
 B2 leaf granularity (per-pixel vs 2x2)                         [1 day]
 B3 colour as a tensor index                                    [1 day]
 C1 pairwise binary contractions instead of 4-way CP            [2-3 days]
 C2 cp_rank sweep (NOT the ruled-out text bond_dim)             [1 day]
-C3 product-tree normalisation / kurtosis study                 [1-2 days]
+C3 product-tree normalisation / kurtosis study    <- demoted    [1-2 days]
+   -> real (layers decay Gram corr 0.112 -> 0.0006) but secondary: it
+      would only preserve an already-ruined representation. Test it by
+      re-running the structure trace AFTER B1.
 C4 residual ablation                                           [hours]
 D1 DMRG-style sweep optimisation                               [1 week]
 E1 gated non-linearity, gate init 0                            [last resort]
@@ -269,6 +283,11 @@ E1 gated non-linearity, gate init 0                            [last resort]
 Gate between stages: **does it beat raw-pixel logistic regression (~0.40)?**
 Report the overfit-500 result alongside every val number — it separates
 "cannot optimise" from "cannot represent", and those need different fixes.
+
+Cheap pre-gate before committing any change to a full training run:
+**kNN class consistency at the output** (chance 0.100, raw-pixel input
+0.2004). Minutes to measure, and it is the metric that actually tracks
+whether class information survives the tower.
 
 ---
 
@@ -547,3 +566,91 @@ that would be strong, clean evidence that C3's mechanism is real and
 independent of the feature map — sharpening rather than wasting the next
 step either way. Not implemented yet — this is a recommendation, pending
 confirmation.
+
+### ✅ B1 confirmed, and the damage localised — structure trace (2026-09-18)
+
+The B1-vs-C3 recommendation above was made on the mean-pairwise-cosine
+trace. That metric turns out to be **degenerate for this question**, and
+replacing it both confirms B1 and pinpoints exactly which operation is
+responsible.
+
+**Why the old metric couldn't decide this.** Mean pairwise cosine ≈ 0 is
+what you get from a faithful embedding of diverse images *and* from pure
+noise. At 32×32 the CIFAR input already sits at ~0.005-0.015, so the trace
+had almost no dynamic range left and read identically for "structure
+preserved" and "structure destroyed". This is why the A1/A4/A5 ablations
+all looked like "no change", and why an initial reading of the 64×64-vs-
+32×32 comparison (input 0.1754 → output 0.1459 there; 0.0052 → 0.0037
+here, i.e. output ≈ input in both) suggested the tower was *preserving*
+input geometry and the layer 0→1 "crash" was an artifact of the bilinear
+product's inflated common mode. **That reading was wrong** — the matching
+mean levels are a coincidence, and the measurement below refutes it.
+
+**Two metrics that do decide it**, measured at every stage on 512 CIFAR
+images, random init, 32×32/patch=2:
+- **Gram corr** — correlation between a stage's pairwise-cosine matrix and
+  the *input's*. 1 = geometry preserved, 0 = destroyed.
+- **kNN cons** — fraction of each image's 10 nearest neighbours sharing its
+  true CIFAR class. Chance = 0.100. This is the one that matters: it asks
+  whether *class information* survives, not merely whether geometry does.
+
+| stage | mean cos | Gram corr | kNN cons |
+|---|---|---|---|
+| input (raw pixels) | 0.0154 | 1.0000 | **0.2004** |
+| colour projection (linear) | 0.0176 | 0.9975 | 0.2016 |
+| pixel projection (linear) | 0.0123 | 0.9823 | 0.1707 |
+| **bilinear product `c*p`** | 0.4383 | **0.1120** | **0.1305** |
+| + positional embedding | 0.4390 | 0.1123 | 0.1309 |
+| quadtree layer 0 | 0.1750 | 0.0737 | 0.1266 |
+| quadtree layer 1 | 0.0083 | 0.0416 | 0.1213 |
+| quadtree layer 2 | 0.0018 | 0.0131 | 0.0977 |
+| quadtree layer 3 | -0.0001 | 0.0006 | 0.1012 |
+| **output** | 0.0005 | **0.0002** | **0.1070** |
+
+**Findings:**
+
+1. **Raw CIFAR pixels carry real class structure** — kNN consistency
+   0.2004, twice chance. Consistent with logistic regression on raw pixels
+   reaching 0.3771. There is signal at the input for the tower to lose.
+2. **The output is at chance** (0.1070, Gram corr 0.0002). The random-init
+   tower genuinely destroys class information, confirming this document's
+   earlier conclusion in substance — on much firmer evidence than the
+   mean-cosine trace provided.
+3. **The bilinear patch product is the primary destroyer.** Both linear
+   projections are harmless (Gram corr 0.998 and 0.982; kNN 0.20 and 0.17).
+   The single `c_feat * p_feat` step drops Gram corr from 0.982 to **0.112**
+   and kNN from 0.1707 to 0.1305 — most of the way to chance, in one
+   operation, **before the tree runs at all**.
+4. **The quadtree layers are secondary but real.** They continue the decay
+   (0.112 → 0.074 → 0.042 → 0.013 → 0.0006), so C3's heavy-tailed-product
+   mechanism is genuinely present — but they are finishing off a
+   representation the patch embedding already broke.
+
+**Verdict: B1 is confirmed as the next step**, now as the load-bearing fix
+rather than the cheaper of two guesses — it replaces exactly the operation
+the trace identifies. **C3 stays on the list but is demoted to second**:
+fixing the tree alone would preserve an already-ruined representation. The
+right test of C3 is the one this document already proposed — re-run this
+trace *after* B1 and see whether the quadtree still decays a
+well-conditioned input.
+
+**The random-features probe is superseded, don't run it.** It was proposed
+to split "architecture destroys class info" from "training dynamics
+broken". kNN consistency at chance answers that directly: a linear head on
+frozen random features has nothing to separate.
+
+### Methodology changes this forces
+
+1. **Replace mean pairwise cosine with Gram correlation + kNN class
+   consistency** in `tower_spread_trace.py`. Keep mean cosine only as a
+   collapse detector (pairwise → 1.0), which is what it was originally
+   built for on ARO and where it does work.
+2. **The A1/A4/A5 "no effect" verdicts above are not yet established.**
+   They were judged on the degenerate metric. A1 already produced a real
+   accuracy gain (0.0983 → 0.1591) that the old trace failed to predict —
+   direct evidence the metric misses things. Re-run those three ablations
+   under Gram-corr/kNN before treating them as closed.
+3. **Judge B1 on kNN consistency at the output, not on mean cosine.**
+   Target: the output should retain something meaningfully above 0.100,
+   ideally approaching the input's 0.2004. That is a cheap, minutes-long
+   check to run *before* committing to a full CIFAR-10 training run.
