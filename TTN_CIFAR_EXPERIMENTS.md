@@ -654,3 +654,55 @@ frozen random features has nothing to separate.
    Target: the output should retain something meaningfully above 0.100,
    ideally approaching the input's 0.2004. That is a cheap, minutes-long
    check to run *before* committing to a full CIFAR-10 training run.
+
+### B1 implemented and traced — fixes the embedding step, not the tower
+
+Implemented as `IMAGE_MODEL_USE_B1_FEATURE_MAP=true` (opt-in, default
+`False` — SVO/ARO/COCO keep today's bilinear embedding unchanged while
+this stays a CIFAR-scoped investigation). `TTNImageModel.forward` inverts
+the ImageNet normalisation back to ~[0,1] (every existing data pipeline
+normalises before calling this model, so this keeps every external
+contract unchanged), applies `phi(x) = [cos(pi*x/2), sin(pi*x/2)]` per raw
+pixel, then one learned linear map into `bond_dim`, replacing
+`c_feat * p_feat` entirely. Verified with a real forward/backward pass
+(finite output and gradients) before running anything on the cluster.
+
+**Trace result (512 CIFAR images, random init, 32×32/patch=2, same
+Gram-corr/kNN metrics as the structure trace above):**
+
+| stage | Gram corr (baseline) | Gram corr (+B1) | kNN cons (baseline) | kNN cons (+B1) |
+|---|---|---|---|---|
+| input | 1.0000 | 1.0000 | 0.2004 | 0.2004 |
+| after patch embedding step | **0.1120** | **0.5529** | 0.1305 | 0.1791 |
+| quadtree layer 0 | 0.0737 | 0.4968 | 0.1266 | 0.1832 |
+| quadtree layer 1 | 0.0416 | 0.3611 | 0.1213 | 0.1709 |
+| quadtree layer 2 | 0.0131 | 0.1629 | 0.0977 | 0.1330 |
+| quadtree layer 3 | 0.0006 | 0.0296 | 0.1012 | 0.1125 |
+| **output** | **0.0002** | **0.0249** | **0.1070** | **0.1061** |
+
+**B1 works exactly where it should, and exactly there.** At the patch
+embedding step — the one operation this document identified as
+degenerate — Gram correlation improves 5x (0.112 → 0.553) and kNN
+consistency improves meaningfully (0.131 → 0.179). This is the cleanest
+confirmation in this document that the diagnosis was right.
+
+**But it does not survive the quadtree.** By the output, B1's numbers
+(Gram corr 0.0249, kNN cons 0.1061) are barely distinguishable from
+baseline's (0.0002, 0.1070) — both are at essential chance on kNN
+consistency. This is exactly the test this document proposed for
+disentangling B1 from C3: *"If B1's spread trace still crashes... that
+would be strong, clean evidence that C3's mechanism is real and
+independent of the feature map."* It does, and it is. **C3 is not merely
+"secondary" — on this evidence it is co-equal with B1: fixing the
+embedding without fixing the tree still loses essentially all class
+information by the output.**
+
+Full CIFAR-10 training with B1 (on top of the now-permanent A1 fix)
+launched as job 7431014, to check for the same kind of real-but-
+trace-underestimated gain A1 produced — but the trace here is far more
+informative than A1's was (a genuine 5x Gram-corr improvement at the one
+identified defect, not "no visible change"), so a null training result
+would mean something different this time: not "the metric missed it" but
+"the tree destroys whatever the embedding hands it, regardless of
+quality." Either outcome sharpens the case for C3 as the next real
+target.
