@@ -410,3 +410,78 @@ TTN 0.1424 / CNN 0.3928 / ResNet18 0.3242, all vs. majority 0.1304) were
 run *before* the Stage 0.2 fix and at 64×64, not 32×32 — same caveat as
 the original CIFAR-10 number. Not re-run yet; lower priority than CIFAR-10
 since this document's scope is specifically the CIFAR-10 gate.
+
+## Stage A (2026-09-18)
+
+### A1 — per-node isometric init: fixed, verified, does NOT fix the collapse alone
+
+Implemented exactly as diagnosed: `CPQuadRankLayer._initialize` now loops
+over nodes and calls `nn.init.orthogonal_` on each node's own `[rank,
+in_dim]` matrix individually, instead of once on the full `[num_nodes,
+rank, in_dim]` tensor (which orthogonalised nodes against each other
+instead of isometrising each node). Verified directly: per-node Frobenius
+norm is now `sqrt(rank)=5.657` (was 1.0), `W @ W.T` is the identity
+(rows orthonormal, was ~0.028 off-diagonal-adjacent), and node-vs-node dot
+products are no longer forced to zero.
+
+**But the spread trace at 32×32/patch=2 random init is essentially
+unchanged with A1 alone:**
+
+| stage | baseline (pre-A1) | + A1 |
+|---|---|---|
+| after quadtree layer 0 | 0.1851 | 0.1888 |
+| after quadtree layer 1 | 0.0096 | 0.0088 |
+| after quadtree layer 2 | 0.0011 | 0.0024 |
+| after quadtree layer 3 | 0.0012 | -0.0005 |
+| **output** | **0.0037** | **-0.0007** |
+
+A1 is a real, verified defect and a correct fix on its own terms (it's
+the canonical TN-isometric prescription and is worth keeping regardless),
+but it is **not** the mechanism behind the collapse this document is
+chasing. Full CIFAR-10 training with A1 applied launched as job 7430647
+for a complete accuracy record, but the trace result already predicts it
+won't move the needle much — logged here as a negative result, not left
+untested.
+
+### A4 (mean-centre input) and A5 (pos_scale=0): also do not fix it
+
+Quick trace-only ablations (`--mean-center`, `--zero-pos-scale`, new flags
+on `tower_spread_trace.py`), each alone and combined, all at the same
+32×32/patch=2 random init:
+
+| stage | baseline | A4 (mean-centre) | A5 (pos_scale=0) | A4+A5 |
+|---|---|---|---|---|
+| after quadtree layer 0 | 0.1851 | 0.1927 | 0.1947 | 0.2025 |
+| after quadtree layer 1 | 0.0096 | 0.0093 | 0.0094 | 0.0098 |
+| after quadtree layer 2 | 0.0011 | 0.0023 | 0.0034 | 0.0026 |
+| after quadtree layer 3 | 0.0012 | 0.0018 | 0.0033 | 0.0037 |
+| **output** | **0.0037** | **0.0026** | **0.0048** | **0.0034** |
+
+Every variant is indistinguishable from baseline within noise. None of
+Stage A's four cheap defects (A1, A4, A5 tested; A2/dropout is untestable
+via this eval-mode trace since dropout doesn't fire in `.eval()`) touch
+the actual mechanism.
+
+**Where the signal consistently dies, across every variant tried:** the
+pattern is identical in all five traces (baseline, A1, A4, A5, A4+A5) —
+spread survives quadtree layer 0 at a healthy ~0.19, then crashes by an
+order of magnitude at layer 1 and never recovers. This happens *inside*
+`CPQuadRankLayer.forward`'s repeated structure (per-child RMS-norm →
+4-way elementwise product → output projection), applied identically at
+every layer, so whatever causes the crash at layer 0→1 is presumably also
+active at layer 0 itself — layer 0's output (0.19) is already well below
+the input to the tree (bilinear product output, 0.44-0.46) before any
+layer runs, and each subsequent layer compounds it further. This matches
+Stage C3's suspected mechanism almost exactly: *"A product of four
+unit-RMS zero-mean vectors is heavy-tailed — most components land near
+zero and a few dominate."* Combined with Stage 0 A1-style reasoning, the
+init-level defects (A1/A4/A5) are not where this specific problem lives.
+
+**Revised priority: skip ahead to Stage C3 (product-tree normalisation)
+and Stage B1 (proper local feature map) before further Stage A items.**
+Both were already flagged as candidates; this trace evidence makes them
+the load-bearing hypotheses rather than one candidate among several. A2
+(dropout=0) remains cheap and untested in training (not just at
+init) — worth including as a control in whatever training run tests C3/B1,
+but is not expected to be the primary mechanism given traces above are
+dropout-independent (eval mode) and still show the collapse.
