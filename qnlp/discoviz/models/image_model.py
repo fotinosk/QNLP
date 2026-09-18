@@ -38,6 +38,25 @@ class ImageModelSettings(BaseSettings):
     # Stage A5 (default False): zero the positional embedding's
     # contribution entirely, regardless of the learned pos_scale value.
     zero_pos_scale: bool = False
+    # Track 2, proposal C-c (default 0 = disabled, use patch_size as stride):
+    # overlapping patches. Must be paired with a patch_size/image_size combo
+    # that keeps num_patches = (image_size // stride)**2 a power of 4 -- e.g.
+    # patch_size=4, stride=2, image_size=32 gives 16x16=256 leaves, depth 4,
+    # the same tree shape as the non-overlapping B1 baseline (deliberately
+    # NOT depth 5, which is the config that regressed in Stage B2). Requires
+    # use_b1_feature_map (overlapping bilinear patches were never
+    # implemented, since B1 is the only patch path this document still
+    # recommends).
+    patch_stride: int = 0
+    patch_pad: int = 0
+    # Track 2, proposal C-a (default False, requires use_b1_feature_map):
+    # replace B1's single nn.Linear feature_proj -- shared across every
+    # patch position -- with a position-specific [num_patches, in_features,
+    # bond_dim] tensor, one independent projection per patch. The quadtree
+    # itself is already per-node (CPQuadRankLayer indexes factors by node),
+    # so this closes the one part of the model that was still weight-tied
+    # across space. See TTN_CIFAR_EXPERIMENTS.md's "Plan forward".
+    use_per_patch_embedding: bool = False
 
 
 image_model_hyperparams = ImageModelSettings()
@@ -50,8 +69,16 @@ class TTNImageModel(nn.Module):
         self.embedding_dim = embedding_dim
         self.bond_dim = image_model_hyperparams.bond_dim
         self.patch_size = image_model_hyperparams.patch_size
+        # Track 2, proposal C-c: stride < patch_size gives overlapping
+        # patches. 0 means "no override" -> stride == patch_size, exactly
+        # today's non-overlapping behaviour.
+        self.patch_stride = image_model_hyperparams.patch_stride or self.patch_size
+        self.patch_pad = image_model_hyperparams.patch_pad
+        self.overlapping_patches = self.patch_stride != self.patch_size or self.patch_pad != 0
 
-        num_patches_side = image_model_hyperparams.image_size // self.patch_size
+        num_patches_side = (
+            image_model_hyperparams.image_size + 2 * self.patch_pad - self.patch_size
+        ) // self.patch_stride + 1
         num_patches = num_patches_side**2
 
         self.use_b1_feature_map = image_model_hyperparams.use_b1_feature_map
@@ -69,8 +96,26 @@ class TTNImageModel(nn.Module):
             # this keeps every external dataset/transform contract unchanged.
             self.register_buffer("_pixel_mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
             self.register_buffer("_pixel_std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
-            self.feature_proj = nn.Linear(self.in_channels * self.patch_size**2 * 2, self.bond_dim)
+            in_features = self.in_channels * self.patch_size**2 * 2
+            self.use_per_patch_embedding = image_model_hyperparams.use_per_patch_embedding
+            if self.use_per_patch_embedding:
+                # C-a: one independent [in_features, bond_dim] projection per
+                # patch position, instead of one shared across all of them.
+                # Weight stored as [num_patches, in_features, bond_dim]
+                # (transposed vs. nn.Linear's [out, in]) so the forward pass
+                # is a plain per-patch matmul; init directly with nn.Linear's
+                # default bound (1/sqrt(fan_in)) rather than calling
+                # kaiming_uniform_, which would infer fan_in from the wrong
+                # dimension for this shape.
+                self.patch_weight = nn.Parameter(torch.empty(num_patches, in_features, self.bond_dim))
+                self.patch_bias = nn.Parameter(torch.empty(num_patches, self.bond_dim))
+                bound = 1 / math.sqrt(in_features)
+                nn.init.uniform_(self.patch_weight, -bound, bound)
+                nn.init.uniform_(self.patch_bias, -bound, bound)
+            else:
+                self.feature_proj = nn.Linear(in_features, self.bond_dim)
         else:
+            self.use_per_patch_embedding = False
             # FIX #3: BILINEAR PATCH EMBEDDING
             # Separates Color (What) and Space (Where) to boost initial Variance
             self.color_factor = nn.Parameter(torch.empty(self.in_channels, self.bond_dim))
@@ -133,9 +178,30 @@ class TTNImageModel(nn.Module):
             if self.mean_center_input:
                 # Stage A4: batch-mean-centre before the feature map.
                 x01 = (x01 - x01.mean(dim=0, keepdim=True)).clamp(-1.0, 1.0)
-            patches = rearrange(x01, "b c (h p1) (w p2) -> b (h w) c (p1 p2)", p1=self.patch_size, p2=self.patch_size)
+            if self.overlapping_patches:
+                # Track 2, proposal C-c: stride < patch_size gives
+                # overlapping patches. unfold's output column order is
+                # row-major over the output spatial grid (same convention
+                # as rearrange's "(h w)" below), so the rest of the forward
+                # pass (positional embedding, quadtree reshape) needs no
+                # further change.
+                b = x01.shape[0]
+                cols = nn.functional.unfold(
+                    x01, kernel_size=self.patch_size, stride=self.patch_stride, padding=self.patch_pad
+                )  # [b, c*patch_size**2, num_patches]
+                patches = cols.view(b, self.in_channels, self.patch_size**2, -1).permute(0, 3, 1, 2)
+            else:
+                patches = rearrange(
+                    x01, "b c (h p1) (w p2) -> b (h w) c (p1 p2)", p1=self.patch_size, p2=self.patch_size
+                )
             phi = torch.stack([torch.cos(math.pi / 2 * patches), torch.sin(math.pi / 2 * patches)], dim=-1)
-            x = self.feature_proj(phi.flatten(2))
+            phi_flat = phi.flatten(2)
+            if self.use_per_patch_embedding:
+                # C-a: independent projection per patch position instead of
+                # one nn.Linear shared across all of them.
+                x = torch.einsum("bnf,nfd->bnd", phi_flat, self.patch_weight) + self.patch_bias.unsqueeze(0)
+            else:
+                x = self.feature_proj(phi_flat)
         else:
             # 1. Bilinear Patch Mapping
             # [b, c, (h p1), (w p2)] -> [b, n, c, p]

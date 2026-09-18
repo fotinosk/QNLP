@@ -59,6 +59,19 @@ class AROContrastiveStep:
             metrics["false_cosine_mean"] = neg_sim.mean()
             metrics["hard_neg_acc"] = (pos_sim > neg_sim).float().mean()
 
+            # TTN_CIFAR_EXPERIMENTS.md Track 1: the actual readout for whether
+            # the image tower is collapsing to a constant vector under this
+            # triplet_weight. Near 1.0 means every image in the batch embeds
+            # near-identically -- exactly the failure image_ablation.py found
+            # at triplet_weight=40000 (pairwise cos 1.0000, real/shuffled/zeroed
+            # all identical). This is the metric to watch during training, not
+            # just at eval time via image_ablation.py.
+            B = outputs["image_embeddings"].shape[0]
+            if B > 1:
+                img_n = outputs["image_embeddings"]
+                off_diag = ~torch.eye(B, dtype=torch.bool, device=img_n.device)
+                metrics["image_pairwise_cos_mean"] = (img_n @ img_n.t())[off_diag].mean()
+
             # Surface the non-linear contraction gate so its trajectory is logged
             # per epoch — it's the verdict on whether non-linearity is being used.
             gate = getattr(model.text_model, "nonlinear_gate", None)
