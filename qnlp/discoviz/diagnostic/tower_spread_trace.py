@@ -75,11 +75,19 @@ def spread(tensor: torch.Tensor, label: str) -> None:
     print(f"  {label:<34} pairwise cos mean {off_diag.mean():.4f}")
 
 
-def trace(model: TTNImageModel, x: torch.Tensor) -> None:
-    """Mirrors TTNImageModel.forward, measuring spread between every stage."""
+def trace(model: TTNImageModel, x: torch.Tensor, mean_center: bool = False, zero_pos_scale: bool = False) -> None:
+    """Mirrors TTNImageModel.forward, measuring spread between every stage.
+
+    mean_center (Stage A4) and zero_pos_scale (Stage A5) are cheap
+    trace-only ablations — they don't require retraining, just show
+    whether either change would help the random-init spread on its own."""
     with torch.no_grad():
         spread(x, "raw pixels (ImageNet-normalised)")
-        spread(x - x.mean(0, keepdim=True), "raw pixels, dataset-mean-centred")
+        if mean_center:
+            x = x - x.mean(0, keepdim=True)
+            spread(x, "raw pixels, dataset-mean-centred [A4 applied]")
+        else:
+            spread(x - x.mean(0, keepdim=True), "raw pixels, dataset-mean-centred")
 
         patches = rearrange(x, "b c (h p1) (w p2) -> b (h w) c (p1 p2)", p1=model.patch_size, p2=model.patch_size)
         c_feat = torch.einsum("bncp, ck -> bnk", patches, model.color_factor)
@@ -89,8 +97,9 @@ def trace(model: TTNImageModel, x: torch.Tensor) -> None:
 
         h = c_feat * p_feat
         spread(h, "after bilinear product c*p")
-        h = h + (model.positional_embedding * model.pos_scale)
-        spread(h, "+ positional embedding")
+        pos_scale = 0.0 if zero_pos_scale else model.pos_scale
+        h = h + (model.positional_embedding * pos_scale)
+        spread(h, "+ positional embedding" + (" [A5: pos_scale=0]" if zero_pos_scale else ""))
 
         grid = int(math.sqrt(h.shape[1]))
         for i, layer in enumerate(model.layers):
@@ -112,6 +121,8 @@ def main() -> None:
     parser.add_argument("--embedding_dim", type=int, default=512)
     parser.add_argument("-n", type=int, default=128)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--mean-center", action="store_true", help="Stage A4 ablation")
+    parser.add_argument("--zero-pos-scale", action="store_true", help="Stage A5 ablation")
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
@@ -135,8 +146,11 @@ def main() -> None:
     model.eval()
 
     which = f"trained ({args.checkpoint})" if args.checkpoint else "RANDOM INIT"
-    print(f"{len(x)} real photos, input {tuple(x.shape)} | tower: {which} | embedding_dim={embedding_dim}")
-    trace(model, x)
+    print(
+        f"{len(x)} real photos, input {tuple(x.shape)} | tower: {which} | embedding_dim={embedding_dim} "
+        f"| mean_center={args.mean_center} | zero_pos_scale={args.zero_pos_scale}"
+    )
+    trace(model, x, mean_center=args.mean_center, zero_pos_scale=args.zero_pos_scale)
 
 
 if __name__ == "__main__":
