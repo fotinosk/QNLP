@@ -1064,3 +1064,231 @@ next step for the *VLM* work is fixing ARO's objective (e.g. lowering
 now that there's a tower worth preserving) rather than further CIFAR-10
 tuning — but that is a new investigation, not a continuation of this
 document's scope.
+
+---
+
+## Plan forward (2026-09-18) — two proposals evaluated, then the next batch
+
+Two architectural proposals raised: **overlapping patches**, and **a
+different network per patch instead of one shared matrix**. Both are
+worth testing. One needs a factual correction about what is already
+shared and what isn't.
+
+### Proposal 2 first: "a different network per patch"
+
+**Correction: the tree is already per-node, not shared.**
+`CPQuadRankLayer`'s parameters are `[num_nodes, rank, in_dim]` and the
+forward einsum (`"bni, nri -> bnr"`) indexes them by node `n`. Every
+quadtree node already has its own independent tensors — position-specific,
+not weight-tied across the tree. So at the *tree* level this is already
+the case, and matches standard TN practice (MPS/TTN classifiers give each
+site its own tensor).
+
+**Where it is genuinely untested: the patch embedding.** B1 introduced
+`self.feature_proj = nn.Linear(in_channels * patch_size**2 * 2, bond_dim)`
+— a **single Linear shared across all 256 patches**. That is the one part
+of the model that is weight-tied across spatial positions, and it is the
+part the proposal actually targets. Untested, and worth testing:
+
+- **TN-faithful.** Position-dependent site tensors are the norm in the TN
+  image-classification literature, not the exception.
+- **Cheap.** A `[num_patches, in_features, bond_dim]` parameter at
+  256 × 24 × 64 ≈ 393K params — small next to the 2.3M-9.2M models
+  already in the grid.
+- **It subsumes the positional embedding.** A5 showed `pos_scale=0` is
+  noise (row 6: 0.5191 vs 0.5168), i.e. the additive positional embedding
+  currently contributes nothing. Per-patch embeddings make position
+  *structural* rather than an additive hack bolted onto a multiplicative
+  network — replacing a term that demonstrably does nothing with one that
+  might.
+- **Honest risk (the one the proposal itself names):** it trades
+  translation equivariance for per-position specialisation. On CIFAR-10
+  each patch position sees all 45,000 training images, so data is not the
+  constraint. On SVO (~8,600 rows) it would be far more marginal — so
+  evaluate this on CIFAR and do not assume it ports.
+
+**Verdict: test it.** Highest-expected-value of the two proposals.
+
+### Proposal 1: overlapping patches
+
+Worth one clean job, with a design constraint and a real risk.
+
+**Why it might help.** The B2 result is the evidence in its favour: row 7
+(per-pixel leaves) *regressed* to 0.3713 while 2×2 patches give 0.5168,
+which says intra-patch pooling matters and the tree recovers fine spatial
+structure poorly when asked to do it combinatorially. Overlapping patches
+sit between those two points — they keep patch-level pooling while
+softening the rigid partition, so that pixels straddling a patch boundary
+interact below the top of the tree. This is the same reason CNNs use
+stride < kernel size.
+
+**Design constraint — avoid confounding with depth.** The quadtree needs
+`4^depth` leaves. The naive overlap (patch=2, stride=1, padded to 32×32)
+gives 1024 leaves → depth 5, which is *exactly the configuration that just
+regressed in row 7*. Any result would be uninterpretable. Use instead:
+
+```
+patch_size=4, stride=2, pad=1  ->  16x16 = 256 leaves, depth 4
+```
+
+Same tree shape as the current baseline, 2× overlap, one variable changed.
+
+**Real risk, specific to multiplicative networks.** The tree *multiplies*
+leaves together. If a pixel appears in four overlapping patches, it enters
+the product four times — raising its effective polynomial degree rather
+than merely adding a redundant path, as it would in an additive CNN. That
+plausibly worsens the heavy-tailed-activation problem the structure trace
+already measured (Stage C3). So this experiment must be read alongside a
+structure trace and the C3 kurtosis measurement, not on accuracy alone.
+
+**Motivational caveat worth recording for the thesis.** Copying one
+pixel's encoded state into several sites has no native quantum analogue —
+no-cloning. It is adjacent to *data re-uploading*, which the quantum-side
+investigation already tested as a residual mechanism and found no robust
+benefit (`llm/quantum_implementation_plan.md`). So a win here would need
+framing as a quantum-inspired-but-not-quantum-realisable choice, which
+costs something in the story even if it gains accuracy.
+
+**Verdict: one job, at constant depth, read with the trace.** Lower
+expected value than proposal 2, but cheap and genuinely informative about
+whether the blocky partition is a limiter.
+
+---
+
+### Track 1 — the VLM objective (highest value in the project right now)
+
+This document's own batch verdict is that CIFAR's capacity question is
+closed and the blocker is now ARO's objective. That makes the following
+the most valuable experiment available anywhere in the project, and it
+should not wait behind CIFAR architecture work. **Log results in
+`SVO_EXPERIMENTS.md`, not here — this is outside this document's scope.**
+
+| # | config | answers |
+|---|---|---|
+| T1 | ARO, A1+B1+cp_rank=128, `triplet_weight` ∈ {1, 10, 100} | does the tower stay uncollapsed once InfoNCE's anti-collapse pressure survives? |
+| T2 | `image_ablation.py` on each T1 checkpoint | the actual success criterion — **real vs shuffled vs zeroed must differ** |
+| T3 | SVO-Probes with the best T1 configuration | does a tower that provably uses images move the target task? |
+
+Log `image_pairwise_cos_mean` as a first-class training metric on all of
+these. The mechanism is already diagnosed ("`triplet_weight` deletes the
+only anti-collapse term"); what is new is that there is now, for the first
+time, a tower worth preserving. Success on T2 is what turns the ARO
+chapter from "provably image-invariant" into "uses vision."
+
+### Track 2 — CIFAR architecture (parallel, independent of Track 1)
+
+| # | config | answers |
+|---|---|---|
+| C-a | **per-patch embedding** (proposal 2): `feature_proj` → `[num_patches, in_features, bond_dim]` | does position-specific state preparation beat a shared map? |
+| C-b | C-a **with `pos_scale=0`** | does the per-patch embedding subsume the positional embedding, as predicted? |
+| C-c | **overlapping patches** (proposal 1): patch=4, stride=2, pad=1, depth 4 | does softening the rigid partition help, or does degree inflation hurt? |
+| C-d | `cp_rank=256` | where does the monotonic 32→64→128 (0.5168→0.5328→0.5420) trend saturate? |
+| C-e | C1: pairwise binary contractions replacing the 4-way CP node | the last untested structural item |
+
+C-a and C-c need code; C-b depends on C-a; C-d is pure config and can go
+immediately. Baseline for all rows: **A1+B1+cp_rank=128 = 0.5420**, not
+row 1's 0.5168.
+
+### Dependent, not to be launched blind
+
+- **C3 kurtosis of `merged` per layer on the trained A1+B1 checkpoint** —
+  still undone (wave-2 row 13), and now needed to interpret C-c's overlap
+  result as well as to design any C3 fix.
+- Structure trace (Gram-corr/kNN) on C-a and C-c *at init* is fine as
+  triage, but per this document's own rule — established twice — **no
+  trace-only metric decides anything; only training does.**
+
+### Standing gate
+
+CIFAR baseline to beat: **0.5420**. Context: cnn 0.7842, resnet18 0.7569,
+logreg 0.3784. The remaining question for this document is how much of the
+~0.24 gap to a from-scratch CNN is closable while staying multilinear —
+and that is now a "how far" question, not a "does it work at all" one.
+
+## Batch 2 results (2026-09-18)
+
+### Track 2 (CIFAR) — all four finished
+
+| job | config | test_acc | Δ vs A1+B1+cp128 (0.5420) |
+|---|---|---|---|
+| C-d | cp_rank=256 | **0.5500** | +0.008 |
+| C-a | per-patch embedding | 0.4147 | -0.127 |
+| C-b | per-patch + pos_scale=0 | 0.3907 | -0.151 |
+| C-c | overlapping patches (depth 4) | 0.5171 | -0.025 (≈ baseline 0.5168 pre-cp-sweep) |
+
+**cp_rank saturates.** 32→64→128→256: 0.5168 → 0.5328 → 0.5420 → 0.5500.
+Diminishing returns continue (+0.016, +0.009, +0.008) — capacity is a
+real but small, saturating lever, not the remaining gap to CNN.
+
+**C-a/C-b: the higher-expected-value proposal was wrong, and wrong by a
+lot.** Per-patch embedding regresses hard (-0.127), and adding
+`pos_scale=0` on top makes it *worse* (-0.151), directly contradicting
+the prediction that per-patch embeddings would subsume the (already-shown-
+useless, per A5) positional embedding. Plausible mechanism: a shared
+`nn.Linear` pools gradient signal across all 256 patches every step; an
+independent `[num_patches, in_features, bond_dim]` tensor gives each
+patch position 1/256th of the effective training signal per step, with
+no cross-patch statistical sharing — on a 45,000-image dataset that may
+simply not be enough per-patch data for independent projections to
+outlearn a shared one, even though the *architecture* is more
+TN-faithful. This is a real, useful negative result, not a bug: being
+"more literature-faithful" (per-position tensors, as in B2 and now C-a)
+has now regressed **twice** relative to a shared/pooled alternative — a
+pattern worth naming rather than re-trying a third variant of the same
+idea without a different theory of why it would work.
+
+**C-c is a clean null.** Overlapping patches (0.5171) neither help nor
+hurt relative to the pre-cp-sweep baseline (0.5168) — softening the rigid
+patch partition doesn't matter at this depth/config. Doesn't rule out
+degree-inflation being a real cost (per the pre-registered risk), just
+that it's not a large one here; the C3 kurtosis measurement on this
+checkpoint (still not done) would say more.
+
+**Revised Track 2 priority:** C-a/B2's shared pattern (per-position
+tensors regress) argues against C-e (C1, pairwise binary contractions)
+without first understanding *why* per-position specialisation is losing
+to weight-sharing here — that diagnosis, not another architecture
+variant, is now the higher-value next step in this track.
+
+### Track 1 (ARO objective) — early results are the most important
+finding of this batch, and they're a serious problem for the hypothesis
+
+**`image_pairwise_cos_mean` collapses to ~1.0 within 2-3 epochs at
+`triplet_weight=1` and `10`** — the two lowest weights tested, more than
+three orders of magnitude below the original 40000:
+
+| job | triplet_weight | epoch 1 (val) | epoch 2 (val) | epoch 3 (val) |
+|---|---|---|---|---|
+| T1a | 1 | 0.2094 | 0.9950 | **0.9997** |
+| T1b | 10 | 0.1446 | 0.6617 | **0.9966** |
+| T1c | 100 | 0.1342 | *(running)* | *(running)* |
+
+**This is a real problem for the "lower triplet_weight enough and
+InfoNCE's anti-collapse pressure survives" hypothesis** — at
+`triplet_weight=1`, the triplet term should be almost negligible next to
+InfoNCE's loss (~5.0), yet the tower still collapses just as fast as at
+weight 40000 did. Two readings, not yet distinguished:
+1. InfoNCE's own in-batch anti-collapse pressure is *itself* too weak to
+   prevent collapse on ARO specifically, independent of the triplet
+   term's weight entirely — the loss doesn't need the image to vary
+   *at all* for either term to be minimised, since ARO's task never
+   requires comparing two different images.
+2. Something in the training dynamics (learning rate ratio between image
+   and text towers, batch composition, or the tower's own conditioning
+   from Stage A/B) makes collapse the path of least resistance
+   independent of loss weighting.
+
+Reading 1 is the more parsimonious explanation and consistent with this
+document's own earlier diagnosis (ARO's task structure, not merely the
+loss weighting, permits a constant-image solution) — if true, no
+`triplet_weight` value fixes this, and Track 1 needs a structurally
+different intervention (e.g. an explicit anti-collapse term independent
+of triplet_weight, not just detuning it). **Not yet concluded** — T1c
+(triplet_weight=100, running) and the full trajectories of T1a/T1b
+(checking whether collapse is truly permanent or partially reversible
+later in training) are needed before treating this as settled. Log
+`image_pairwise_cos_mean`'s full trajectory, not just early epochs, before
+drawing a final conclusion — a metric that spikes early but recovers
+would tell a different story than one that stays at 1.0 throughout.
+
+**S1 (SVO) still loading data as of this entry.**
