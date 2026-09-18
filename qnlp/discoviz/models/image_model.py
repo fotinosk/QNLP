@@ -16,6 +16,14 @@ class ImageModelSettings(BaseSettings):
     dropout: float = 0.3
     patch_size: int = 4
     image_size: int = 64
+    # TTN_CIFAR_EXPERIMENTS.md Stage B1: replace the learned bilinear patch
+    # embedding (a degenerate rank-1 quadratic form, confirmed to destroy
+    # most class structure in one operation via the structure trace) with a
+    # fixed per-pixel angle-encoding feature map + one learned linear layer.
+    # Default False — this is still an active investigation scoped to the
+    # CIFAR-10 capacity probe; SVO/ARO/COCO keep today's behaviour unless
+    # explicitly opted in via IMAGE_MODEL_USE_B1_FEATURE_MAP=true.
+    use_b1_feature_map: bool = False
 
 
 image_model_hyperparams = ImageModelSettings()
@@ -32,12 +40,27 @@ class TTNImageModel(nn.Module):
         num_patches_side = image_model_hyperparams.image_size // self.patch_size
         num_patches = num_patches_side**2
 
-        # FIX #3: BILINEAR PATCH EMBEDDING
-        # Separates Color (What) and Space (Where) to boost initial Variance
-        self.color_factor = nn.Parameter(torch.empty(self.in_channels, self.bond_dim))
-        self.pixel_factor = nn.Parameter(torch.empty(self.patch_size**2, self.bond_dim))
-        nn.init.xavier_uniform_(self.color_factor)
-        nn.init.xavier_uniform_(self.pixel_factor)
+        self.use_b1_feature_map = image_model_hyperparams.use_b1_feature_map
+        if self.use_b1_feature_map:
+            # Stage B1: fixed angle encoding phi(x) = [cos(pi*x/2), sin(pi*x/2)],
+            # x in [0,1], applied per raw pixel value -- the quantum-inspired
+            # analogue of a qubit angle encoding (state preparation is where
+            # the non-linearity belongs, not the circuit; see
+            # TTN_CIFAR_EXPERIMENTS.md's "What multilinear does and does not
+            # forbid"). Callers pass ImageNet-normalised tensors (every
+            # existing data pipeline in this project does), so forward()
+            # inverts that normalisation back to ~[0,1] before applying phi --
+            # this keeps every external dataset/transform contract unchanged.
+            self.register_buffer("_pixel_mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
+            self.register_buffer("_pixel_std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
+            self.feature_proj = nn.Linear(self.in_channels * self.patch_size**2 * 2, self.bond_dim)
+        else:
+            # FIX #3: BILINEAR PATCH EMBEDDING
+            # Separates Color (What) and Space (Where) to boost initial Variance
+            self.color_factor = nn.Parameter(torch.empty(self.in_channels, self.bond_dim))
+            self.pixel_factor = nn.Parameter(torch.empty(self.patch_size**2, self.bond_dim))
+            nn.init.xavier_uniform_(self.color_factor)
+            nn.init.xavier_uniform_(self.pixel_factor)
 
         # FIX #1: GATED POSITIONAL EMBEDDING
         # Prevents position from drowning out image signal (SNR Fix)
@@ -82,14 +105,23 @@ class TTNImageModel(nn.Module):
         # output magnitude can carry class signal — so
         # qnlp/discoviz/diagnostic/ttn_supervised_probe.py reads the raw
         # head output instead. See TTN_CIFAR_EXPERIMENTS.md Stage 0.2.
-        # 1. Bilinear Patch Mapping
-        # [b, c, (h p1), (w p2)] -> [b, n, c, p]
-        patches = rearrange(x, "b c (h p1) (w p2) -> b (h w) c (p1 p2)", p1=self.patch_size, p2=self.patch_size)
+        if self.use_b1_feature_map:
+            # Stage B1: invert ImageNet normalisation back to ~[0,1] pixel
+            # intensities, apply the fixed angle encoding per pixel, then one
+            # learned linear map from the per-patch phi-stack into bond_dim.
+            x01 = (x * self._pixel_std + self._pixel_mean).clamp(0.0, 1.0)
+            patches = rearrange(x01, "b c (h p1) (w p2) -> b (h w) c (p1 p2)", p1=self.patch_size, p2=self.patch_size)
+            phi = torch.stack([torch.cos(math.pi / 2 * patches), torch.sin(math.pi / 2 * patches)], dim=-1)
+            x = self.feature_proj(phi.flatten(2))
+        else:
+            # 1. Bilinear Patch Mapping
+            # [b, c, (h p1), (w p2)] -> [b, n, c, p]
+            patches = rearrange(x, "b c (h p1) (w p2) -> b (h w) c (p1 p2)", p1=self.patch_size, p2=self.patch_size)
 
-        # Entangle Color and Pixels
-        c_feat = torch.einsum("bncp, ck -> bnk", patches, self.color_factor)
-        p_feat = torch.einsum("bncp, pk -> bnk", patches, self.pixel_factor)
-        x = c_feat * p_feat  # Bilinear Interaction
+            # Entangle Color and Pixels
+            c_feat = torch.einsum("bncp, ck -> bnk", patches, self.color_factor)
+            p_feat = torch.einsum("bncp, pk -> bnk", patches, self.pixel_factor)
+            x = c_feat * p_feat  # Bilinear Interaction
 
         # 2. Add Gated Position
         x = x + (self.positional_embedding * self.pos_scale)
