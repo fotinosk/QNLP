@@ -298,9 +298,67 @@ classification. Fixed both:
   post-fix before being treated as a capacity conclusion**; re-running is
   part of Stage 0's harness validation, not an optional extra.
 
-**0.3 — overfit-500 gate, and 0.4 — spread trace at 32×32 init:** launched
-together via `scripts/submit_ttn_cifar_stage0.sh` (job pending as of this
-entry — `IMAGE_MODEL_DROPOUT=0` for the overfit gate per this stage's
-explicit ask to remove regularisation, `--overfit-n 500 --overfit-epochs
-200` for ttn/cnn/resnet18, plus the spread trace at the same 32×32/patch=2
-config with `-n 128` random-init images). Results pending.
+**0.3 — overfit-500 gate: PASSED for all three architectures** (job
+7430551, `IMAGE_MODEL_DROPOUT=0`, no augmentation, `--overfit-n 500
+--overfit-epochs 200`):
+
+| arch | passed | epochs to 100% train acc |
+|---|---|---|
+| ttn | True | **130** |
+| cnn | True | 14 |
+| resnet18 | True | 95 |
+
+TTN *can* memorise 500 examples — this rules out a hard
+optimisation/capacity block per this gate's own logic (a model unable to
+reach ~100% here would indicate a genuine optimisation/conditioning
+failure, not a representational one). But it took **~9x more epochs than
+the CNN** to get there, which is itself a real, measurable conditioning
+problem — consistent with Stage A's suspected defects (A1 per-node init,
+A4 mean-centring) rather than a Stage B representational rewrite being
+required.
+
+**0.4 — spread trace at 32×32/patch=2 random init: collapses, unlike the
+64×64 trace.** Same job, `-n 128`:
+
+| stage | pairwise cos mean |
+|---|---|
+| raw pixels (ImageNet-normalised) | 0.0052 |
+| after colour projection (linear) | 0.0060 |
+| after pixel projection (linear) | 0.0026 |
+| after bilinear product c*p | 0.4442 |
+| + positional embedding | 0.4449 |
+| after quadtree layer 0 | 0.1851 |
+| after quadtree layer 1 | 0.0096 |
+| after quadtree layer 2 | 0.0011 |
+| after quadtree layer 3 | 0.0012 |
+| **after final_norm + head (output)** | **0.0037** |
+
+Contrast with the original 64×64/patch=4 trace in the "image tower is the
+bottleneck" section of `SVO_EXPERIMENTS.md`, which *recovered* to ~0.15 by
+layer 1 and held there through the output (0.1459). Here, at the same tree
+depth (4, since `256` leaves either way) but smaller patches (2×2 vs 4×4,
+so a 4-dim raw patch vector instead of 16-dim), the representation
+collapses monotonically after layer 0 and never recovers — the random-init
+tower is nearly indistinguishable across different CIFAR images by the
+time it reaches the classifier head (0.0037 ≈ what 128 independent random
+unit vectors in a high-dim space would give by chance). This is a
+plausible mechanism for 0.3's slow convergence: the classifier head starts
+from an almost-uninformative representation and needs many steps of joint
+tower+head training to carve out class-relevant structure, whereas the CNN
+and ResNet18 start with normal, well-conditioned random features.
+
+**Stage 0 status:** harness verified (probe bug found and fixed; overfit
+gate passing rules out a hard capacity block; spread trace pinpoints where
+random-init signal is lost). Not yet run: the actual bug-fixed CIFAR-10
+accuracy number against the >0.40 logistic-regression bar — that's the
+next step before deciding whether to proceed to Stage A's specific fixes.
+
+### Corrected full CIFAR-10 run, pending
+
+The original CIFAR-10 result in `SVO_EXPERIMENTS.md` (TTN 0.1136) predates
+the Stage 0.2 fix and used 64×64 images. Launching a clean re-run at
+32×32/patch=2 (matching this document's target config) with the
+normalize=False fix in place, plus a raw-pixel logistic regression
+baseline (`--arch logreg`, added to `ttn_supervised_probe.py`) to check
+against this document's explicit bar (`TTN must beat raw-pixel logistic
+regression, ~0.40`) rather than only the 0.10 majority baseline.

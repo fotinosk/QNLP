@@ -111,13 +111,28 @@ class SmallCNN(nn.Module):
         return self.classifier(x)
 
 
-def _build_model(arch: str, num_classes: int) -> nn.Module:
+class LogisticRegression(nn.Module):
+    """Raw-pixel linear classifier — TTN_CIFAR_EXPERIMENTS.md's explicit
+    minimum bar (~0.40 on CIFAR-10): a TN encoder that can't beat this isn't
+    encoding anything a tensor network is uniquely doing."""
+
+    def __init__(self, num_classes: int, in_features: int):
+        super().__init__()
+        self.classifier = nn.Linear(in_features, num_classes)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.classifier(x.flatten(1))
+
+
+def _build_model(arch: str, num_classes: int, image_size: int = IMAGE_SIZE) -> nn.Module:
     if arch == "ttn":
         return TTNClassifier(num_classes)
     if arch == "cnn":
         return SmallCNN(num_classes)
     if arch == "resnet18":
         return resnet18(weights=None, num_classes=num_classes)
+    if arch == "logreg":
+        return LogisticRegression(num_classes, in_features=3 * image_size * image_size)
     raise ValueError(f"Unknown arch: {arch!r}")
 
 
@@ -325,7 +340,7 @@ def run_overfit_gate(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dataset", choices=["cifar10", "svo", "both"], default="both")
-    parser.add_argument("--arch", choices=["ttn", "cnn", "resnet18", "all"], default="all")
+    parser.add_argument("--arch", choices=["ttn", "cnn", "resnet18", "logreg", "all"], default="all")
     parser.add_argument("--label-col", choices=["obj", "verb"], default="obj")
     parser.add_argument("--top-k", type=int, default=20)
     parser.add_argument("--epochs", type=int, default=30)
@@ -345,7 +360,7 @@ def main() -> None:
 
     set_seed()
     device = get_device()
-    archs = ["ttn", "cnn", "resnet18"] if args.arch == "all" else [args.arch]
+    archs = ["ttn", "cnn", "resnet18", "logreg"] if args.arch == "all" else [args.arch]
     datasets = ["cifar10", "svo"] if args.dataset == "both" else [args.dataset]
 
     results = []
