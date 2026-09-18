@@ -731,7 +731,10 @@ reproduction of the legacy result than the aggregate number suggested.
 SVO/ARO-specific vocabulary doesn't cover those benchmarks' symbols; not
 meaningful here.)
 
-**Conclusion:** this decisively answers the sanity-check question. Our
+**Conclusion:** ⚠ *superseded in part — see "The image tower is the
+bottleneck" at the end of this doc: the ARO score below turns out to be
+image-invariant, so it validates the text tower and the port, not the
+recipe's visual grounding.* Our
 `ImageContrastiveLoss`/`SVOHardNegStep` implementation (mirroring
 `ContrastiveLoss`/`AROContrastiveStep` used here) **reproduces the
 documented legacy result on ARO to within ~2 points per task** —
@@ -798,3 +801,138 @@ manual pair inspection) image data — not something ARO's photos-are-
 plausible-or-not signal transfers to. Still far from the 94%
 SVO-Swap target, but the first result clearly and reproducibly above
 chance on this benchmark.
+
+## ⚠ The image tower is the bottleneck — ARO never tested it (2026-09-18)
+
+The ARO sanity check above concluded "the implementation is correct, so the
+SVO gap is about SVO's data." That conclusion was too generous to the ARO
+result. Direct ablation shows **the ARO score does not use the image at
+all**, which changes what every experiment in this log was measuring.
+
+**Method** (`qnlp/discoviz/diagnostic/image_ablation.py`, new): take a
+trained `aro_contrastive` checkpoint and re-score ARO test three ways —
+with the real image, with each row scored against *some other row's* image
+("shuffled"), and with an all-zero image ("zeros"). Separately, measure the
+mean pairwise cosine between different images' embeddings.
+
+**Results** (checkpoint `runs/checkpoints/aro_contrastive/2026-06-11_10-25-56/`,
+epoch 53, NLC=true + AlignmentHead; 512-row sample of `aro_test.parquet`):
+
+| variant | N | hard_neg_acc | true_cos | false_cos |
+|---|---|---|---|---|
+| real | 512 | 0.7168 | 0.7593 | 0.5695 |
+| shuffled | 512 | 0.7129 | 0.7594 | 0.5696 |
+| zeros (no image at all) | 512 | **0.7168** | 0.7603 | 0.5708 |
+
+Feeding a blank image changes accuracy by 0.0000. The mechanism, measured
+on the same checkpoint:
+
+```
+pairwise cosine between DIFFERENT images: mean 0.9984  min 0.9489  std 0.0031
+per-dimension std across images:          0.00164
+```
+
+The image tower has collapsed to a single constant vector — it emits
+essentially the same embedding whatever it is shown. The ~70% ARO score is
+a **text-only caption-plausibility classifier**: the text tower learned to
+point well-formed captions toward one fixed direction and swapped ones away
+from it. ARO permits this because both candidate captions are scored
+against the *same* image, so the image never has to break a tie; the
+benchmark is known to be largely solvable blind (the SugarCREPE critique of
+ARO makes the same point about text-only baselines).
+
+**Why this explains SVO-Probes exactly.** SVO-Probes inverts the roles: the
+caption is identical for both candidates, so the decision is
+`cos(t, I_pos) > cos(t, I_neg)` and the *entire* discriminative burden falls
+on the image tower. With an image-invariant model that is exactly 0.50, for
+any loss, any triplet_weight, any capacity, any dataset size. SVO-Probes is
+the first task in this project that requires the image tower to work at
+all — and the rest of the project's history is consistent with it never
+having worked: COCO retrieval was always "zero retrieval"
+(`COCO_EXPERIMENTS.md`), and experiment 17's ARO warm start helped
+SVO-**Swap** (caption-side, +8pts) while doing nothing for SVO-Probes
+(image-side).
+
+Fifteen experiments tuned the loss, the head, the capacity, the
+regularization and the data volume around a bottleneck none of those levers
+touch.
+
+**Provenance caveat.** This ablation ran on the June checkpoint above, not
+on job 7428516's (the September legacy-faithful run); the June one is the
+newest `aro_contrastive` checkpoint held locally. It scores 0.72 on this
+sample vs. 7428516's 0.688 on the full test set — the same regime — and the
+collapse mechanism is independent of the NLC/head flags that differ between
+them. Re-running the script on 7428516's checkpoint (and on an SVO
+checkpoint, `--task svo`) is the first item below.
+
+**Ruled out while investigating this** (so they aren't re-chased):
+- Image loading/normalization is correct: `read_image` → `.float().div(255)`
+  → `Normalize`, in `qnlp/domain/datasets/dataset.py`.
+- Untrained symbols at eval time: only ~8% of val/test rows contain a word
+  unseen in train on the *unfiltered* corpus, less after the freq≥10 filter.
+  Not enough to pin val at chance.
+- An eval-only bug in `evaluate_svo_probes`: val `hard_neg_acc` goes through
+  the same `SVOHardNegStep` as train and is at chance, so the failure is in
+  training, not in the final eval path.
+
+**The target was also never the right one.** ~83% SVO-Probes comes from
+models with an ImageNet-pretrained visual backbone trained on ~3M
+Conceptual Captions pairs, where SVO-Probes is a *zero-shot probe* rather
+than a training set. The paper's "SVO is easier than ARO" ordering
+presupposes a working vision encoder; with a from-scratch tensor-network
+tower the ordering inverts, because ARO can be passed blind and SVO-Probes
+cannot.
+
+### Next steps
+
+1. ✅ Re-ran `image_ablation.py` on job 7428516's checkpoint (2026-09-18) —
+   confirms the collapse on the actual validated-against-target run, not
+   just the older June checkpoint used above: real/shuffled/zeros accuracy
+   0.6855/0.6914/0.6797 (statistically identical), pairwise image cosine
+   **0.9342** (near-collapsed, closes the provenance caveat).
+
+   Also ran on the SVO checkpoint (job 7429309, ARO warm start) —
+   **different failure mode than ARO's, as predicted**: pairwise image
+   cosine is **0.2108**, not collapsed — SVO's own true/false-image
+   training objective does push the tower to vary per image. But accuracy
+   stays at chance (real caption 0.5508 vs shuffled-caption 0.4844 — only
+   a small gap), meaning that variation doesn't carry caption-relevant
+   discriminative signal. So SVO's image tower isn't frozen at a constant
+   output like ARO's — it has learned *something* image-specific — but
+   whatever it learned doesn't help decide which of two images matches a
+   given caption. Confirms experiment 9's `image_pairwise_cos_mean ≈ 0.19`
+   reading rather than overturning it: two distinct failure modes (ARO:
+   collapsed and unused; SVO: varying but not caption-grounded), same
+   practical consequence (image tower contributes ~nothing to accuracy on
+   both benchmarks).
+2. Make the image tower the object of study: linear probe on
+   `TTNImageModel` features for SVO's object/verb class at 64×64. Converts
+   "SVO-Probes failed" into a quantified statement about the encoder, and
+   connects to the 16×16 training ceiling already documented on the quantum
+   side (`llm/research_log.md`).
+3. ✅ Implemented (2026-09-18), launch pending: `qnlp/scripts/svo/run_frozen.py`
+   + `scripts/submit_svo_frozen.sh`. Frozen CLIP ViT-B/32 image tower (reuses
+   `CLIPImageCache` from `coco_multi_caption/run_frozen.py`, 512-dim, matching
+   `SVOExperimentConfig`'s default `embedding_dim`) in place of TTNImageModel;
+   DisCoCat `EinsumModel` text tower unchanged, still trained from scratch
+   with the same `ImageContrastiveLoss` + hard-negative triplet on SVO's own
+   data. A learnable linear text head is added (unlike the legacy no-head
+   config) since the text tower now has to land in CLIP's fixed embedding
+   space rather than co-adapt with a from-scratch image tower. Bespoke eval
+   functions mirror `evaluate_svo_probes`/`evaluate_sugarcrepe`'s logic
+   (subj/verb/obj breakdown for Probes; SVO-Swap reuses the ARO/SugarCREPE
+   hard-neg shape directly, since `svo_swap_eval.parquet`'s schema already
+   matches it). If Probes jumps to 70-80%, the bottleneck is isolated beyond
+   argument. (COCO experiment 11 tried frozen CLIP but died at epoch 2
+   against a 389k-way retrieval objective; a binary hard-negative task is a
+   far easier target.) This is a diagnostic control, not a proposal to put
+   classical capacity in the quantum pipeline.
+4. Collapse-adjacent settings worth revisiting on their own: `image_lr=5e-5`
+   is very low for a tower trained from scratch, there is no image
+   augmentation anywhere (train transform == val transform), and
+   `triplet_weight=40000` with a constant image direction is trivially
+   satisfiable by moving captions alone — it actively rewards ignoring the
+   image. Log `image_pairwise_cos_mean` in ARO training too.
+5. Reframing: SVO-Swap is caption-side and is where this architecture can
+   legitimately show results (0.61 with the ARO warm start). SVO-Probes
+   becomes a vision-bottleneck negative result backed by the ablation above.
