@@ -966,4 +966,134 @@ useful.
   real test of "does the image tower learn something once it's actually
   allowed to move meaningfully." This run tests the combination, not a
   repeat.
-- _(results pending)_
+
+**Results — job 7429715 (`image_lr=0.001, triplet_weight=100`, + augmentation):**
+Early-stopped at epoch 13 (best epoch 3, val hard_neg_acc 0.5277 — picked by
+noise, not a real trend: val bounced 0.49-0.53 the whole run with no
+direction). **SVO-Probes overall 0.4977** (obj 0.4919 / subj 0.5320 / verb
+0.4898), **SVO-Swap 0.4476** — both *worse* than the legacy baseline
+(0.4983/0.5270) and worse than the best prior result (experiment 14:
+0.5305/0.5810). Worth stating plainly: this combination made things worse.
+
+**The unexpected part — train itself never left chance.** Every prior run
+(with or without hard negatives) showed train `hard_neg_acc` climbing fast,
+often to 0.68-0.9+, while val stayed flat — the standard
+memorise-train/fail-val signature. Here train sat at 0.495-0.531 for all 13
+epochs, with `true_cosine_mean`/`false_cosine_mean` both hovering within
+±0.01 of zero throughout (i.e. statistically indistinguishable, not just
+"not separating well") and `image_pairwise_cos_mean` oscillating noisily in
+0.003-0.06 — nowhere near the 1.0 collapse seen on ARO, but also not
+settling into any stable structure. Confirmed this isn't silent data
+dropping: `n_dropped` was 0 in every logged epoch.
+
+**Follow-up run — job 7430070 (`image_lr=0.0003`, same triplet_weight=100 +
+augmentation), launched to check whether 0.001 was simply too large a
+step:** same qualitative picture through 6 epochs — train `hard_neg_acc`
+0.510-0.531 with no trend, cosines still near-zero. Lowering the LR 3x
+changed nothing structural, which argues against "LR magnitude" as the
+specific cause.
+
+**Interpretation, read together with the init-spread trace below:** that
+trace shows a freshly-initialised tower already separates real images well
+(pairwise cos 0.146) — the representational capacity is there. The
+previous (pre-augmentation) runs' fast train-accuracy climb was most likely
+the model exploiting a shortcut unrelated to real visual grounding:
+memorising the *one exact, unaugmented* false image shown per training row
+every single epoch. Augmentation correctly removes that shortcut (the crop
+differs each epoch) — but nothing has yet replaced it with real learning at
+either LR tried. This is a third, previously-unseen failure mode (neither
+"memorise-then-fail-to-generalise" nor "collapse to a constant vector") and
+is not yet understood. Recommendation before trying further LR values in
+this same three-way bundle: isolate variables (augmentation alone at the
+original `image_lr=5e-5`/`triplet_weight=40000`, vs. `triplet_weight`
+lowered alone with no augmentation) rather than continuing to vary one
+knob inside a combination that is itself not yet behaving as expected.
+
+## Is the collapse architectural? No — init-spread trace (2026-09-18)
+
+Before redesigning the image tower, checked whether a collapsed tower is
+something the architecture *is* or something training *does to it*.
+`qnlp/discoviz/diagnostic/tower_spread_trace.py` (new) runs real photos
+through `TTNImageModel` and measures mean pairwise cosine between different
+images at every internal stage. With no `--checkpoint` it traces a freshly
+initialised tower.
+
+**Random init, 128 real ARO photos:**
+
+```
+raw pixels (ImageNet-normalised)   pairwise cos mean 0.1754
+raw pixels, dataset-mean-centred   0.0069
+after colour projection (linear)   0.1757
+after pixel projection (linear)    0.1489
+after bilinear product c*p         0.5406   <- bilinear patch map costs spread
++ positional embedding             0.5406
+after quadtree layer 0             0.3649
+after quadtree layer 1             0.1510   <- quadtree recovers it
+after quadtree layer 2             0.1441
+after quadtree layer 3             0.1487
+after final_norm + head (output)   0.1459   <- trained ARO checkpoint: 0.9984
+```
+
+**At initialisation the tower separates images perfectly well** (0.146).
+The bilinear `c_feat * p_feat` patch map does cost real spread (0.15 →
+0.54), and that's worth remembering as a second-order concern, but the
+quadtree recovers it by layer 1 and the output is healthy. So the 0.9984
+collapse measured on the trained ARO checkpoint is **learned, not
+structural** — the representational capacity to distinguish images is
+there at init and training destroys it.
+
+Conclusion for the architecture question: **don't redesign the tower yet.**
+The objective, not the multilinear quadtree, is the first thing to fix.
+
+### The mechanism: `triplet_weight` deletes the only anti-collapse term
+
+`ContrastiveLoss` (and its `ImageContrastiveLoss` mirror) computes
+`total = infonce + triplet_weight * triplet`. On ARO the triplet term is
+caption-side — `d(I, t_true) < d(I, t_false) - margin` — and that is
+**fully satisfiable with a constant image embedding**, by moving only the
+captions. The one term that *requires* different images to embed
+differently is InfoNCE, whose in-batch matching is impossible when every
+image embeds identically. At a weight ratio of 1 : 40,000 its gradient is
+negligible, so the collapsed solution is the easy minimum and training
+finds it.
+
+This sharpens experiment 7's original hypothesis. That experiment framed
+`triplet_weight=40000` as "swamping InfoNCE's diverse in-batch negatives";
+the more precise statement is that it removes the objective's only
+anti-collapse pressure. It also explains why experiments 7 and 12
+(triplet_weight 100 and 10) showed nothing: both ran on SVO, whose tower
+was never collapsed in the first place (`image_pairwise_cos ≈ 0.19`), so
+neither run ever tested this mechanism. The combination launched in
+"Direct image-tower fix attempt" above — augmentation + `image_lr=0.001` +
+`triplet_weight=100` — is the first run that does.
+
+`image_pairwise_cos_mean` should be logged as a first-class training metric
+on the ARO pipeline too, not just SVO's: it is the metric that would have
+caught this at the time.
+
+### Revised architecture position
+
+Ranked, given the above (items 1-4 of the previous list are largely
+actioned; this replaces the architectural part of item 4):
+
+1. **Objective and signal first** — the launched fix run, plus
+   `image_pairwise_cos_mean` logging on ARO. No architecture change is
+   interpretable while the objective still admits a degenerate solution.
+2. **Then one architectural change, if the fix run doesn't move Probes:**
+   the image tower is purely multilinear — no non-linearity anywhere. The
+   text side got NLC (`contraction + gate * GELU(contraction)`, gate init
+   0) and demonstrably learned to use it (gate rose 0.044 → 0.393 in the
+   COCO campaign). The same gated device inside `CPQuadRankLayer` is a
+   strict generalisation — gate=0 recovers today's model exactly — reuses a
+   mechanism already validated in this codebase on the other tower, and
+   makes a clean thesis question: does the image tower need the same
+   non-linearity the text tower needed? Adding capacity *before* fixing the
+   objective would only give the model a better way to collapse.
+3. **Second-order, only if the trace above becomes the binding
+   constraint:** the bilinear patch map's 0.15 → 0.54 spread loss, and
+   dataset-mean-centring the input (0.1754 → 0.0069 at the pixel stage).
+4. **Not resolution.** 64×64 / 16×16 patches is not the binding constraint
+   while the objective admits a constant-image solution.
+
+Still ruled out, unchanged: wider `bond_dim`, and further sweeps of the
+kind experiments 1-15 already covered.
