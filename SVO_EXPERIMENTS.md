@@ -1117,3 +1117,51 @@ actioned; this replaces the architectural part of item 4):
 
 Still ruled out, unchanged: wider `bond_dim`, and further sweeps of the
 kind experiments 1-15 already covered.
+
+## Supervised capacity probe (2026-09-18) — decisive
+
+Removes every other suspect at once: no text tower, no CCG, no
+contrastive/triplet loss. `qnlp/discoviz/diagnostic/ttn_supervised_probe.py`
+(new) trains `TTNImageModel` + a plain linear classifier with ordinary
+cross-entropy, and compares it against a small CNN and a from-scratch
+ResNet-18 on the identical task — first on CIFAR-10 (upsampled to 64×64,
+TTNImageModel's native input size), then on SVO's own images labeled with
+their top-20 `obj` classes (12,185 unique positive images; top classes:
+beach, ball, grass, water, field, street, tree, road, sea, game, ...; 3,881
+images resolve to files and fall in the top 20; split 2,716/582/583).
+Job 7430493.
+
+**CIFAR-10 result — clean and decisive:**
+
+| arch | test_acc | majority_baseline | params |
+|---|---|---|---|
+| **TTN** | **0.1136** | 0.1000 | 2,282,144 |
+| CNN (small, 4-block) | 0.7554 | 0.1000 | 391,946 |
+| ResNet18 (from scratch) | 0.8001 | 0.1000 | 11,181,642 |
+
+TTNImageModel's loss sat flat at ~2.30 (= ln(10), the exact value for
+uniform random predictions over 10 classes) for all 7 epochs before early
+stopping — it did not move off chance at any point during training, on a
+completely standard, easy classification task. A CNN with **6x fewer
+parameters** reached 75.5%, and ResNet18 reached 80%, trained with the
+identical optimizer, schedule, and stopping criterion.
+
+**Why this is decisive:** every one of the 17+ prior SVO experiments used a
+contrastive/triplet objective, which confounds two different questions —
+"can the tower represent images at all" and "does this particular loss
+recover that representation." This probe removes the second question
+entirely. The answer is now unambiguous: **the image tower itself cannot
+learn to classify real images, independent of the SVO/ARO contrastive
+setup, the text tower, CCG, or any hyperparameter tuned across this entire
+campaign.** This overturns the working assumption behind the "objective
+first" ranking above (item 1) — fixing `triplet_weight`/augmentation was
+never going to help, because the tower could not have used a working
+objective either. It also reframes the init-spread trace finding: a fresh
+tower separating unlabeled photos at init (pairwise cos 0.146) shows it
+preserves *some* per-image variation, which is a much weaker property than
+being able to learn a linear decision boundary over that variation with
+gradient descent — CIFAR-10 tests the latter directly, and it fails.
+
+**SVO top-20 object classification result:** _(job 7430493 still running as
+of this entry — CIFAR-10 portion complete, SVO portion in progress; will be
+appended once finished)._
