@@ -709,16 +709,20 @@ target.
 
 ### ✅ First result to clear the document's gate (job 7431014)
 
-| config | TTN test_acc | vs. logreg floor (0.3771) |
+| config | TTN test_acc | vs. logreg floor (job 7431014's own: 0.3686) |
 |---|---|---|
-| no fixes (job 7430561) | 0.0983 | -0.279 |
-| + A1 (job 7430647) | 0.1591 | -0.218 |
-| **+ A1 + B1 (job 7431014)** | **0.4968** | **+0.120** |
-| cnn (context) | 0.7830 | — |
-| resnet18 (context) | ~0.75-0.76 (job still running, contended node) | — |
+| no fixes (job 7430561) | 0.0983 | -0.270 |
+| + A1 (job 7430647) | 0.1591 | -0.210 |
+| **+ A1 + B1 (job 7431014)** | **0.4968** | **+0.128** |
+| cnn (job 7431014, context) | 0.7830 | — |
+| resnet18 (job 7431014, context) | 0.7567 | — |
+
+(logreg landed at 0.3686 this run vs. 0.3771 previously — normal
+run-to-run noise on a tiny 30,730-parameter model with early stopping;
+TTN's margin over it is decisive either way.)
 
 **TTN beats the raw-pixel logistic regression floor for the first time in
-this entire investigation** — by nearly 12 points, not marginally. This
+this entire investigation** — by nearly 13 points, not marginally. This
 is the document's explicit, stated gate (`>0.40`) and it is now cleared.
 
 **TTN never early-stopped.** It ran the full 40 epochs with `patience=8`
