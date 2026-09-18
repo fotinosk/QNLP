@@ -778,3 +778,145 @@ which was the open question this whole document was scoped to answer.
    this as open.
 
 Not implemented yet — recommendations pending confirmation.
+
+---
+
+## Parallel batch plan (2026-09-18)
+
+The cluster can run these concurrently. The binding risk in this campaign
+has been *bundling variables to save wall-clock* — the SVO fix attempt's
+three-way bundle (augmentation + image_lr + triplet_weight) produced a
+failure mode nobody could attribute. Parallel capacity removes the only
+reason to bundle, so every job below changes **exactly one thing**.
+
+Run this way, the whole Stage A/B ablation table completes in one
+wall-clock cycle instead of ten sequential ones. That matters because
+**the ablation table is the deliverable** — the thesis contribution is
+"these specific defects account for a 0.098 → 0.497 swing, constraint
+never relaxed," and that claim needs clean single-variable rows.
+
+### Wave 1A — CIFAR ablation grid (launch together)
+
+All pure config on the existing harness. Same seed, same budget, one
+variable each.
+
+| # | config | answers |
+|---|---|---|
+| 1 | A1+B1, `--epochs 100 --patience 20`, **all archs on the same budget** | the real ceiling, plus baselines on a fair budget |
+| 2 | **B1 alone** (A1 off) | the missing single-variable row — is A1 load-bearing, or was the gain all B1? |
+| 3 | A1 alone, long budget | matched-budget A1 row (the 0.1591 figure was 40 epochs/patience 8) |
+| 4 | A1+B1+A2 (`IMAGE_MODEL_DROPOUT=0`) | A2 has never been tested *in training* — the eval-mode traces can't fire dropout at all |
+| 5 | A1+B1+A4 (dataset mean-centring) | judged only on the degenerate mean-cosine metric so far |
+| 6 | A1+B1+A5 (`pos_scale=0`) | same |
+| 7 | A1+B1+B2 (per-pixel leaves, 1024 leaves, depth 5) | the literature-faithful configuration; independent of everything else |
+| 8 | A1+B1, `cp_rank` ∈ {32, 64, 128} | capacity is now plausibly binding — job 7431014 never plateaued |
+
+**Why job 1 re-runs the baselines:** the current 0.4968-vs-0.7830
+comparison is confounded. TTN was the only model that didn't early-stop,
+so the gap is partly a budget artefact, not purely a capability gap.
+
+### Wave 1B — transfer track (launch simultaneously with 1A)
+
+Separate pipeline, no dependency on the CIFAR grid. **Note B1 is opt-in
+and defaults to `False`, so ARO/SVO are still running the degenerate
+bilinear embedding** — these need the flag explicitly enabled.
+
+| # | config | answers |
+|---|---|---|
+| 9 | ARO with A1+B1 enabled | does the fix transfer to the real task? |
+| 10 | SVO-Probes with A1+B1 enabled | the project's actual target — has never had a working image tower behind it |
+
+**Pre-check before trusting job 10 — minutes, local, not a cluster job.**
+B1's `forward` inverts the ImageNet normalisation to recover ~[0,1] before
+applying `φ`. CIFAR's pipeline is `Resize → ToTensor → Normalize`, so that
+inversion is exact. SVO's train transform is now `RandomResizedCrop →
+ColorJitter → RandomHorizontalFlip → Normalize` — ColorJitter can push
+values outside [0,1], and `cos(πx/2)`/`sin(πx/2)` is **periodic, so
+out-of-range values wrap rather than saturate**: two images differing only
+in brightness could encode to the same point. Verify the actual value range
+reaching `φ` under the SVO transform first, or a negative SVO result is
+uninterpretable rather than merely negative.
+
+### Wave 2 — genuinely dependent, do not launch blind
+
+| # | depends on | why it's worth running |
+|---|---|---|
+| 11 | job 9's checkpoint | **`image_ablation.py` — is the image-invariance gone?** Highest-information single measurement in the batch. If shuffled/zeroed images now degrade ARO accuracy, this project has a vision-language model that actually uses vision for the first time, and the ARO chapter is rewritten. |
+| 12 | job 9's checkpoint | SVO warm-started from the new ARO checkpoint — repeats experiment 17, but this time the transferred tower isn't collapsed |
+| 13 | job 1's trained checkpoint | C3 kurtosis of `merged` per layer, on the **trained** model (init-time measurements have twice undersold real training outcomes) |
+| — | code + job 13's result | C1 (pairwise binary contractions) and B3 (colour as a tensor index) need implementation, and C1's design should be informed by what job 13 measures |
+
+### Rules for the batch
+
+1. **One variable per job.** Parallel capacity removes the only reason to
+   bundle. This is the rule the SVO campaign violated.
+2. **Fix the seed; hold everything else constant across the grid.** Rows
+   are only comparable if they differ in exactly one thing.
+3. **Pre-commit what each row would change, before results land.** With
+   ten results arriving at once, the temptation is to read the batch as a
+   whole and narrate a story around it. Decide in advance which rows would
+   move the baseline.
+4. **Judge on training, not on traces.** Established twice now: A1's trace
+   showed nothing and gave +6 points; B1's trace showed chance-at-output
+   and gave +34. Traces triage candidates; only training decides.
+
+### What NOT to parallelise
+
+Speculative C/D-stage variants whose design depends on measurements that
+don't exist yet (C1's contraction structure, C3's actual fix, D1). A
+cluster makes it cheap to run experiments whose results can't yet be
+interpreted — a different failure mode from this campaign's previous one,
+but still a failure mode.
+
+## Batch launched (2026-09-18)
+
+**Pre-check for job 10 (required before trusting it):** simulated SVO's
+actual train transform (`RandomResizedCrop → ColorJitter → RandomHorizontalFlip
+→ Normalize`) on 200 synthetic images, then applied B1's exact
+normalisation-inversion (`x * std + mean`). Result: reconstructed pixel
+values stayed exactly within `[0, 1]` (min 0.0, max 1.0) across all 200
+samples — `torchvision.ColorJitter` clamps its output internally, so the
+periodic-wraparound risk this pre-check was checking for does not
+materialise in practice. Job 10 is safe to trust.
+
+**Code additions needed before the grid could run** (all default to
+today's fixed/correct behaviour — see `qnlp/discoviz/models/{cp_node,image_model}.py`):
+- `use_isometric_init` (default `True`) — lets row 2 disable Stage A1 to
+  get the missing single-variable "B1 alone" row.
+- `mean_center_input` (Stage A4, batch-mean-centring before the patch
+  embedding — the earlier `--mean-center` flag only ever affected the
+  diagnostic trace, never actual training).
+- `zero_pos_scale` (Stage A5, forces the positional embedding's
+  contribution to exactly zero regardless of the learned `pos_scale`).
+- B2 (per-pixel leaves) and the `cp_rank` sweep needed no code changes —
+  both were already environment-configurable (`IMAGE_MODEL_PATCH_SIZE=1`,
+  `IMAGE_MODEL_CP_RANK`).
+
+All verified with a real forward+backward pass locally before touching
+the cluster. New generic runner: `scripts/submit_ttn_cifar_ablation.sh`
+(env-var-parameterised, nothing hardcoded — every row below is this same
+script with different `qsub -v` overrides).
+
+**Launched, all 11 jobs, queued simultaneously:**
+
+| row | job | name | config |
+|---|---|---|---|
+| 1 | 7431183 | ttn_b1_ceiling | A1+B1, all archs, epochs=100 patience=20 |
+| 2 | 7431184 | ttn_b2_b1only | B1 alone (`IMAGE_MODEL_USE_ISOMETRIC_INIT=false`), epochs=100 patience=20 |
+| 3 | 7431185 | ttn_b3_a1only_long | A1 alone (B1 off, default), epochs=100 patience=20 |
+| 4 | 7431186 | ttn_b4_dropout0 | A1+B1+`IMAGE_MODEL_DROPOUT=0` |
+| 5 | 7431187 | ttn_b5_meancenter | A1+B1+`IMAGE_MODEL_MEAN_CENTER_INPUT=true` |
+| 6 | 7431188 | ttn_b6_zeropos | A1+B1+`IMAGE_MODEL_ZERO_POS_SCALE=true` |
+| 7 | 7431189 | ttn_b7_perpixel | A1+B1+`IMAGE_MODEL_PATCH_SIZE=1` (1024 leaves, depth 5) |
+| 8a | 7431190 | ttn_b8a_cprank64 | A1+B1, `IMAGE_MODEL_CP_RANK=64` |
+| 8b | 7431191 | ttn_b8b_cprank128 | A1+B1, `IMAGE_MODEL_CP_RANK=128` |
+| 9 | 7431192 | ttn_b9_aro_b1 | ARO, legacy-faithful config, +`IMAGE_MODEL_USE_B1_FEATURE_MAP=true` |
+| 10 | 7431193 | ttn_b10_svo_b1 | SVO, +`IMAGE_MODEL_USE_B1_FEATURE_MAP=true` |
+
+Wave 2 (rows 11-13, the image-ablation-on-job-9's-checkpoint test, SVO
+warm-start from the new ARO checkpoint, and C3 kurtosis on a trained
+checkpoint) is intentionally not launched yet — each depends on a
+checkpoint from jobs 9 or 1 that doesn't exist until those finish. Per
+rule 3 above: row 11 (does ARO stop being image-invariant?) is the
+highest-information single measurement in the whole batch and is the
+first thing to check once job 9 completes.
