@@ -988,10 +988,30 @@ dropping: `n_dropped` was 0 in every logged epoch.
 
 **Follow-up run — job 7430070 (`image_lr=0.0003`, same triplet_weight=100 +
 augmentation), launched to check whether 0.001 was simply too large a
-step:** same qualitative picture through 6 epochs — train `hard_neg_acc`
-0.510-0.531 with no trend, cosines still near-zero. Lowering the LR 3x
-changed nothing structural, which argues against "LR magnitude" as the
-specific cause.
+step:** through epoch 6 showed the same stalled picture as 7429715. But it
+did NOT stay stalled — from epoch ~7 onward it broke out, just later:
+train `hard_neg_acc` climbed steadily from 0.527 (ep7) to **0.733 (ep20)**,
+with `true_cosine_mean` rising from 0.017 to 0.16 while `false_cosine_mean`
+stayed flat and low (0.008-0.017) — real train/false separation, the same
+qualitative shape every pre-augmentation run showed, just delayed ~7
+epochs. Val never followed: best epoch was 10 (val hard_neg_acc 0.5226),
+and every epoch through early stopping at 20 failed to beat it (0.497-0.521,
+no trend). **Final: SVO-Probes overall 0.5045** (obj 0.5130 / subj 0.5381 /
+verb 0.4916), **SVO-Swap 0.4381** — chance on Probes, below chance on Swap,
+consistent with 7429715's outcome and still worse than the best prior
+result (experiment 14: 0.5305/0.5810).
+
+**Conclusion for this pair of runs:** the lower LR didn't fix the problem,
+it just delayed the same failure mode. `RandomResizedCrop(scale=(0.8,
+1.0))` keeps 80-100% of each image, which is apparently not aggressive
+enough to block crop-invariant memorisation of one specific training
+image over ~10-15 epochs — it only slowed the onset. Both `image_lr` values
+tried (0.001, 0.0003) converge to the same place: chance-level Probes,
+below-chance Swap. Next step should address the objective directly (per
+the mechanism identified below — `triplet_weight` removing InfoNCE's
+anti-collapse pressure) or use much more aggressive augmentation
+(e.g. `scale=(0.3, 1.0)`), rather than further LR tuning inside this same
+combination.
 
 **Interpretation, read together with the init-spread trace below:** that
 trace shows a freshly-initialised tower already separates real images well
