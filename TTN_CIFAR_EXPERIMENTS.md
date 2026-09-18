@@ -920,3 +920,100 @@ checkpoint from jobs 9 or 1 that doesn't exist until those finish. Per
 rule 3 above: row 11 (does ARO stop being image-invariant?) is the
 highest-information single measurement in the whole batch and is the
 first thing to check once job 9 completes.
+
+## Wave 1A/1B results (2026-09-18)
+
+9 of 11 jobs finished within the hour; job 9 (ARO+B1, 100-epoch budget)
+is still running, several hours out. One bug found and fixed along the
+way.
+
+**Bug found: row 7 crashed on launch.** `gains = [2.0, 1.5, 1.0, 1.0]`
+only has 4 hand-tuned entries; `IMAGE_MODEL_PATCH_SIZE=1` at 32×32 gives
+1024 leaves → depth 5 → `gains[4]` → `IndexError`. Fixed (deeper layers
+fall back to the untuned `gain=1.0` default), verified locally, relaunched
+as job **7431935**.
+
+### Wave 1A — CIFAR grid, TTN accuracy
+
+| row | config | TTN test_acc | Δ vs row 1 (A1+B1 baseline) |
+|---|---|---|---|
+| 1 | **A1+B1, epochs=100/patience=20 (ceiling re-run)** | **0.5168** | — |
+| 2 | B1 alone, A1 off | 0.4697 | -0.047 |
+| 3 | A1 alone, long budget | 0.1574 | -0.359 |
+| 4 | A1+B1+dropout=0 | 0.5130 | -0.004 |
+| 5 | A1+B1+mean-centre | 0.5127 | -0.004 |
+| 6 | A1+B1+pos_scale=0 | 0.5191 | +0.002 |
+| 7 | A1+B1+per-pixel leaves | *(crashed; relaunched as 7431935)* | — |
+| 8a | A1+B1, cp_rank=64 | 0.5328 | +0.016 |
+| 8b | A1+B1, cp_rank=128 | 0.5420 | +0.025 |
+
+Row 1's baselines (fair, matched 100-epoch/patience-20 budget for
+everything, resolving the earlier confound where TTN was the only model
+that hadn't early-stopped): **cnn 0.7842, resnet18 0.7569, logreg
+0.3784.**
+
+**Reading the grid — this is the ablation table the document said would
+be the deliverable:**
+
+1. **B1 is the dominant effect, A1 is real but secondary.** B1 alone
+   (row 2, 0.4697) recovers almost all of the combined gain (row 1,
+   0.5168) on its own — A1 contributes a real but modest +0.047 on top.
+   Symmetrically, A1 alone (row 3, 0.1574) is barely above its own
+   0.1591 result from the 40-epoch run, confirming (independent of
+   budget) that **A1 alone plateaus early and cannot get TTN near the
+   logreg floor by itself** — the fixed feature map is what was actually
+   gating trainability, not the init.
+2. **A2 (dropout), A4 (mean-centre), A5 (pos_scale=0) are all noise.**
+   Rows 4, 5, 6 land within ±0.004-0.002 of row 1 — genuinely
+   indistinguishable from run-to-run variance. None of these Stage A
+   items matter once B1 is in place. This resolves the "re-run A4/A5
+   under the corrected metric" item from the methodology section above:
+   the corrected metric was never necessary because these don't move
+   real training outcomes either way, consistent with (though for a
+   different reason than) the original degenerate-trace verdict.
+3. **`cp_rank` is a small but real, monotonic lever.** 32→64→128 gives
+   0.5168 → 0.5328 → 0.5420 (+0.016, +0.025 cumulative) — diminishing
+   but still positive returns, and job 1 never plateauing at 40 epochs
+   (see the earlier "First result to clear the document's gate" section)
+   is consistent with capacity being a real, secondary constraint on top
+   of the embedding fix. Not dramatic, but real and monotonic across two
+   independent steps.
+4. **The picture in one line:** of the five Stage A/B levers tested
+   (A1, A2, A4, A5, plus B1 itself), exactly two do anything —
+   B1 (the whole game) and A1 (a real, secondary +0.047) — and the
+   other three (A2, A4, A5) are confirmed noise, now on the *training*
+   metric rather than the degenerate trace. `cp_rank` (Stage C2) adds a
+   further small, monotonic increment on top.
+
+### Wave 1B — transfer track
+
+**Job 10 (SVO+B1) finished — a genuine negative result for the actual
+target task.** SVO-Probes overall **0.5157** (obj 0.5293 / subj 0.4804 /
+verb 0.5210) — still flat at chance, no improvement over any prior SVO
+run. SVO-Swap **0.5524** — actually *worse* than experiment 17's ARO
+warm-start result (0.6095), the best SVO-Swap result to date. **B1's
+CIFAR-10 gain does not transfer to SVO as tested here.** Plausible
+reasons, not yet distinguished: SVO's training set (~8,600 rows) is far
+smaller than CIFAR-10's 45,000, so B1 may need more data than SVO
+provides to have room to help; SVO's images are real, uncontrolled
+photographs rather than CIFAR's canonical 32×32 benchmark images, which
+may interact differently with a fixed per-pixel angle encoding; or B1
+alone (without also transferring ARO's much larger training signal, as
+experiment 17's warm start did for the text tower) isn't sufficient for
+SVO specifically. This does not undercut the CIFAR-10 finding — it narrows
+what "the fix" actually means: B1 measurably fixes the *tower's
+CIFAR-10-classification capacity*, and that is not automatically the
+same thing as fixing SVO-Probes.
+
+**Job 9 (ARO+B1) still running** (100-epoch budget, ~7 min/epoch, at
+epoch 27/100 as of this entry). Val `hard_neg_acc` is plateauing around
+0.67-0.68 (best so far: epoch 22, 0.6832) — closely matching the
+non-B1 ARO result (0.678, job 7428516) rather than showing an obvious
+aggregate improvement. **This aggregate number is not the decisive
+measurement** — per the batch plan, row 11 (`image_ablation.py` on this
+checkpoint, once trained) is what actually answers whether B1 broke
+ARO's image-invariance; a similar aggregate accuracy with the image
+tower finally contributing rather than being ignored is a completely
+different (and more interesting) result than a similar aggregate
+accuracy for the same reason as before. Will check once job 9 finishes
+and run row 11 immediately after.
