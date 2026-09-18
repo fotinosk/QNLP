@@ -943,7 +943,7 @@ as job **7431935**.
 | 4 | A1+B1+dropout=0 | 0.5130 | -0.004 |
 | 5 | A1+B1+mean-centre | 0.5127 | -0.004 |
 | 6 | A1+B1+pos_scale=0 | 0.5191 | +0.002 |
-| 7 | A1+B1+per-pixel leaves | *(crashed; relaunched as 7431935)* | — |
+| 7 | A1+B1+per-pixel leaves (job 7431935, after the gains-list fix) | 0.3713 | -0.146 |
 | 8a | A1+B1, cp_rank=64 | 0.5328 | +0.016 |
 | 8b | A1+B1, cp_rank=128 | 0.5420 | +0.025 |
 
@@ -978,12 +978,27 @@ be the deliverable:**
    is consistent with capacity being a real, secondary constraint on top
    of the embedding fix. Not dramatic, but real and monotonic across two
    independent steps.
-4. **The picture in one line:** of the five Stage A/B levers tested
-   (A1, A2, A4, A5, plus B1 itself), exactly two do anything —
-   B1 (the whole game) and A1 (a real, secondary +0.047) — and the
-   other three (A2, A4, A5) are confirmed noise, now on the *training*
-   metric rather than the degenerate trace. `cp_rank` (Stage C2) adds a
-   further small, monotonic increment on top.
+4. **B2 (per-pixel leaves) is a real regression, not a neutral variant.**
+   Row 7 (job 7431935, after fixing the `gains`-list crash): **0.3713**,
+   *below* row 1's 2×2-patch result (0.5168) by 0.146 — the single
+   largest negative delta in the grid, and barely above the logreg floor
+   (0.3784, i.e. essentially tied with or slightly below it). Despite
+   being "the most literature-faithful configuration" per the original
+   Stage B2 write-up, going to single-pixel leaves (1024 leaves, depth 5,
+   9.18M params — the largest model in the grid) performs *worse* than
+   2×2 patches with 6x fewer parameters. Plausible reason: patch_size=1
+   discards all intra-patch spatial pooling and instead asks a much
+   deeper tree (5 layers vs. 4) to recover that structure combinatorially,
+   which the still-untrained-at-init evidence throughout this document
+   suggests this architecture does poorly at scale. Not a settled
+   explanation — worth a targeted look if B2 is revisited, but the data
+   says don't adopt it as-is.
+5. **The picture in one line:** of the six Stage A/B levers tested
+   (A1, A2, A4, A5, B2, plus B1 itself), exactly two help — B1 (the
+   whole game) and A1 (a real, secondary +0.047) — three are confirmed
+   noise (A2, A4, A5), and one (B2) is a real regression despite being
+   the more literature-faithful choice. `cp_rank` (Stage C2) adds a
+   further small, monotonic increment on top of B1+A1.
 
 ### Wave 1B — transfer track
 
@@ -1005,15 +1020,47 @@ what "the fix" actually means: B1 measurably fixes the *tower's
 CIFAR-10-classification capacity*, and that is not automatically the
 same thing as fixing SVO-Probes.
 
-**Job 9 (ARO+B1) still running** (100-epoch budget, ~7 min/epoch, at
-epoch 27/100 as of this entry). Val `hard_neg_acc` is plateauing around
-0.67-0.68 (best so far: epoch 22, 0.6832) — closely matching the
-non-B1 ARO result (0.678, job 7428516) rather than showing an obvious
-aggregate improvement. **This aggregate number is not the decisive
-measurement** — per the batch plan, row 11 (`image_ablation.py` on this
-checkpoint, once trained) is what actually answers whether B1 broke
-ARO's image-invariance; a similar aggregate accuracy with the image
-tower finally contributing rather than being ignored is a completely
-different (and more interesting) result than a similar aggregate
-accuracy for the same reason as before. Will check once job 9 finishes
-and run row 11 immediately after.
+**Job 9 (ARO+B1) finished** — early-stopped at epoch 32 (best epoch 22,
+patience 10). Final ARO test: attribution 0.7582, relation 0.6038,
+overall 0.6886 — essentially identical to the non-B1 result (0.7573 /
+0.6036 / 0.6879, job 7428516), within noise on every figure.
+
+**Row 11 (`image_ablation.py` on this checkpoint) — decisive, and it's a
+clean negative.** Real/shuffled/zeroed images give **identical** accuracy
+(0.7129, all three variants) and pairwise cosine between different
+images' embeddings is **1.0000** (min 0.9999, std 0.0000) — the image
+tower is *still fully collapsed*, if anything more completely than the
+pre-B1 checkpoint (0.93-0.998, `image_pairwise_cos_mean`). **B1 does not
+fix ARO's image-invariance.** This resolves the question the whole Wave
+1B/row-11 exercise was built to answer, and the answer is unambiguous:
+ARO's collapse and CIFAR-10's chance-level classification were never the
+same failure. CIFAR-10's failure was a genuinely bad *representation* (a
+degenerate rank-1 patch embedding destroying class structure before the
+tree even runs, per the structure trace) — B1 fixes that, and the
+CIFAR-10 numbers prove it. ARO's failure is an *objective* problem: the
+triplet loss's caption-side hard negative is fully satisfiable with a
+constant image embedding (the mechanism already diagrammed in "The
+mechanism: `triplet_weight` deletes the only anti-collapse term," earlier
+in this document), so training finds and keeps that degenerate solution
+regardless of whether the tower *could* represent images well. **A better
+tower cannot fix a loss that doesn't need one.** SVO's job 10 negative
+result is now explicable by the same logic: SVO-Probes' loss does require
+the image (both candidates share a caption), which is exactly why it
+was expected to benefit from B1 differently than ARO — but it didn't
+improve either, meaning SVO's chance-level result has a separate, still
+unexplained cause (data scale, image quality, or something else not yet
+isolated) distinct from ARO's collapse mechanism.
+
+**Batch verdict:** the CIFAR-10 capacity question this document was
+scoped to answer is closed — B1 (+A1, +cp_rank) demonstrably fixes the
+tower's ability to learn from real images, taking it from below chance
+to within striking distance of a from-scratch ResNet-18. That fix does
+not, on its own, transfer to either downstream VLM task tested here, for
+two different and now well-understood reasons (ARO: objective permits
+collapse regardless of tower quality; SVO: still unexplained, worth its
+own investigation rather than being folded into this one). The natural
+next step for the *VLM* work is fixing ARO's objective (e.g. lowering
+`triplet_weight` enough that InfoNCE's anti-collapse pressure survives,
+now that there's a tower worth preserving) rather than further CIFAR-10
+tuning — but that is a new investigation, not a continuation of this
+document's scope.
