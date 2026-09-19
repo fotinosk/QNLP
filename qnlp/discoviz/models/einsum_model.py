@@ -290,13 +290,21 @@ class EinsumModel(nn.Module):
         findings). For a single-piece word (e.g. a bare noun) this is just
         its raw parameter tensor. Route A's subject/object vectors use this
         directly; the verb uses `get_verb_chain` instead (see its docstring
-        for why). Returns None if `word` isn't in `symbols`."""
+        for why). Returns None if `word` isn't in `symbols`, OR if its chain
+        pieces don't sequentially bond-contract (observed on real SVO-Probes
+        data: some object words resolve to a multi-piece chain whose pieces
+        don't share a common bond-leg size — e.g. a modified noun phrase
+        parsed with a different internal structure than a bare noun's usual
+        single piece. Treated the same as an unresolved role rather than
+        crashing training on a shape mismatch)."""
         pieces = self._get_chain_pieces(word, symbols)
         if pieces is None:
             return None
         tensors = [self.sym2weight[sym] for sym in pieces]
         result = tensors[0]
         for t in tensors[1:]:
+            if result.shape[-1] != t.shape[0]:
+                return None
             result = torch.tensordot(result, t, dims=1)
         return result
 
@@ -313,6 +321,21 @@ class EinsumModel(nn.Module):
         if pieces is None:
             return None
         return [self.sym2weight[sym] for sym in pieces]
+
+    @staticmethod
+    def _is_valid_verb_chain(chain: List[torch.Tensor] | None) -> bool:
+        """v1 scope check: exactly the mainline 3-piece transitive-verb shape
+        RoleGroundedScoreHead expects — left [n_r, bond], mid [bond, s, bond],
+        right [bond, n_l], with matching bond legs. Guards against real data
+        producing an unusual chain shape (see `get_role_tensor`'s docstring
+        for the sibling case that motivated this) crashing the score head
+        instead of being treated as an unresolved role."""
+        if chain is None or len(chain) != 3:
+            return False
+        left, mid, right = chain
+        if left.ndim != 2 or mid.ndim != 3 or right.ndim != 2:
+            return False
+        return left.shape[-1] == mid.shape[0] and mid.shape[-1] == right.shape[0]
 
     def forward_roles(
         self, symbols_batch: List[List[Symbol]], roles_batch: List[tuple[str, str, str]]
@@ -338,7 +361,7 @@ class EinsumModel(nn.Module):
             s = self.get_role_tensor(subj_w, symbols)
             o = self.get_role_tensor(obj_w, symbols)
             v_chain = self.get_verb_chain(verb_w, symbols)
-            ok = s is not None and o is not None and v_chain is not None and len(v_chain) == 3
+            ok = s is not None and o is not None and self._is_valid_verb_chain(v_chain)
             subj_list.append(s if ok else None)
             obj_list.append(o if ok else None)
             verb_chains.append(v_chain if ok else None)
