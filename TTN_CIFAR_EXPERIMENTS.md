@@ -2480,3 +2480,49 @@ source is common across configurations (likely the text tower / training
 setup): interventions that globally reduce overfitting pressure help
 regardless of where they're applied, while interventions that only change
 *how* the (already-overfit-prone) representations get compared do not.
+
+## Batch complete — V1 result and final summary (2026-09-19)
+
+**V1 (gated residual trilinear, full-capacity from-scratch tower):
+SVO-Probes overall 0.5273** (obj_neg 0.5505, subj_neg 0.4722, verb_neg
+0.5348) — below the 0.5323 baseline. Gate settled at 0.0128, still
+essentially inert. Fails, joining B1/V2/V3.
+
+### Full batch, final
+
+| config | mechanism | image tower | SVO-Probes | vs. 0.5323 |
+|---|---|---|---|---|
+| B1 | trilinear | from-scratch, full capacity | 0.5168 | fail |
+| V1 | + gated cosine residual | from-scratch, full capacity | 0.5273 | fail |
+| V2 | Born-rule (permutation-invariant) | from-scratch, full capacity | 0.5269 | fail |
+| V3 | max-aggregation | from-scratch, full capacity | 0.5052 | fail |
+| **V4** | trilinear, capacity-reduced (rank=8, tied, normalised, weight decay) | from-scratch, full capacity | **0.5439** | **pass** |
+| **F1** | trilinear-gated | **frozen**, CIFAR-pretrained | **0.5356** | **pass** |
+| **F2** | trilinear-gated | **warm-started**, CIFAR-pretrained | **0.5475** (best) | **pass** |
+
+**The split is exactly along one axis, cleanly, across all seven runs.**
+Every configuration that changed *only* the comparison function while
+keeping a full-capacity, from-scratch image tower (B1, V1, V2, V3) failed
+— including the two variations specifically designed to fix B1's
+diagnosed region-index memorisation (V2, V3), which is itself informative:
+the memorisation wasn't really about *which* comparison function was
+used. Every configuration that reduced capacity (V4) or improved
+initialisation (F1, F2) — regardless of scoring function, since F1/F2
+still used the trilinear-gated head — passed. F2 > F1 > V4 > baseline,
+with F2 (warm-started, unfrozen, best init AND full trainability) the
+clear winner.
+
+**Conclusion for what to try next:** stop iterating on scoring-head
+architecture (Routes A and B's original premise) and instead pursue the
+capacity/initialisation axis directly:
+- Apply the CIFAR-pretrained warm-start (F2's recipe) to the plain cosine
+  head, isolating whether the score head contributes anything at all
+  once the real lever (image tower init) is controlled for.
+- Investigate the text tower (17.7M params, unfrozen and identical
+  across every run in this batch) as the likely dominant memorisation
+  source per the earlier cross-cutting finding — a text-side capacity
+  reduction or pretraining analogous to F1/F2 is the natural next
+  experiment, not another image-region scoring variant.
+- Sweep V4's capacity-reduction knobs further (smaller `rank`, stronger
+  weight decay) now that it's confirmed to be a working, independent
+  lever.
