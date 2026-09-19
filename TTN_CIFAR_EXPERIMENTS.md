@@ -2377,3 +2377,40 @@ Finished: SVO-Probes overall **0.5269** (obj_neg 0.5277, subj_neg 0.5010,
 verb_neg 0.5342) — below the 0.5323 baseline, though closer than B1
 (0.5168). A modest improvement over the plain trilinear head, consistent
 with removing the region-index memorisation surface, but not yet a pass.
+
+### V3 (max-aggregation) result
+
+Finished: SVO-Probes overall **0.5052** (obj_neg 0.5065, subj_neg 0.4557,
+verb_neg 0.5192) — near chance, worse than V2, no better than B1.
+
+### The overfitting pattern is universal across every configuration tested today — new central finding
+
+With V1/V4/F1/F2 all mid-run, the same signature appears in **every
+single one**, without exception, alongside B1/V2/V3 above:
+
+| config | train `hard_neg_acc` (~epoch 10-24) | val `hard_neg_acc` |
+|---|---|---|
+| B1 (plain trilinear) | 0.92 | 0.51-0.52 |
+| V1 (gated residual) | 0.98 | 0.53-0.55 |
+| V2 (Born-rule) | (finished, see above) | — |
+| V3 (max-agg) | (finished, see above) | — |
+| V4 (capacity-reduced, rank=8) | 0.95 | 0.51-0.53 |
+| F1 (image tower **frozen**, 0 trainable image params) | 0.93 | 0.51-0.53 |
+| F2 (image tower warm-started, trainable) | 0.92 | 0.52-0.55 |
+
+**F1 is the decisive data point.** With the image tower completely frozen
+— pretrained on real CIFAR-10 data, zero trainable image-side parameters
+— train accuracy still climbs to 0.93 while val stays at chance. This
+directly falsifies the "most memorisation capacity is in the image
+backbone" hypothesis that motivated F1/F2 in the first place. Combined
+with F2 showing the identical pattern with the tower *un*frozen, and
+every scoring-head variant (cosine through five structurally different
+alternatives) showing it too, the conclusion is now hard to avoid:
+**the overfitting source is common to all these configurations, not
+particular to any image-side design choice.** The remaining candidates
+are the text tower (17.7M params, unfrozen and identical across every
+run above) and the training setup itself (`triplet_weight=100` pushing
+hard-negative separation aggressively against a training set — 8,609
+rows — small relative to that parameter count). Neither has been
+isolated yet; that is the next thing to test, not another scoring-head
+variant.
