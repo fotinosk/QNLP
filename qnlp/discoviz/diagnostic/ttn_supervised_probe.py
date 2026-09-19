@@ -276,10 +276,15 @@ def train_and_eval(
         t0 = time.time()
         train_loss, train_acc = _run_epoch(model, train_loader, optimizer, device, train=True)
         val_loss, val_acc = _run_epoch(model, val_loader, optimizer, device, train=False)
+        gate_str = ""
+        if arch == "ttn" and hasattr(model.backbone, "nonlinear_gates"):
+            gates = model.backbone.nonlinear_gates()
+            if gates is not None:
+                gate_str = " gates=[" + ", ".join(f"{g:.4f}" for g in gates) + "]"
         logger.info(
             f"[{arch}] epoch {epoch:02d} ({time.time() - t0:.1f}s) "
             f"train_loss={train_loss:.4f} train_acc={train_acc:.4f} "
-            f"val_loss={val_loss:.4f} val_acc={val_acc:.4f}"
+            f"val_loss={val_loss:.4f} val_acc={val_acc:.4f}{gate_str}"
         )
         if val_acc > best_val_acc:
             best_val_acc = val_acc

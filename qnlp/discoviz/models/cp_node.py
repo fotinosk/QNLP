@@ -17,6 +17,7 @@ class CPQuadRankLayer(nn.Module):
         use_residual=True,
         gain_factor=1.0,
         use_isometric_init=True,
+        nonlinearity="none",
     ):
         super().__init__()
         self.num_nodes = num_nodes
@@ -24,6 +25,15 @@ class CPQuadRankLayer(nn.Module):
         self.dropout_p = dropout_p
         self.use_residual = use_residual
         self.use_isometric_init = use_isometric_init
+        # TTN_CIFAR_EXPERIMENTS.md Route N: measures what the multilinear
+        # constraint costs, mirroring the text tower's NLC exactly. gate
+        # inits at EXACTLY 0.0 (not text tower's 0.1-floor-clamped variant)
+        # so the model is bit-for-bit today's multilinear one at init --
+        # the gate's learned trajectory IS the measurement of how much
+        # non-linearity this task demands.
+        self.nonlinearity = nonlinearity
+        if nonlinearity != "none":
+            self.gate = nn.Parameter(torch.zeros(1))
 
         # Factor weights: [Nodes, Rank, Input_Dim]
         self.factor_tl = nn.Parameter(torch.empty(num_nodes, rank, in_dim))
@@ -91,6 +101,14 @@ class CPQuadRankLayer(nn.Module):
             merged = nn.functional.dropout(merged, p=self.dropout_p)
 
         out = torch.einsum("bnr, nro -> bno", merged, self.factor_out)
+
+        # 4b. Route N: gated non-linearity, applied before the residual add
+        # (mirrors the text tower's NLC placement). At gate=0 this is exactly
+        # a no-op regardless of which _f is selected.
+        if self.nonlinearity == "born":
+            out = out + self.gate * (out * out)
+        elif self.nonlinearity == "gelu":
+            out = out + self.gate * nn.functional.gelu(out)
 
         # 5. Residual (Optional for early layers)
         if self.use_residual:

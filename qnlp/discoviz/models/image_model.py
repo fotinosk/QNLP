@@ -57,6 +57,13 @@ class ImageModelSettings(BaseSettings):
     # so this closes the one part of the model that was still weight-tied
     # across space. See TTN_CIFAR_EXPERIMENTS.md's "Plan forward".
     use_per_patch_embedding: bool = False
+    # Route N (default "none"): gated non-linearity per quadtree layer,
+    # mirroring the text tower's NLC. "born" = x + gate*x^2 (the real-valued
+    # analogue of the Born rule, the principled quantum-inspired choice);
+    # "gelu" = x + gate*GELU(x) (an upper bound on what any non-linearity
+    # buys). gate inits at exactly 0.0 per layer, so this is a measurement,
+    # not a capitulation -- at gate=0 the model is bit-for-bit unchanged.
+    nonlinearity: str = "none"
 
 
 image_model_hyperparams = ImageModelSettings()
@@ -154,6 +161,7 @@ class TTNImageModel(nn.Module):
                     use_residual=use_res,
                     gain_factor=gain,
                     use_isometric_init=image_model_hyperparams.use_isometric_init,
+                    nonlinearity=image_model_hyperparams.nonlinearity,
                 )
             )
             current_nodes //= 4
@@ -161,6 +169,14 @@ class TTNImageModel(nn.Module):
 
         self.final_norm = nn.LayerNorm(in_dim)
         self.head = nn.Linear(in_dim, self.embedding_dim)
+
+    def nonlinear_gates(self) -> list[float] | None:
+        """Route N: per-layer gate values, for logging their trajectory
+        during training (the headline figure for this route). None if
+        nonlinearity="none"."""
+        if image_model_hyperparams.nonlinearity == "none":
+            return None
+        return [layer.gate.item() for layer in self.layers]
 
     def forward(self, x, normalize: bool = True):
         # normalize=False exposes the pre-L2-norm head output. Contrastive
