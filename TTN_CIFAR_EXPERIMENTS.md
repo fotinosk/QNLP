@@ -2054,3 +2054,39 @@ Baseline per the plan: A1+B1+cp_rank=128+triplet_weight=100,
 |---|---|---|
 | B1 | `trilinear` | beat 0.5323 Probes **and** widen the 5.9pt real-vs-shuffled-caption ablation gap |
 | A1 | `role_grounded` | same |
+
+Route A's first launch (job 7432895) crashed at epoch 0: an object word's
+MPS chain had pieces with incompatible bond dimensions, and
+`get_role_tensor`'s generic sequential-tensordot fold raised instead of
+treating it as an unresolved role. Fixed by validating shape
+compatibility before each fold (returns `None` instead of crashing) and
+tightening `forward_roles`'s verb-chain validity check to the exact
+mainline 3-piece shape `RoleGroundedScoreHead` expects. Relaunched as job
+7432897.
+
+### B1 result — a clean negative, same failure mode as T1/T2
+
+Job 7432894 finished (early-stopped). **SVO-Probes overall: 0.5168**
+(subj_neg 0.5093, verb_neg 0.5198, obj_neg 0.5147) — at chance, below the
+0.5323 cosine baseline it needed to beat. SVO-Swap: unavailable (the known
+`evaluate_sugarcrepe` gap for non-cosine heads).
+
+Train `hard_neg_acc` climbed steadily and cleanly: 0.57 (epoch 2) → 0.92
+(epoch 11), while val `hard_neg_acc` stayed flat at 0.51–0.52 the entire
+run. This is the **same checkpoint-selection-gap pattern already
+documented for Track 1** (T1a-c): the model can clearly fit the specific
+triplets it's trained on (train signal is real and monotonic), but that
+fit does not generalise to held-out pairs at all. Route B's structured
+scoring did not fix the generalisation gap — it reproduced it. The
+region-level comparison gives the model more free parameters to
+memorise training triplets with, not more of the right kind of
+structure.
+
+### A1 in progress — no train signal yet, unlike B1
+
+As of epoch 15, `hard_neg_acc` oscillates at chance (0.44–0.55) on
+**both** train and val, and `pos_score_mean`/`neg_score_mean` stay near
+zero (~0.001) with no separating trend — unlike B1, which at least showed
+strong (if non-generalising) train-side discrimination by this point.
+Watching for whether this changes with more epochs before drawing a
+conclusion.
