@@ -1409,9 +1409,46 @@ the caption-side one, a real trade-off rather than a free win, consistent
 with `triplet_weight` trading off which side of the hard-negative
 decision the model prioritises.
 
-**Not yet run: `image_ablation.py --task svo` on this checkpoint** (the
-SVO-side analogue of T2, checking whether the image tower's contribution
-to the *decision* — not just its ability to vary — improved). Given T2's
-ARO finding (tower varies, decision still doesn't track it), this is
-worth checking rather than assuming SVO-Probes' accuracy gain reflects
-genuine image use.
+**`image_ablation.py --task svo` on this checkpoint — a genuinely
+different result from ARO's.** SVO's ablation is the mirror of ARO's
+(caption fixed, images vary, so the corrupting variant swaps in a *wrong*
+caption rather than a wrong image — see the script's docstring): if
+accuracy holds up under a wrong caption, the model is choosing an image
+independent of what the caption actually says.
+
+| variant | N | hard_neg_acc |
+|---|---|---|
+| real (correct caption) | 1024 | **0.5234** |
+| shuffled_caption (wrong caption) | 1024 | 0.4648 |
+
+Image embeddings: pairwise cosine between different images mean **0.0106**
+(std 0.24, min -0.66) — genuinely diverse, not collapsed, consistent with
+B1's known effect on SVO's image tower.
+
+**This is categorically different from ARO's ablation result.** ARO's
+real/shuffled/zeroed variants were statistically identical (differences
+<0.004, pure noise). Here, real vs. shuffled-caption differ by **5.9
+points** — a real, if modest, signal that the model's true/false-image
+choice does shift when the caption is wrong, i.e. the decision is not
+purely image-identity-driven independent of caption content. **Caveat on
+magnitude, not direction:** both numbers are close to chance (0.52 real,
+0.46 shuffled — the "real" condition itself is barely above 0.50), so
+this is weak evidence of a real coupling, not strong evidence of a well-
+functioning caption-image mechanism. But weak-and-real is a different
+finding than ARO's zero-and-flat, and is the first time in this entire
+project that an SVO checkpoint has shown *any* measurable
+caption-conditioning of the image-side decision.
+
+**Track 1/S1 combined verdict:** the same recipe (A1+B1+cp_rank=128,
+triplet_weight=100) produces two different partial successes and one
+clear miss, depending on which side of the hard-negative structure the
+task needs: ARO (caption-side hard negative) still shows zero
+image-decision coupling despite the tower now varying; SVO (image-side
+hard negative) shows the first non-zero, if weak, caption-decision
+coupling recorded in this project, alongside a real accuracy gain on its
+own pre-committed metric and a real regression on SVO-Swap. Neither
+result is a finished success — both point toward the same open question
+this document has now surfaced twice: **varying embeddings are necessary
+but not sufficient; something about how the loss couples the two
+modalities' decisions still needs a more direct fix than tuning
+`triplet_weight`.**
