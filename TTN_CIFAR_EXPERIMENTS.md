@@ -1283,12 +1283,135 @@ document's own earlier diagnosis (ARO's task structure, not merely the
 loss weighting, permits a constant-image solution) — if true, no
 `triplet_weight` value fixes this, and Track 1 needs a structurally
 different intervention (e.g. an explicit anti-collapse term independent
-of triplet_weight, not just detuning it). **Not yet concluded** — T1c
-(triplet_weight=100, running) and the full trajectories of T1a/T1b
-(checking whether collapse is truly permanent or partially reversible
-later in training) are needed before treating this as settled. Log
-`image_pairwise_cos_mean`'s full trajectory, not just early epochs, before
-drawing a final conclusion — a metric that spikes early but recovers
-would tell a different story than one that stays at 1.0 throughout.
+of triplet_weight, not just detuning it).
 
-**S1 (SVO) still loading data as of this entry.**
+## Track 1 concluded — full trajectories, T2 ablation, and S1 (2026-09-19)
+
+All three T1 jobs ran to early stopping overnight; T2 (`image_ablation.py`
+on each checkpoint) and S1 (SVO) are also complete. This closes Track 1.
+
+### The trajectories tell a different story than the early epochs did
+
+All three jobs show the *same* two-phase pattern: rapid collapse to
+~0.99-1.0 within 2-3 epochs (as the early-epoch table above already
+showed), **followed by a slow, continuous de-collapse for the rest of
+training** — and the de-collapse rate is inversely related to
+`triplet_weight`, exactly as the "weaker triplet term, more room for
+InfoNCE's anti-collapse pressure" hypothesis predicts:
+
+| job | triplet_weight | peak `image_pairwise_cos_mean` | last epoch's value | epoch stopped |
+|---|---|---|---|---|
+| T1a | 1 | 0.9997 (ep. 3) | **0.704** (ep. 23) | 23 (early-stopped) |
+| T1b | 10 | 0.9976 (ep. 4) | **0.804** (ep. 27) | 27 (early-stopped) |
+| T1c | 100 | 0.9999 (ep. 12-18) | **0.977** (ep. 42) | 42 (early-stopped) |
+
+So reading 1 above was too pessimistic as stated: the tower is *not*
+stuck at collapse regardless of weight — lower `triplet_weight` does let
+it escape further, monotonically, exactly matching the weight ordering.
+
+### But checkpoint selection hides this: a real methodological gap
+
+`Trainer` selects the best checkpoint by `hard_neg_acc` alone, which is
+insensitive to collapse — a collapsed model gets identical accuracy to a
+partially de-collapsed one on this metric (both readings on validation
+have been hovering at 0.67-0.69 the entire time in all three runs,
+regardless of the collapse trajectory). Consequently **the actual
+selected checkpoints are far earlier and more collapsed than the
+trajectories above suggest**:
+
+| job | best epoch (of 100 max) | selected checkpoint's `image_pairwise_cos_mean` | ARO overall (this checkpoint) |
+|---|---|---|---|
+| T1a (tw=1) | 13 | 0.885 | 0.6630 |
+| T1b (tw=10) | 17 | 0.884 | 0.6892 |
+| T1c (tw=100) | 32 | 0.990 | 0.6907 |
+
+T1a and T1b's *selected* checkpoints are nearly identical in collapse
+(0.885 vs 0.884) despite T1a's full trajectory eventually reaching much
+further de-collapse (0.704) than T1b's would have at the same epoch —
+the monitor metric simply doesn't reward the thing this experiment cares
+about. **This is a real gap worth fixing before any future Track 1 run**:
+either monitor `image_pairwise_cos_mean` directly (e.g. minimize it, or a
+combined criterion), or report results from a fixed late epoch rather
+than "best by accuracy."
+
+### T2 — the decisive test, run despite the checkpoint-selection caveat
+
+`image_ablation.py` on all three *selected* checkpoints (with
+`IMAGE_MODEL_CP_RANK=128` — the ablation script infers `embedding_dim`
+from the checkpoint but not `cp_rank`, a small gap worth fixing in that
+script too):
+
+| job | pairwise cos (different images) | real | shuffled | zeros |
+|---|---|---|---|---|
+| T1a (tw=1) | 0.878 (min 0.341, std 0.100) | 0.6699 | 0.6523 | 0.6660 |
+| T1b (tw=10) | 0.873 (min 0.380, std 0.099) | 0.6875 | 0.6836 | 0.6875 |
+| T1c (tw=100) | 0.989 (min 0.848, std 0.015) | 0.7031 | 0.7070 | 0.7090 |
+
+**This is the answer, and it's still a clean negative — but a more
+interesting one than before.** T1a's images have genuinely, measurably
+stopped being identical (pairwise cosine spread from std 0.0 to 0.100,
+min down to 0.34 — a real, substantial de-collapse at the embedding
+level). **But real/shuffled/zeroed accuracy remain statistically
+indistinguishable at every triplet_weight tested** (T1c's zeros variant
+is even nominally *higher* than real, well within noise). The image
+tower is no longer emitting a literally-constant vector, but the
+caption-vs-image decision still does not depend on which image — real,
+a randomly wrong one, or none at all — is shown.
+
+**This sharpens rather than resolves the diagnosis.** "The tower has
+collapsed to a constant vector" and "the loss doesn't need the image"
+are not the same failure, and this batch separates them for the first
+time: T1a shows the *first* is fixable (lower `triplet_weight`, patience
+for slow de-collapse), but the *second* persists even after the first is
+fixed. The caption embeddings and the (now genuinely varying) image
+embeddings are simply not coupled in a way that makes the classification
+decision track the image. This is consistent with — and sharpens —
+reading 1's original framing: it was never really about whether the
+*tower* can vary its output (it plainly can, once collapse is escaped);
+it's that ARO's training signal never asks the *decision* to depend on
+that variation, because both InfoNCE and the triplet term are satisfiable
+by making the *caption* embeddings alone separate true from false
+relative to whatever fixed-ish direction the image lands near — image
+variation can appear without ever being read out. **No `triplet_weight`
+value tested fixes this**, because the mechanism isn't (purely) about
+that weight — Track 1's original hypothesis is falsified, or at least
+insufficient on its own.
+
+**Track 1 verdict: closed, negative, but genuinely informative.** The
+image tower's ability to vary is not the bottleneck for ARO (B1 fixed
+that, this batch confirms the fix generalises to letting the tower
+partially escape induced collapse too). What's missing is a mechanism
+that makes the *task's decision* actually depend on that variation —
+something closer to an explicit term that penalises exactly the failure
+mode seen here (accuracy invariant to image identity), not merely a
+softer version of the existing triplet term.
+
+### S1 (SVO) — a genuine, if modest, positive result, alongside a genuine regression
+
+Config: A1+B1+cp_rank=128+triplet_weight=100 (the same recipe as T1c,
+applied to SVO).
+
+| metric | S1 (this run) | job 10 (B1 only, tw=40000) | pre-committed criterion |
+|---|---|---|---|
+| SVO-Probes overall | **0.5323** (obj 0.5879 / subj 0.4990 / verb 0.5216) | 0.5157 | beat 0.5157 — **passed** |
+| SVO-Swap | 0.4762 | 0.5524 | — (not the pre-committed metric) |
+
+**SVO-Probes cleared its pre-committed bar** — a genuine, if modest
+(+0.017), improvement over job 10, and the best SVO-Probes result to
+date across the entire project (previous best: experiment 14's 0.5305).
+Consistent with the same mechanism as T1a-c: lowering `triplet_weight`
+from B1-only's default (40000) to 100 plausibly let SVO's image tower
+partially escape whatever collapse-adjacent state it was in under job
+10's config too, even though SVO's task (unlike ARO's) genuinely needs
+image variation to solve at all. **SVO-Swap regressed** (0.5524 → 0.4762)
+— the same triplet_weight change that helped the image-side task hurt
+the caption-side one, a real trade-off rather than a free win, consistent
+with `triplet_weight` trading off which side of the hard-negative
+decision the model prioritises.
+
+**Not yet run: `image_ablation.py --task svo` on this checkpoint** (the
+SVO-side analogue of T2, checking whether the image tower's contribution
+to the *decision* — not just its ability to vary — improved). Given T2's
+ARO finding (tower varies, decision still doesn't track it), this is
+worth checking rather than assuming SVO-Probes' accuracy gain reflects
+genuine image use.
