@@ -1756,6 +1756,77 @@ Decision pending: whether to invest in that redesign, or let Route B
 absorb the priority Route A was slated for. **Not decided as of this
 entry — discussion ongoing, no Route A/B/P1 code written yet.**
 
+### Follow-up experiment — is the split fixable via the ansatz/parser? Yes, but at a real cost
+
+Two direct questions raised: can `max_order` (the CCG-to-tensor ansatz's
+own splitting parameter, not a CCG grammar rule) be changed to get a
+literal dense verb tensor, and is `UnifyEinsumRankStep` actually needed
+for SVO? Both tested empirically, no pipeline code changed.
+
+**The split is controlled by `CustomMPSAnsatz`'s `max_order` parameter
+(`qnlp/discoviz/parser/asnsatz.py`), currently hardcoded to 3 in
+`compiler_step.py`'s `_worker_init`.** It is `lambeq`'s
+`SplitTensorAnsatz`: any box with more than 1 total wire gets factored
+into a chain of pieces, each carrying at most `max_order - 2` "real"
+wires plus bond legs on either side. At `max_order=3`, that chunk size
+is 1 — every multi-wire box, no exceptions, gets maximally split. A
+transitive verb (3 wires: subject, sentence, object) needs
+`max_order >= 5` to survive as one piece (chunk size 3 = the whole
+`cod`, so the loop runs once and both bond legs get stripped off the
+single resulting box).
+
+**Verified directly** (`BobcatTextProcessor` + `CustomMPSAnsatz`, "a dog
+hold a ball"):
+
+| `max_order` | `hold`'s symbol(s) | shape(s) | total params |
+|---|---|---|---|
+| 3 (current) | `hold_0__n.r@B`, `hold_1__B.r@s@B`, `hold_2__B.r@n.l` | (512,10), (10,512,10), (10,512) | 61,440 |
+| 5 | `hold_0__n.r@s@n.l` | **(512, 512, 512)** | **134,217,728** |
+
+`max_order=5` genuinely produces a single dense rank-3 tensor with
+subject/sentence/object legs — exactly what Route A's original design
+assumed existed. **The cost is a ~2,185x parameter increase per
+transitive-verb symbol.** With embedding_dim=512 and SVO's ~8,600-row
+training set (likely a few examples per distinct verb at most, spread
+across hundreds of verbs), fitting 134M parameters per verb from scratch
+is not viable — this would need either a much smaller embedding_dim for
+verb legs specifically, or accepting severe per-verb overfitting. It
+also requires recompiling the entire SVO/ARO/COCO CCG cache (LMDB), a
+real one-time cost, not a config flip at train time.
+
+**Practical alternative, no pipeline changes needed:** the current
+`bond_dim=10` factorization is a valid low-rank (rank ≤10) decomposition
+of the same rank-3 tensor `max_order=5` would materialise densely.
+Route A's originally-planned "contract the symbol chain along its bond
+legs" approach reconstructs an effective `M(v)` at zero extra parameter
+or recompilation cost — it's rank-limited to `bond_dim`, but that's the
+same kind of capacity trade-off already accepted elsewhere in this
+project (the image tower's `cp_rank`). A middle path also worth
+considering later: sweep `bond_dim` itself (not `max_order`) upward —
+32/64 rather than 10 — for a higher-rank factored approximation without
+`max_order`'s combinatorial blowup, mirroring the image tower's `cp_rank`
+sweep (32→64→128→256, small monotonic gains). **Recommendation: keep
+`max_order=3` and implement Route A's contraction against the existing
+factored chain; treat `bond_dim` (not `max_order`) as the capacity knob
+if the rank-10 reconstruction proves insufficient.**
+
+**`UnifyEinsumRankStep` — not dead code, but rarely fires on real
+captions.** Tested the full pipeline (tokenize → lemmatize → parse →
+rewrite → ansatz) on 15 real, LLM-corrected SVO captions sampled from
+the corpus plus a handful of hand-picked realistic SVO/prepositional
+sentences (22 total): **every one already produced a rank-1 diagram
+output** before `UnifyEinsumRankStep` would need to truncate anything —
+consistent with `LemmatizeStep`'s stated purpose (forcing sentences into
+a finite, `S`-typed form) already doing this job on well-formed input.
+But a deliberately fragmentary input (`"Running."`, no subject) produced
+a genuine 2-wire output — confirming the step is a real, if rare, safety
+net for malformed/fragment captions, not inert. **Recommendation: don't
+remove it outright** — a corpus-scale check (what fraction of the actual
+~36,841-row manifest triggers it) would be needed to state a precise
+rate, but the fragment test shows it's not a no-op, and removing it
+would convert a graceful truncation into a hard downstream shape error
+on whatever fraction of rows (however small) still need it.
+
 ## Parallel batch and dependencies
 
 ```
