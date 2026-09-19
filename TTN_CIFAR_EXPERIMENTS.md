@@ -2438,3 +2438,45 @@ image-side) while also showing the image tower's *quality*, not just its
 capacity, matters. Wait for F2 (warm-started, unfrozen) before concluding
 whether freezing specifically was necessary, or whether any warm start
 would have done as well.
+
+## F2 and V4 both pass too — the pattern is capacity/init, not scoring architecture (2026-09-19)
+
+**F2 (warm-started, *unfrozen*): SVO-Probes overall 0.5475** (obj_neg
+0.5521, subj_neg 0.5113, verb_neg 0.5564) — the best result in the entire
+batch, beating even F1 (0.5356). Gate again settled near zero (-0.0038).
+**F2 beating F1 answers the freeze-vs-warm-start question directly:
+freezing was not necessary, and was if anything slightly worse than
+leaving the tower trainable.** The pretrained tower's *initialisation*
+is the transferable asset, not a need to protect it from further
+training. This further confirms the corpus-wide finding: reduced image
+capacity does not help; a better starting point does.
+
+**V4 (capacity-reduced trilinear: rank=8, tied u=v, normalised terms,
+higher head weight decay, from-scratch image tower): SVO-Probes overall
+0.5439** (obj_neg 0.5472, subj_neg 0.5134, verb_neg 0.5516) — a second,
+independent pass, via a completely different mechanism than F1/F2 (no
+pretrained tower involved at all).
+
+### Emerging pattern across the full batch
+
+| config | mechanism | SVO-Probes | vs. 0.5323 |
+|---|---|---|---|
+| B1 | trilinear, full capacity | 0.5168 | fail |
+| V1 | + gated cosine residual | (pending) | — |
+| V2 | Born-rule (permutation-invariant) | 0.5269 | fail |
+| V3 | max-aggregation | 0.5052 | fail |
+| **V4** | **trilinear, reduced capacity** | **0.5439** | **pass** |
+| **F1** | trilinear-gated, frozen pretrained tower | **0.5356** | **pass** |
+| **F2** | trilinear-gated, warm-started tower | **0.5475** | **pass** |
+
+Every fix that worked reduced the model's ability to memorise (V4's
+smaller/tied/normalised/decayed head) or gave it a better starting point
+that needs less adaptation to fit (F1/F2's pretrained tower) — not a more
+expressive comparison function. Every attempt at a more expressive or
+differently-biased score (V1/V2/V3, all still using a from-scratch,
+full-capacity image tower) failed to clear the bar. This is consistent
+with — not contradicting — the earlier finding that the overfitting
+source is common across configurations (likely the text tower / training
+setup): interventions that globally reduce overfitting pressure help
+regardless of where they're applied, while interventions that only change
+*how* the (already-overfit-prone) representations get compared do not.
