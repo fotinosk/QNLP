@@ -2313,3 +2313,31 @@ above) — will launch once that job finishes.
 
 **Per the spec: report train `hard_neg_acc` alongside val for every row**,
 since B1's diagnosis came from the train/val gap, not accuracy alone.
+
+## A1 finished — chance, but confounded by a real resolve-rate gap Phase 0 missed (2026-09-19)
+
+Job 7432897 finished. **SVO-Probes overall: 0.4982** (obj_neg 0.4156,
+subj_neg 0.4844, verb_neg 0.5160) — exact chance, no better than a coin
+flip on any subset.
+
+**But the eval only covered 546 of 2767 test rows (19.7%) — an ~80%
+skip rate**, not the ~1% Phase 0's resolve-rate check predicted.
+Phase 0 verified that subj/verb/obj *strings* match a known symbol base
+name (98.7-99.5% across splits). It never checked the additional, much
+stricter condition `RoleGroundedScoreHead` actually needs: that the verb
+resolves to *exactly* the mainline 3-piece transitive chain (`_is_valid_
+verb_chain`'s 2D/3D/2D shape-and-bond-dim check). Evidently only ~20% of
+real SVO-Probes verb usages are simple transitive chains — the rest are
+presumably intransitive, phrasal, copula, or otherwise differently-shaped
+CCG parses that the v1 scope explicitly doesn't handle.
+
+**Consequence: A1's negative result is confounded, not clean.** Training
+on ~20% of the data (and whichever verbs happen to be simple-transitive —
+plausibly a biased subset, not a random one) could easily explain "no
+train signal" on its own, independent of whether the role-grounded scoring
+idea itself has merit. This is a different, and more actionable, diagnosis
+than the "role-tensor plumbing bug" hypothesis floated above. Before
+re-attempting Route A: measure the *true* resolve rate (fraction of rows
+where `_is_valid_verb_chain` succeeds, not just the string-match rate) and
+report it against the 90% gate properly — the gate was never actually
+checked against the condition that matters.
