@@ -1733,28 +1733,49 @@ symbols):
 | obj | 94.8% | 36,841 |
 | **all three** | **86.3%** | 36,841 |
 
-**Caveat on scope, not yet resolved:** this is measured against the
-**full raw 36,841-row manifest**, not the ~8,609-row set actually used
-for training/eval — every caption word that survives the existing
-image-availability and word-frequency filters is already in-vocab by
-construction, so the true rate restricted to real training rows is
-plausibly higher. Computing that number precisely requires joining
-`sample_id` back to the raw CSV (the parquet's `sample_id` isn't a raw
-row index) — this was treated as A-data implementation work, not a
-Phase 0 read-only check, and was deliberately not done here. **86.3% is
-in the neighbourhood of the 90% gate but doesn't clearly clear it as
-measured**; the real number needs the proper join before deciding
-pass/fail.
+**Resolved — the true rate clears the gate comfortably.** The 86.3%
+above was against the full raw manifest, not the rows actually used for
+training/eval. Reconstructed `sample_id`'s mapping back to the raw CSV
+(`sample_id` = `f"svo_{i}"`, `i` the row's index in the same
+image-availability-filtered dataframe `load_svo_to_atlas.py` ingests, in
+CSV order) and re-ran the check restricted to each split's actual rows —
+every `sample_id` matched exactly (8609/8609, 2908/2908, 2767/2767),
+confirming the reconstruction is exact, not approximate:
 
-### Open question, not yet decided
+| split | rows | all-three-resolve |
+|---|---|---|
+| train | 8,609 | **98.9%** |
+| val | 2,908 | **99.5%** |
+| test | 2,767 | **98.7%** |
 
-Both findings point the same way: Route A as specified needs real design
-work (diagram-level symbol-chain resolution, not word lookup) before
-implementation, beyond what "inspect `sym2weight` first" anticipated.
-Decision pending: whether to invest in that redesign, or let Route B
-(which makes no structural assumptions and has no equivalent blocker)
-absorb the priority Route A was slated for. **Not decided as of this
-entry — discussion ongoing, no Route A/B/P1 code written yet.**
+All three splits comfortably clear the 90% gate. As predicted, the
+full-manifest number was an underestimate — every caption word that
+survives the word-frequency filter is already in-vocab, and subj/verb/obj
+largely coincide with in-caption words. **Route A's data prerequisite is
+cleared — no further check needed before implementing the
+subj/verb/obj-column propagation into the parquets.**
+
+### Decided — proceed with Route A, de-risked twice over
+
+Two follow-ups closed the remaining uncertainty:
+
+**The diagram-level symbol-chain lookup Route A seemed to need already
+exists as data, no new mechanism required.** Checked a real training
+row's stored `symbols`/`diagram` columns directly: each row already
+carries the exact ordered chain of symbols used for its own sentence —
+e.g. verb "sit" in one row resolves to exactly `sit_0__n.r@B` and
+`sit_1__B.r@s` in that row's own symbol list, contractible via their
+shared bond leg per the row's diagram string. Route A doesn't need a new
+diagram-parsing mechanism; it's a straightforward extension of the
+symbol-matching pattern already used elsewhere in this codebase (e.g.
+`evaluate.py`'s `known = set(model.text_model.sym2weight.keys())`).
+
+**Combined with the resolve-rate result above (98.7-99.5% on real
+training/val/test rows) and the `max_order`/bond-chain-contraction
+finding below, both of Route A's original blockers are resolved
+favourably.** Decision: **proceed with Route A as one of the three
+routes**, implementing it against the existing `bond_dim`-factored
+symbol chains (not a `max_order` change) per the recommendation below.
 
 ### Follow-up experiment — is the split fixable via the ansatz/parser? Yes, but at a real cost
 
