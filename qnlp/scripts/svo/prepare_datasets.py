@@ -29,7 +29,13 @@ Outputs (data/datasets/):
                                pairs only; SingleCaptionStrategy shape)
     svo_val_probes.parquet  — sample_id, true_local_image_path,
     svo_test_probes.parquet   false_local_image_path, diagram, symbols, path,
-                               subj_neg, verb_neg, obj_neg (SVO-Probes eval shape)
+                               subj_neg, verb_neg, obj_neg, subj, verb, obj
+                               (SVO-Probes eval shape; subj/verb/obj added for
+                               Route A -- role-grounded cross-modal scoring,
+                               TTN_CIFAR_EXPERIMENTS.md's "Implementation
+                               spec" -- and already survive the preprocessing
+                               pipeline's keep_columns list unchanged, so no
+                               new join/reconstruction is needed here)
 
 Usage:
     python -m qnlp.scripts.svo.prepare_datasets
@@ -38,6 +44,7 @@ Usage:
 import re
 from collections import Counter
 
+import orjson
 import polars as pl
 
 from qnlp.constants import constants
@@ -97,11 +104,33 @@ def _build_probes_split(atoms: pl.DataFrame) -> pl.DataFrame:
     cols = (
         ["sample_id", "pos_local_image_path", "neg_local_image_path", "diagram", "symbols"]
         + (["path"] if has_path else [])
-        + ["subj_neg", "verb_neg", "obj_neg"]
+        + ["subj_neg", "verb_neg", "obj_neg", "subj", "verb", "obj"]
     )
     return atoms.select(cols).rename(
         {"pos_local_image_path": "true_local_image_path", "neg_local_image_path": "false_local_image_path"}
     )
+
+
+def _log_role_resolve_rate(atoms: pl.DataFrame, split_name: str) -> None:
+    """Route A's data prerequisite (TTN_CIFAR_EXPERIMENTS.md): what fraction
+    of rows have all three roles resolving to a symbol actually present in
+    this split's vocabulary. Verified once by hand at 98.7-99.5% across all
+    three splits (Phase 0 follow-up) — logged here on every run so a future
+    change to the filter/split doesn't silently regress it unnoticed."""
+    known = set()
+    for raw in atoms["symbols"].to_list():
+        if raw is None:
+            continue
+        for entry in orjson.loads(raw):
+            # entry is [{"name": ...}, size] per the LMDB-stored compiled format.
+            name = entry[0]["name"]
+            known.add(name.split("_")[0].lower())
+
+    subj = atoms["subj"].str.to_lowercase().to_list()
+    verb = atoms["verb"].str.to_lowercase().to_list()
+    obj = atoms["obj"].str.to_lowercase().to_list()
+    resolved = sum(1 for s, v, o in zip(subj, verb, obj) if s in known and v in known and o in known)
+    logger.info(f"{split_name}: role-resolve rate {resolved}/{len(atoms)} ({100 * resolved / max(len(atoms), 1):.1f}%)")
 
 
 def run() -> None:
@@ -157,6 +186,7 @@ def run() -> None:
         out_path = datasets_path / f"svo_{split_name}_probes.parquet"
         out.write_parquet(out_path)
         logger.info(f"svo_{split_name}_probes.parquet: {len(out)} rows ({len(split_imgs)} unique positive images)")
+        _log_role_resolve_rate(out, split_name)
 
 
 if __name__ == "__main__":
