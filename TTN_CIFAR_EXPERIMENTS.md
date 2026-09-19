@@ -2414,3 +2414,27 @@ hard-negative separation aggressively against a training set — 8,609
 rows — small relative to that parameter count). Neither has been
 isolated yet; that is the next thing to test, not another scoring-head
 variant.
+
+## F1 result — the first pass, though for a reason unrelated to the score head (2026-09-19)
+
+Finished: **SVO-Probes overall 0.5356** (obj_neg 0.5603, subj_neg 0.5196,
+verb_neg 0.5312) — clears the 0.5323 baseline, the first configuration in
+this entire Route B/variation batch to do so. Same overfitting signature
+as everything else (test/accuracy in-batch is low, `score_head_gate`
+settled at 0.0062 — the trilinear correction term is essentially inert).
+
+**Read this result carefully — it is not evidence the trilinear score
+head works.** The gate barely moved from its zero init, meaning almost
+none of the gain traces to the structured scoring idea Route B was
+testing. What actually changed vs. every other run today is the frozen,
+CIFAR-pretrained image backbone (a real, validated 0.5857 CIFAR-10
+classifier) replacing a from-scratch-initialised one. The most defensible
+reading: a better-initialised (not necessarily lower-capacity — F1 froze
+it, but F2's un-frozen warm-start is the config that isolates that)
+image tower gives the cosine-equivalent term something more useful to
+work with, independent of the score head sitting on top of it. This is
+consistent with the corpus-wide finding above (memorisation is not
+image-side) while also showing the image tower's *quality*, not just its
+capacity, matters. Wait for F2 (warm-started, unfrozen) before concluding
+whether freezing specifically was necessary, or whether any warm start
+would have done as well.
