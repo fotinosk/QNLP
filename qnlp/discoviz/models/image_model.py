@@ -178,14 +178,7 @@ class TTNImageModel(nn.Module):
             return None
         return [layer.gate.item() for layer in self.layers]
 
-    def forward(self, x, normalize: bool = True):
-        # normalize=False exposes the pre-L2-norm head output. Contrastive
-        # training (every caller elsewhere) wants the default: cosine
-        # similarity is scale-invariant so L2-norm is free there. A
-        # classification probe is NOT scale-invariant — a TN classifier's
-        # output magnitude can carry class signal — so
-        # qnlp/discoviz/diagnostic/ttn_supervised_probe.py reads the raw
-        # head output instead. See TTN_CIFAR_EXPERIMENTS.md Stage 0.2.
+    def _patch_embed(self, x):
         if self.use_b1_feature_map:
             # Stage B1: invert ImageNet normalisation back to ~[0,1] pixel
             # intensities, apply the fixed angle encoding per pixel, then one
@@ -228,23 +221,66 @@ class TTNImageModel(nn.Module):
             p_feat = torch.einsum("bncp, pk -> bnk", patches, self.pixel_factor)
             x = c_feat * p_feat  # Bilinear Interaction
 
+        return x
+
+    def _run_tree(self, x) -> list:
+        """Run the quadtree contraction, returning every layer's raw output
+        in order (index 0 = first layer below the leaves, index -1 = root,
+        pre-squeeze/final_norm/head). P1: consumers index this list from the
+        END to get root-indexed, depth-invariant region tensors — see
+        forward_regions."""
         # 2. Add Gated Position
         pos_scale = 0.0 if self.zero_pos_scale else self.pos_scale  # Stage A5
         x = x + (self.positional_embedding * pos_scale)
 
         # 3. Tree Contraction
         current_grid_dim = int(math.sqrt(x.shape[1]))
+        layer_outputs = []
         for layer in self.layers:
             # Reshape into 2x2 blocks for QuadTree contraction
             x = rearrange(x, "b (h w) c -> b c h w", h=current_grid_dim)
             x = rearrange(x, "b c (h h2) (w w2) -> b (h w) (h2 w2) c", h2=2, w2=2)
 
             x = layer(x)
+            layer_outputs.append(x)
             current_grid_dim //= 2
+        return layer_outputs
+
+    def forward(self, x, normalize: bool = True):
+        # normalize=False exposes the pre-L2-norm head output. Contrastive
+        # training (every caller elsewhere) wants the default: cosine
+        # similarity is scale-invariant so L2-norm is free there. A
+        # classification probe is NOT scale-invariant — a TN classifier's
+        # output magnitude can carry class signal — so
+        # qnlp/discoviz/diagnostic/ttn_supervised_probe.py reads the raw
+        # head output instead. See TTN_CIFAR_EXPERIMENTS.md Stage 0.2.
+        x = self._patch_embed(x)
+        layer_outputs = self._run_tree(x)
 
         # 4. Global Head
-        x = x.squeeze(1)
+        x = layer_outputs[-1].squeeze(1)
         x = self.final_norm(x)
         x = self.head(x)
 
         return nn.functional.normalize(x, p=2, dim=-1) if normalize else x
+
+    def forward_regions(self, x, level: int = 1):
+        """P1 (TTN_CIFAR_EXPERIMENTS.md, shared prerequisite for Routes A/B):
+        return [B, 4**level, dim_at_level] root-indexed region tensors.
+        level=0 is the root (equivalent to forward()'s pooled output, before
+        final_norm/head). Root-indexed rather than leaf-indexed because tree
+        depth varies with image size, so this interface is depth-invariant:
+        level=1 is always 4 regions, level=2 is always 16, regardless of how
+        many quadtree layers the model has. Does not change forward()'s
+        behaviour or outputs — runs the same _patch_embed/_run_tree path."""
+        if not 0 <= level < len(self.layers):
+            raise ValueError(f"level must be in [0, {len(self.layers) - 1}], got {level}")
+        x = self._patch_embed(x)
+        layer_outputs = self._run_tree(x)
+        regions = layer_outputs[len(self.layers) - 1 - level]
+        expected_nodes = 4**level
+        assert regions.shape[1] == expected_nodes, (
+            f"forward_regions(level={level}): expected {expected_nodes} regions, got {regions.shape[1]} "
+            "-- check the root-indexing arithmetic against the model's actual depth."
+        )
+        return regions
