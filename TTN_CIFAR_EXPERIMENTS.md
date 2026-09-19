@@ -2341,3 +2341,39 @@ re-attempting Route A: measure the *true* resolve rate (fraction of rows
 where `_is_valid_verb_chain` succeeds, not just the string-match rate) and
 report it against the 90% gate properly — the gate was never actually
 checked against the condition that matters.
+
+## V1-V4/F1/F2 batch: infrastructure issues found and fixed en route (2026-09-19)
+
+Two real problems surfaced launching the batch, neither in the scoring
+logic itself:
+
+**Bad GPU node.** V1/V3/V4's first three attempts all crashed identically
+(`CUDA error: CUDA-capable device(s) is/are busy or unavailable`) —
+confirmed all three landed on the same node, `animal-206-2.local`. Not a
+code issue; relaunched with `qsub -l hostname='!animal-206-2.local'`,
+which cleared it.
+
+**F1/F2 checkpoint compatibility, two rounds.** First launch used the SVO
+baseline's `cp_rank=128`/no-nonlinearity — mismatched N2's actual training
+config (`cp_rank=256`, `nonlinearity=gelu`), which would have crashed
+`load_state_dict`. Caught before either job started (`qw` state) and
+cancelled. Second launch matched cp_rank/nonlinearity but missed that N2
+was trained at `image_size=32, patch_size=2` (CIFAR-native), not SVO's
+default `64/4` — a different patch-embedding input size. Fixed by passing
+matching `IMAGE_MODEL_IMAGE_SIZE`/`PATCH_SIZE` at launch. Third launch hit
+a real remaining mismatch: `ttn_supervised_probe.py`'s classifier probe
+and SVO use different `embedding_dim` (128 vs 512), so `TTNImageModel.head`
+(and `final_norm`) never match shape — but neither is used by
+`forward_regions`-based score heads at all, so `_load_pretrained_image_tower`
+now explicitly drops `head.*`/`final_norm.*` from the checkpoint's state
+dict before loading (plain `strict=False` does NOT skip shape-mismatched
+keys present in both dicts, only missing/unexpected ones — this needed an
+explicit filter, not just a flag). Verified locally with a synthetic
+128-dim-checkpoint-into-512-dim-model test before relaunching.
+
+### V2 (Born-rule) result
+
+Finished: SVO-Probes overall **0.5269** (obj_neg 0.5277, subj_neg 0.5010,
+verb_neg 0.5342) — below the 0.5323 baseline, though closer than B1
+(0.5168). A modest improvement over the plain trilinear head, consistent
+with removing the region-index memorisation surface, but not yet a pass.

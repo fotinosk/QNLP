@@ -110,10 +110,31 @@ def _load_pretrained_image_tower(image_model: TTNImageModel, checkpoint_path: st
     it trainable, separating "good init" from "reduced capacity"."""
     logger.info(f"Loading pretrained image tower from {checkpoint_path} (freeze={freeze})")
     checkpoint = torch.load(checkpoint_path, map_location=device)
-    image_model.load_state_dict(checkpoint["backbone_state_dict"], strict=True)
+    backbone_sd = checkpoint["backbone_state_dict"]
+    # ttn_supervised_probe.py's classifier probe and SVO use different
+    # `embedding_dim`s (128 vs 512), so `head.weight`/`head.bias` (the final
+    # Linear mapping pooled features -> embedding_dim) never match shape --
+    # a plain strict=False does NOT skip these (PyTorch still raises on a
+    # shape mismatch for a key present in both dicts; strict only affects
+    # missing/unexpected keys), so they're dropped from the checkpoint's
+    # dict explicitly before loading. This is fine here because every
+    # score_head that would use a pretrained image tower reads
+    # TTNImageModel.forward_regions directly (raw quadtree layer outputs),
+    # which never touches `head` or `final_norm` at all -- only the
+    # quadtree layers + patch embedding (the actual CIFAR-pretrained
+    # capacity) are shared and get loaded.
+    dropped = [k for k in backbone_sd if k.startswith(("head.", "final_norm."))]
+    backbone_sd = {k: v for k, v in backbone_sd.items() if k not in dropped}
+    result = image_model.load_state_dict(backbone_sd, strict=False)
+    if result.unexpected_keys or set(result.missing_keys) - set(dropped):
+        raise RuntimeError(
+            f"Unexpected key mismatch loading pretrained image tower: "
+            f"missing={set(result.missing_keys) - set(dropped)}, unexpected={result.unexpected_keys}"
+        )
     logger.info(
         f"Image tower loaded (probe test_acc={checkpoint.get('test_acc', '?')}, "
-        f"val_acc={checkpoint.get('val_acc', '?')})."
+        f"val_acc={checkpoint.get('val_acc', '?')}); skipped head/final_norm (embedding_dim differs, "
+        f"unused by region-based score heads): {dropped}"
     )
     if freeze:
         for p in image_model.parameters():
