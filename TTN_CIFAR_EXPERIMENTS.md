@@ -1902,3 +1902,155 @@ accuracy for every SVO run. Accuracy near chance carries little
 information on its own; the coupling gap measures the thing these routes
 are designed to fix. Current reference: 0.5234 real vs 0.4648 shuffled =
 **5.9 points**.
+
+## Batch 3 results (2026-09-19) — N1/N2, Route D, A-data swap rebuild
+
+All four "start immediately, no blockers" jobs from the table above have
+finished.
+
+### Route N — gated non-linearity, CIFAR-10 (jobs 7432824, 7432825)
+
+| variant | epochs run | best val_acc | test_acc | gate values (final) |
+|---|---|---|---|---|
+| N1 (`born`, out += gate·out²) | 100 (no early stop) | 0.5642 | **0.5586** | [0.271, -0.004, 0.020, 0.008] |
+| N2 (`gelu`, out += gate·gelu(out)) | 91 (early stopped) | 0.5946 | **0.5857** | [-1.10, 1.20, -0.06, -0.16] |
+| C-d baseline (cp_rank=256, linear) | — | — | 0.5500 | n/a |
+
+N2 (gelu) beats the cp_rank=256 baseline outright (0.5857 vs 0.5500) with
+the same parameter budget as the default cp_rank config — this is a real,
+adopted win for Track 2, not noise. The gate values are informative: N1's
+gates stay small and mostly hover near 0 except the first layer (~0.27),
+i.e. the squaring non-linearity is used sparingly and mostly at the
+coarsest level. N2's gates grow large and asymmetric across layers
+(layer 0 → -1.10, layer 1 → +1.20), i.e. GELU is being used aggressively
+and differently at different tree depths — the network wants
+depth-dependent non-linearity, which a single shared linear tree cannot
+express. **Conclusion: adopt GELU-gated non-linearity as the new Track 2
+baseline going forward**, replacing the pure-multilinear tree.
+
+### Route D — text-tower capacity probe (job 7432827)
+
+Verb classification, top-20 classes, majority baseline 0.2490:
+
+| model | test_acc |
+|---|---|
+| `einsum` (actual DisCoCat text tower) | **0.7950** |
+| `bow_logreg` (bag-of-words ceiling) | 0.9707 |
+| kNN class consistency (einsum embeddings, k=10) | 0.8908 (chance 0.05) |
+
+The text tower is nowhere near chance and nowhere near broken the way the
+image tower was — 0.795 vs a 0.249 majority baseline, with high kNN
+consistency (0.89) confirming the embedding space itself clusters by verb,
+not just the final linear head. There is a real gap to the bag-of-words
+ceiling (0.795 vs 0.971), so the tower is not extracting every bit of
+verb information available in the raw words, but it is unambiguously
+extracting most of it. **Conclusion: the text tower is not the
+bottleneck. Routes A and B's premise (that per-symbol text tensors carry
+meaningful, resolvable role information) is not built on sand.**
+
+### A-data — `build_svo_swap` rebuild at 32G (job 7432838)
+
+Succeeded cleanly after the two 16G OOM failures (root-caused as real
+node memory contention, fixed by raising the reservation, not a code bug).
+Against the corrected pipeline (subj/verb/obj now surviving into
+`svo_test_probes.parquet`):
+
+- 178 human/animal subject+object candidates identified
+- 105 successfully swapped and CCG-recompiled → `data/datasets/svo_swap_eval.parquet`
+
+This supersedes the earlier 95-pair swap set (built before the A-data
+column fix) — the eval set used for any future SVO-Swap number should be
+this 105-pair one.
+
+### Net effect on the plan
+
+All four items in "start immediately, no blockers" are now done. Nothing
+in the batch plan is running. The remaining work is exactly the two
+P1-gated implementations (Route B, Route A) and their corresponding SVO
+jobs — no further diagnostics are blocking either.
+
+## Route B and Route A implemented (2026-09-19)
+
+No new backbone models — both plug into `TTNImageModel`/`EinsumModel`
+unchanged, exactly as "What is reused vs. what is new" specified. New
+code: `qnlp/domain/models/vlm/score_heads.py` (`TrilinearScoreHead`,
+`RoleGroundedScoreHead`), `qnlp/core/training/losses/structured_contrastive.py`
+(`StructuredContrastiveLoss`), a `score_head` param on `ContrastiveVLM`
+(`None` = every existing run stays bit-for-bit unchanged), and
+`EinsumModel.get_role_tensor`/`get_verb_chain`/`forward_roles` for Route
+A's per-symbol lookups. Config: `SVO_ML_SCORE_HEAD` = `cosine` (default) |
+`trilinear` | `role_grounded`, plus `SVO_ML_REGION_LEVEL`,
+`SVO_ML_SCORE_DIM`, `SVO_ML_RANK`.
+
+### A real design problem found and solved during implementation: the verb tensor is too big to materialise
+
+Phase 0 established the verb chain's outer legs are full `embedding_dim`
+(512), not a trivial size-1 "sentence" leg as DisCoCat's abstract type
+theory might suggest — checked directly against `sym2weight`
+(`hold_1__B.r@s@B` has shape `(10, 512, 10)`, not `(10, 1, 10)`).
+Contracting a 3-piece chain the naive way (as `get_role_tensor` does for
+subject/object) therefore produces a genuine dense `[512, 512, 512]`
+tensor **per row** — 134M elements, ~512MB in float32 — before it's even
+projected down to the `[n_regions, n_regions]` matrix Route A's formula
+needs. At any real batch size this is not near the edge of feasible, it's
+off by orders of magnitude (a batch of 128 would need ~64GB just for this
+intermediate).
+
+**Fix — project before contracting, not after.** Tensor contraction is
+multilinear, so contracting the chain's two outer legs against a learned
+`Linear(embedding_dim -> n_regions)` *before* doing the internal bond-dim
+contraction gives the exact same final `[n_regions, n_regions]` matrix as
+projecting the full dense tensor afterward, but only ever touches
+`O(bond_dim * n_regions)`-sized intermediates. The middle "sentence" leg
+(also size 512) is reduced to a scalar via a learned weight vector at the
+same step. Implemented in `RoleGroundedScoreHead._verb_matrix`. This is
+the concrete resolution of Phase 0's flagged risk ("reconstructing a
+usable M(v) is comparable in engineering cost to re-deriving part of what
+EinsumModel.forward already does per-diagram") — it turned out to be a
+projection-ordering trick, not a diagram-parsing project.
+
+**v1 scope, stated explicitly:** only the mainline 3-piece transitive-verb
+chain is handled (subject-leg, sentence-leg, object-leg — the standard
+SVO-Probes case). A row whose verb parses to a different chain length is
+marked invalid the same way an unresolved role is (NaN sentinel, dropped
+before the loss via `SVOHardNegStep`'s new `_finite_mask`/`_index_rows`
+helpers, which generalise `drop_nonfinite_rows` to the role-tensor dict
+shape).
+
+### Verified locally before touching the cluster
+
+Two smoke tests (`forward`+`backward` on synthetic data, then the full
+`SVOHardNegStep`+`StructuredContrastiveLoss` path with a fake batch)
+confirm both heads produce correctly-shaped `[B,B]` score matrices and
+`[B]` matched-pair scores, gradients reach both the score head and the
+text/image backbones, and no NaN/crash occurs. One real stability issue
+was caught this way: unlike cosine (bounded in [-1,1]), both heads'
+raw scores are unbounded and grew large enough at init to produce loss
+values in the hundreds against the fixed `temperature=0.07`. Fixed with
+attention-style `1/sqrt(rank)` (trilinear) / `1/n_regions` (role-grounded)
+scaling, added directly in `score_heads.py`.
+
+### Evaluation coverage — SVO-Probes only for now, SVO-Swap is a known gap
+
+`evaluate_svo_probes` (`qnlp/scripts/coco_multi_caption/evaluate.py`) is
+score-head-aware: it calls `score_head.score_pairs(...)` instead of
+`F.cosine_similarity` when a structured head is active, and threads
+`subj`/`verb`/`obj` through for Route A. `evaluate_sugarcrepe` (which
+`evaluate_svo`'s SVO-Swap leg reuses) was **not** updated — it still
+hardcodes cosine, so for `trilinear`/`role_grounded` it will throw (caught
+by `evaluate_svo`'s existing `_guard`, logged as "eval skipped", not a
+crash) rather than report a real SVO-Swap number. `svo_swap_eval.parquet`
+also doesn't carry subj/verb/obj for the swapped sentence, so Route A's
+swap eval needs that data prerequisite extended before it can work at
+all. Flagging this now rather than silently reporting `nan` as if it were
+a null result.
+
+### Launch config (2026-09-19)
+
+Baseline per the plan: A1+B1+cp_rank=128+triplet_weight=100,
+`SVO_ML_REGION_LEVEL=1` (4 regions). Two jobs:
+
+| job | `SVO_ML_SCORE_HEAD` | criterion |
+|---|---|---|
+| B1 | `trilinear` | beat 0.5323 Probes **and** widen the 5.9pt real-vs-shuffled-caption ablation gap |
+| A1 | `role_grounded` | same |

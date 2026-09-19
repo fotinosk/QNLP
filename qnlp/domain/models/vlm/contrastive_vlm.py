@@ -5,6 +5,7 @@ from torch.nn.utils import clip_grad_norm_
 
 from qnlp.discoviz.models.einsum_model import EinsumModel
 from qnlp.discoviz.models.image_model import TTNImageModel
+from qnlp.domain.models.vlm.score_heads import ScoreHead
 
 
 class AlignmentHead(nn.Module):
@@ -78,6 +79,7 @@ class ContrastiveVLM(nn.Module):
         embedding_dim: int,
         use_mlp_head: bool = False,
         use_projection_head: bool = True,
+        score_head: ScoreHead | None = None,
     ):
         super().__init__()
         self.text_model = text_model
@@ -89,8 +91,16 @@ class ContrastiveVLM(nn.Module):
             head_cls = MLPProjectionHead if use_mlp_head else AlignmentHead
         self.image_head = head_cls(embedding_dim)
         self.text_head = head_cls(embedding_dim)
+        # Routes A/B (TTN_CIFAR_EXPERIMENTS.md): a structured score head that
+        # replaces the pooled-vector cosine comparison. None (default) keeps
+        # every existing SVO/ARO/COCO run bit-for-bit unchanged — image_head/
+        # text_head/cosine stay the whole story in that case.
+        self.score_head = score_head
 
-    def forward(self, images, true_captions, false_captions=None) -> dict:
+    def forward(self, images, true_captions, false_captions=None, roles=None) -> dict:
+        if self.score_head is not None:
+            return self._forward_structured(images, true_captions, false_captions, roles)
+
         image_emb = self.image_head(self.image_model(images))
         true_emb = self._safe_text_embed(true_captions)
         outputs = {
@@ -100,6 +110,34 @@ class ContrastiveVLM(nn.Module):
         if false_captions is not None:
             outputs["false_caption_embeddings"] = self._safe_text_embed(false_captions)
         return outputs
+
+    def _forward_structured(self, images, true_captions, false_captions, roles) -> dict:
+        """Routes A/B: image_head/text_head are bypassed entirely — the
+        score head does its own projection down to score_dim, since a
+        region tensor / role-tensor dict can't pass through a plain Linear
+        the way a pooled vector can."""
+        assert self.score_head is not None
+        if self.score_head.needs_regions:
+            image_repr = self.image_model.forward_regions(images, level=self.score_head.region_level)
+        else:
+            image_repr = self.image_head(self.image_model(images))
+
+        outputs = {
+            "image_embeddings": image_repr,
+            "true_caption_embeddings": self._structured_text_repr(true_captions, roles),
+        }
+        if false_captions is not None:
+            outputs["false_caption_embeddings"] = self._structured_text_repr(false_captions, roles)
+        return outputs
+
+    def _structured_text_repr(self, captions, roles):
+        assert self.score_head is not None
+        if self.score_head.needs_roles:
+            if roles is None:
+                raise ValueError("This score head needs `roles` (subj, verb, obj) passed to forward().")
+            symbols_batch = [c[1] for c in captions]
+            return self.text_model.forward_roles(symbols_batch, roles)
+        return self.text_model(captions)
 
     def _safe_text_embed(self, captions) -> "torch.Tensor":
         """Apply text_model → text_head, preventing NaN gradient contamination.
@@ -126,7 +164,7 @@ class ContrastiveVLM(nn.Module):
         # PyTorch's recursive load calls _load_from_state_dict, not load_state_dict,
         # so EinsumModel.load_state_dict (which rebuilds its ParameterList) never
         # fires automatically. We manually split and delegate to each submodule.
-        text_sd, image_sd, img_head_sd, txt_head_sd = {}, {}, {}, {}
+        text_sd, image_sd, img_head_sd, txt_head_sd, score_head_sd = {}, {}, {}, {}, {}
         for k, v in state_dict.items():
             if k in ("symbols_list", "sizes_list"):
                 text_sd[k] = v
@@ -138,13 +176,19 @@ class ContrastiveVLM(nn.Module):
                 img_head_sd[k[len("image_head.") :]] = v
             elif k.startswith("text_head."):
                 txt_head_sd[k[len("text_head.") :]] = v
+            elif k.startswith("score_head."):
+                score_head_sd[k[len("score_head.") :]] = v
         self.text_model.load_state_dict(text_sd, strict=strict)
         self.image_model.load_state_dict(image_sd, strict=strict)
         self.image_head.load_state_dict(img_head_sd, strict=strict)
         self.text_head.load_state_dict(txt_head_sd, strict=strict)
+        if self.score_head is not None:
+            self.score_head.load_state_dict(score_head_sd, strict=strict)
 
     def clip_gradients(self, max_norm: float) -> None:
         clip_grad_norm_(self.text_model.parameters(), max_norm)
         clip_grad_norm_(self.image_model.parameters(), max_norm)
         clip_grad_norm_(self.image_head.parameters(), max_norm)
         clip_grad_norm_(self.text_head.parameters(), max_norm)
+        if self.score_head is not None:
+            clip_grad_norm_(self.score_head.parameters(), max_norm)

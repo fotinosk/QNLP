@@ -465,6 +465,7 @@ def evaluate_svo_probes(
     )
     loader = _make_loader(ds, batch_size, vlm_collate_fn)
     known = set(model.text_model.sym2weight.keys())
+    score_head = getattr(model, "score_head", None)
 
     correct_by_subset: dict[str, list[bool]] = defaultdict(list)
     n_skipped = 0
@@ -482,11 +483,19 @@ def evaluate_svo_probes(
             false_images = batch["false_local_image_path"][valid].to(device)
             caps = [captions[i] for i in valid]
 
-            true_out = model(true_images, caps)
-            false_out = model(false_images, caps)
+            roles = None
+            if score_head is not None and score_head.needs_roles:
+                roles = [(batch["subj"][i].lower(), batch["verb"][i].lower(), batch["obj"][i].lower()) for i in valid]
 
-            pos = F.cosine_similarity(true_out["true_caption_embeddings"], true_out["image_embeddings"])
-            neg = F.cosine_similarity(false_out["true_caption_embeddings"], false_out["image_embeddings"])
+            true_out = model(true_images, caps, roles=roles) if roles is not None else model(true_images, caps)
+            false_out = model(false_images, caps, roles=roles) if roles is not None else model(false_images, caps)
+
+            if score_head is not None:
+                pos = score_head.score_pairs(true_out["true_caption_embeddings"], true_out["image_embeddings"])
+                neg = score_head.score_pairs(false_out["true_caption_embeddings"], false_out["image_embeddings"])
+            else:
+                pos = F.cosine_similarity(true_out["true_caption_embeddings"], true_out["image_embeddings"])
+                neg = F.cosine_similarity(false_out["true_caption_embeddings"], false_out["image_embeddings"])
             correct = (pos > neg).tolist()
             finite = (torch.isfinite(pos) & torch.isfinite(neg)).tolist()
 

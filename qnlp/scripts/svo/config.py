@@ -63,4 +63,16 @@ class SVOExperimentConfig(BaseSettings):
     # disables this and trains from scratch as before.
     pretrained_checkpoint: str | None = None
 
+    # Routes A/B (TTN_CIFAR_EXPERIMENTS.md's "Implementation spec: Routes N,
+    # B, A"). "cosine" (default) reproduces every existing run bit-for-bit —
+    # image_head/text_head/ImageContrastiveLoss, no score head at all.
+    # "trilinear" (Route B) and "role_grounded" (Route A) both need P1
+    # (TTNImageModel.forward_regions) and route through StructuredContrastiveLoss
+    # instead. "role_grounded" additionally needs subj/verb/obj columns
+    # (added to svo_{train,val,test}_probes.parquet by prepare_datasets.py).
+    score_head: Literal["cosine", "trilinear", "role_grounded"] = "cosine"
+    region_level: int = 1  # P1: 4**region_level regions, root-indexed
+    score_dim: int = 128
+    rank: int = 32  # Route B's CP rank
+
     model_config = SettingsConfigDict(env_prefix="SVO_ML_")

@@ -27,12 +27,14 @@ from torchvision import transforms
 
 from qnlp.constants import constants
 from qnlp.core.training.losses.image_contrastive import ImageContrastiveLoss
+from qnlp.core.training.losses.structured_contrastive import StructuredContrastiveLoss
 from qnlp.core.training.trainer import Trainer
 from qnlp.discoviz.models.einsum_model import EinsumModel
 from qnlp.discoviz.models.image_model import TTNImageModel, image_model_hyperparams
 from qnlp.domain.datasets.dataloader import get_dataloaders
 from qnlp.domain.datasets.dataset import collect_symbol_sizes
 from qnlp.domain.models.vlm.contrastive_vlm import ContrastiveVLM
+from qnlp.domain.models.vlm.score_heads import RoleGroundedScoreHead, ScoreHead, TrilinearScoreHead
 from qnlp.scripts.coco_multi_caption.evaluate import evaluate_svo, log_banner, print_full_report
 from qnlp.scripts.svo.config import SVOExperimentConfig
 from qnlp.scripts.svo.step import SVOHardNegStep
@@ -87,6 +89,38 @@ def _warm_start_from_aro(text_model: EinsumModel, image_model: TTNImageModel, ch
         f"(SVO vocab) found in ARO's {len(pretrained_symbols)}-symbol vocab with matching shape; "
         "remaining symbols kept at random init."
     )
+
+
+def _build_score_head(cfg: SVOExperimentConfig, image_model: TTNImageModel) -> ScoreHead | None:
+    """Routes A/B (TTN_CIFAR_EXPERIMENTS.md). None reproduces every existing
+    run bit-for-bit (cosine head, ImageContrastiveLoss)."""
+    if cfg.score_head == "cosine":
+        return None
+
+    n_regions = 4**cfg.region_level
+    # P1's dim_at_level: layer i (0-indexed) has out_dim = bond_dim * 2**(i+1);
+    # forward_regions(level) reads layers[len(layers)-1-level].
+    region_dim = image_model.bond_dim * (2 ** (len(image_model.layers) - cfg.region_level))
+
+    if cfg.score_head == "trilinear":
+        return TrilinearScoreHead(
+            text_dim=cfg.embedding_dim,
+            region_dim=region_dim,
+            n_regions=n_regions,
+            score_dim=cfg.score_dim,
+            rank=cfg.rank,
+            region_level=cfg.region_level,
+        )
+    if cfg.score_head == "role_grounded":
+        return RoleGroundedScoreHead(
+            noun_dim=cfg.embedding_dim,
+            verb_leg_dim=cfg.embedding_dim,
+            region_dim=region_dim,
+            n_regions=n_regions,
+            score_dim=cfg.score_dim,
+            region_level=cfg.region_level,
+        )
+    raise ValueError(f"Unknown score_head: {cfg.score_head!r}")
 
 
 def run():
@@ -157,20 +191,32 @@ def run():
     if cfg.pretrained_checkpoint:
         _warm_start_from_aro(text_model, image_model, cfg.pretrained_checkpoint, device)
 
+    score_head = _build_score_head(cfg, image_model)
+
     model = ContrastiveVLM(
         text_model,
         image_model,
         embedding_dim=cfg.embedding_dim,
         use_mlp_head=cfg.use_mlp_head,
         use_projection_head=cfg.use_alignment_head,
+        score_head=score_head,
     ).to(device)
 
-    loss_fn = ImageContrastiveLoss(
-        temperature=cfg.temperature,
-        triplet_weight=cfg.triplet_weight,
-        triplet_margin=cfg.triplet_margin,
-        distance=cfg.distance,
-    ).to(device)
+    if score_head is not None:
+        logger.info(f"Score head: {cfg.score_head} (region_level={cfg.region_level}, score_dim={cfg.score_dim})")
+        loss_fn = StructuredContrastiveLoss(
+            score_head=model.score_head,
+            temperature=cfg.temperature,
+            triplet_weight=cfg.triplet_weight,
+            triplet_margin=cfg.triplet_margin,
+        ).to(device)
+    else:
+        loss_fn = ImageContrastiveLoss(
+            temperature=cfg.temperature,
+            triplet_weight=cfg.triplet_weight,
+            triplet_margin=cfg.triplet_margin,
+            distance=cfg.distance,
+        ).to(device)
     step = SVOHardNegStep(loss_fn=loss_fn, device=device)
 
     param_groups = [
@@ -180,6 +226,8 @@ def run():
     # NoOpHead (use_alignment_head=False) has no parameters — AdamW errors on
     # an empty param group, so only add it when there's something to train.
     head_params = list(model.image_head.parameters()) + list(model.text_head.parameters())
+    if model.score_head is not None:
+        head_params += list(model.score_head.parameters())
     if head_params:
         param_groups.append({"params": head_params, "lr": cfg.head_lr, "weight_decay": cfg.head_weight_decay})
     optimizer = torch.optim.AdamW(param_groups)
