@@ -1452,3 +1452,361 @@ this document has now surfaced twice: **varying embeddings are necessary
 but not sufficient; something about how the loss couples the two
 modalities' decisions still needs a more direct fix than tuning
 `triplet_weight`.**
+
+---
+
+# Implementation spec: Routes N, B, A (2026-09-19)
+
+**Audience: an implementing agent with no other context.** Everything
+needed is in this section. Three independent routes, plus one shared
+prerequisite. All three can be developed and run in parallel after the
+prerequisite lands.
+
+**Scope assumption, load-bearing — state it in any write-up.** Captions
+are well-structured and contract to rank 1 (true for SVO-Probes and ARO;
+*not* assumed for COCO, which is out of scope for this work). Route A
+further assumes subject/verb/object roles are identifiable per row from
+dataset columns. These hold for the target benchmarks and are a declared
+scope condition, not an oversight.
+
+## What is reused vs. what is new
+
+| Component | Decision |
+|---|---|
+| `TTNImageModel` (`qnlp/discoviz/models/image_model.py`) | **Reuse.** Route N adds an opt-in gate inside its layers; Routes A/B add a read-only accessor. No fork. |
+| `CPQuadRankLayer` (`qnlp/discoviz/models/cp_node.py`) | **Reuse**, extended in place for Route N (opt-in, default off). |
+| `EinsumModel` (`qnlp/discoviz/models/einsum_model.py`) | **Reuse unchanged.** Routes A/B read per-symbol tensors via its existing `sym2weight` dict. |
+| `ContrastiveVLM` (`qnlp/domain/models/vlm/contrastive_vlm.py`) | **Reuse**, with a new selectable scoring head. Do **not** fork the class. |
+| Scoring (currently cosine) | **New modules** for Routes B and A, selected by config, with cosine retained as the default control. |
+| Training scripts (`qnlp/scripts/svo/run.py`, `ttn_supervised_probe.py`) | **Reuse.** New behaviour is opt-in via env-var config only. |
+
+**Rule for all three routes: every new behaviour is opt-in and defaults to
+off.** Existing SVO/ARO/COCO/CIFAR runs must be bit-for-bit unchanged when
+the new flags are unset. This is how A1/B1 were shipped and it is what
+keeps the ablation table single-variable.
+
+## P1 — Shared prerequisite: root-indexed region extraction
+
+Routes A and B both need the image tower to expose *intermediate* region
+tensors, not just its final pooled vector.
+
+**Why root-indexed.** Tree depth varies with image size
+(`depth = log_4(num_patches)`), so counting levels from the leaves gives a
+variable interface. Counting from the **root** is depth-invariant: one
+level below the root is always 4 nodes, two levels below is always 16.
+
+**Given** `self.layers` where `layers[i]` outputs shape
+`[B, num_nodes_i, out_dim_i]`, and `num_nodes` descends 64 → 16 → 4 → 1
+for depth 4:
+
+```
+regions at root-level k  =  output of layers[len(layers) - 1 - k]
+
+k = 0  ->  [B,  1, 1024]   (root; equivalent to today's pooled output)
+k = 1  ->  [B,  4,  512]
+k = 2  ->  [B, 16,  256]
+```
+
+**Implement** as a method on `TTNImageModel`:
+
+```python
+def forward_regions(self, x, level: int = 1) -> torch.Tensor:
+    """Return [B, 4**level, dim_at_level] root-indexed region tensors.
+    level=0 is the root. Runs the same forward pass as forward(); capture
+    the output of layers[len(self.layers) - 1 - level]."""
+```
+
+Requirements:
+- Must not change `forward()`'s behaviour or outputs.
+- `level` must be validated against `len(self.layers)`.
+- `dim_at_level` differs per level, so **consumers must project to a
+  common `score_dim` with a per-level `nn.Linear`** (linear, so the
+  multilinear constraint is preserved).
+- Default `level=1` (4 regions) for first experiments; `level=2` (16) is
+  the variant to sweep.
+
+## Route N — non-linearity, as a measurement
+
+**Motivation.** CIFAR has plateaued (0.5500 at `cp_rank=256`) against a
+CNN's 0.7842. A purely multilinear network computes a homogeneous
+polynomial with no thresholding. This route *quantifies what the
+multilinear constraint costs* rather than abandoning it.
+
+**Design — mirror the text tower's NLC exactly.** In
+`CPQuadRankLayer.forward`, after the output projection
+(`out = einsum(merged, factor_out)`) and **before** the residual add:
+
+```python
+if self.nonlinearity != "none":
+    out = out + self.gate * self._f(out)
+```
+
+- `self.gate = nn.Parameter(torch.zeros(1))` — **one scalar per layer,
+  initialised to exactly 0.0.** At gate=0 the model is bit-for-bit the
+  current multilinear model. This is what makes the result a measurement:
+  the learned gate value *is* the answer to "how much non-linearity does
+  this task demand."
+- `_f` is selected by config:
+  - `"born"`: `f(x) = x * x` — the real-valued analogue of the Born rule
+    (|ψ|²), the one non-linearity a quantum model genuinely has. This is
+    the principled variant.
+  - `"gelu"`: `f(x) = F.gelu(x)` — an upper bound on what *any*
+    non-linearity buys. The gap between `born` and `gelu` is itself a
+    reportable result.
+
+**Config:** `IMAGE_MODEL_NONLINEARITY` on `ImageModelSettings`
+(`image_model.py`), values `"none"` (default) | `"born"` | `"gelu"`.
+
+**Logging:** log every layer's gate value per epoch. The trajectory of
+4-5 scalars is the headline figure for this route. Precedent: the text
+tower's NLC gate rose 0.044 → 0.393 over training.
+
+**Jobs (CIFAR, existing harness):**
+
+| job | config | criterion |
+|---|---|---|
+| N1 | A1+B1+cp256, `NONLINEARITY=born` | beat 0.5500 |
+| N2 | A1+B1+cp256, `NONLINEARITY=gelu` | beat 0.5500; gap vs N1 = cost of the principled choice |
+
+Baseline is the existing 0.5500 run — do not re-run it.
+
+## Route B — structured scoring (region-level, no role assumptions)
+
+**Motivation.** The model is two-tower late fusion: one image vector, one
+caption vector, one cosine. SVO-Probes asks which of two images matches a
+fixed caption, so all discriminative burden sits on a single scalar
+comparison of two summary vectors. Route B replaces that with a
+comparison that keeps image regions separate.
+
+**Route B makes no assumptions about sentence structure** (it uses only
+the rank-1 caption vector), which is why it runs first.
+
+**Design — CP-factorised trilinear score.** Given caption vector
+`t ∈ R^{score_dim}` and regions `R ∈ R^{n_regions × score_dim}` (from P1,
+after the per-level projection):
+
+```
+score(t, R) = sum_{j=1..n_regions} sum_{r=1..rank} (u_r · t) (v_r · R_j) (w_r)_j
+```
+
+with learnable `u, v ∈ R^{rank × score_dim}`, `w ∈ R^{rank × n_regions}`.
+
+- **Multilinear in both `t` and `R`** — constraint preserved.
+- **Not degenerate.** A simpler "weighted sum of per-region dot products"
+  collapses algebraically to pooling the regions first and is therefore
+  equivalent to the current cosine head — do not implement that. The
+  third factor `w` indexed by region is what makes the score depend on
+  *which* region matches.
+- Suggested `rank = 32` (mirrors `cp_rank`'s convention), `score_dim =
+  128`. Parameter count ≈ `2*rank*score_dim + rank*n_regions` ≈ 8K.
+
+**Where it lives:** new module, e.g.
+`qnlp/core/training/scoring/trilinear.py`, selected inside
+`ContrastiveVLM` by a config flag. The existing cosine path stays the
+default.
+
+**Config:** `SVO_ML_SCORE_HEAD = "cosine"` (default) | `"trilinear"`,
+plus `SVO_ML_REGION_LEVEL` (default 1) and `SVO_ML_SCORE_DIM`
+(default 128).
+
+**Integration note.** `ImageContrastiveLoss` and `SVOHardNegStep`
+currently compute cosine similarity directly on embeddings. The score
+head must be applied *before* the loss, so the loss receives scores
+rather than recomputing cosine. Keep the cosine path untouched when
+`SCORE_HEAD="cosine"`.
+
+## Route A — role-grounded cross-modal contraction
+
+**Motivation.** DisCoCat's semantics are that nouns denote entities and
+verbs denote relations between them. Route A grounds subject and object
+against image regions and lets the verb mediate — the structure
+SVO-Probes is explicitly built to test, which the current architecture
+discards by pooling everything into one vector.
+
+**Design.** Per row, with `s`, `v`, `o` the per-symbol tensors for the
+subject, verb and object words (read from `EinsumModel.sym2weight`), and
+`R` the region tensors from P1:
+
+```
+g_subj[j] = <P_s · s, R_j>        affinity of the subject to region j
+g_obj [k] = <P_o · o, R_k>        affinity of the object  to region k
+
+score = sum_{j,k} g_subj[j] * M(v)[j,k] * g_obj[k]
+```
+
+where `P_s`, `P_o` are learned linear projections into `score_dim`, and
+`M(v)` is a `[n_regions, n_regions]` matrix produced from the verb tensor
+by a learned linear map. Multilinear in `s`, `o`, `v` and `R`.
+
+**Uncertainty the implementer must resolve first.** In DisCoCat a
+transitive verb has type `nʳ · s · nˡ` (a rank-3 tensor with two noun
+legs), but this pipeline's `LemmatizeStep` and `UnifyEinsumRankStep`
+force rank-1 diagram outputs, so the *stored* verb tensor may already be
+rank-1. **Inspect the actual shape in `sym2weight` before implementing.**
+- If the verb tensor is rank-3 with two noun legs: contract it directly
+  to form `M(v)`.
+- If it is rank-1 (expected): use a learned linear map
+  `R^{dim_v} → R^{n_regions × n_regions}` to produce `M(v)`. Document
+  which case was found and which path was taken.
+
+**Data prerequisite.** Route A needs subject/verb/object identified per
+row. `data/svo/raw/svo_probes_corrected.csv` already has `subj`, `verb`,
+`obj` columns — **no CCG/diagram surgery is required.** Propagate those
+three columns through `qnlp/scripts/svo/prepare_datasets.py` into
+`svo_{train,val,test}_probes.parquet`, applying **the same lemmatisation
+the symbol pipeline uses**, so the strings key correctly into
+`sym2weight`. Log the fraction of rows whose three roles all resolve to
+known symbols; if that fraction is below ~90%, stop and report before
+running experiments — a low hit rate invalidates the route.
+
+**Config:** `SVO_ML_SCORE_HEAD = "role_grounded"`, reusing
+`SVO_ML_REGION_LEVEL` and `SVO_ML_SCORE_DIM`.
+
+**Control.** Route A and the cosine head must be runnable as two heads on
+the same tower and data, changing only `SVO_ML_SCORE_HEAD` — that is the
+single-variable ablation.
+
+## Phase 0 findings (2026-09-19) — Route A's premise needs revisiting before implementation
+
+Two read-only checks, run before writing any Route A/B/P1 code, per the
+agreed execution order (Phase 0 diagnostics → Route D → N/P1/A-data →
+B/A jobs). Both against a real SVO checkpoint
+(`runs/checkpoints/svo_probes/2026-09-18_21-36-56/best_model.pt`).
+
+### Verb tensor shape — resolved, but neither anticipated case is live
+
+Inspected `sym2weight` directly (`symbols_list`/`sizes_list` from the
+checkpoint's state dict, grouped by base word).
+
+**Finding 1 — the same word has multiple symbols, disambiguated by CCG
+type signature, not one symbol per lexeme.** `run` appears as 8 separate
+components: `run_0__n` (bare-noun usage, "a run"), `run_0__n.r@B` /
+`run_1__B.r@s` / `run_1__B.r@s@B` (intransitive-verb chain), and further
+components for transitive usage. A string lookup on the word alone is
+ambiguous — determining which symbol(s) apply to a *specific row's*
+verb requires that row's actual compiled CCG diagram, not just its
+`verb` column value.
+
+**Finding 2 — no verb is a single dense tensor of any rank, let alone
+rank-3 with two noun legs.** Even a clearly-transitive verb (`hold`) is
+split into 3-5 low-rank pieces chained through an auxiliary bond index
+of size `bond_dim=10`:
+
+```
+hold_0__n.r@B      shape (512, 10)
+hold_1__B.r@s@B    shape (10, 512, 10)
+hold_2__B.r@n.l    shape (10, 512)
+hold_2__B.r@p.l@B  shape (10, 512, 10)
+hold_3__B.r@n.l    shape (10, 512)
+```
+
+This is `UnifyEinsumRankStep` performing its actual documented job —
+keeping every *stored* parameter at ≤ rank 2-3 via bond-dimension
+factorization — not a semantic rank-1 collapse. It's a tensor-train/MPO
+decomposition of what would otherwise be a higher-rank verb tensor, with
+the bond legs (`B`, size 10) meant to be contracted away, not read as
+role indices.
+
+**Consequence for Route A's design.** The spec's two-way fork ("rank-3
+with two noun legs → contract directly" vs. "rank-1 → learn a fresh
+linear map") has no live branch — reality is a third case not
+anticipated in either path. Reconstructing a usable `M(v)` bilinear map
+means: (a) identifying which specific chain of symbols a given row's
+diagram actually uses (a diagram-level lookup, not a word lookup), then
+(b) contracting that chain along its bond legs to materialise an
+`[n_regions, n_regions]`-shaped map — which is then implicitly rank-limited
+to `bond_dim=10` regardless of its nominal output shape. This is
+comparable in engineering cost to re-deriving part of what
+`EinsumModel.forward` already does per-diagram internally, not a
+standalone tensor lookup as the spec's pseudocode implies.
+
+### Role-resolve rate — close to the pre-committed gate, not clearly over it
+
+Checked `subj`/`verb`/`obj` columns (lowercased) against the checkpoint's
+known base-word vocabulary (514 unique base words, from 1356 total
+symbols):
+
+| role | resolve rate | N |
+|---|---|---|
+| subj | 97.2% | 36,841 |
+| verb | 93.1% | 36,841 |
+| obj | 94.8% | 36,841 |
+| **all three** | **86.3%** | 36,841 |
+
+**Caveat on scope, not yet resolved:** this is measured against the
+**full raw 36,841-row manifest**, not the ~8,609-row set actually used
+for training/eval — every caption word that survives the existing
+image-availability and word-frequency filters is already in-vocab by
+construction, so the true rate restricted to real training rows is
+plausibly higher. Computing that number precisely requires joining
+`sample_id` back to the raw CSV (the parquet's `sample_id` isn't a raw
+row index) — this was treated as A-data implementation work, not a
+Phase 0 read-only check, and was deliberately not done here. **86.3% is
+in the neighbourhood of the 90% gate but doesn't clearly clear it as
+measured**; the real number needs the proper join before deciding
+pass/fail.
+
+### Open question, not yet decided
+
+Both findings point the same way: Route A as specified needs real design
+work (diagram-level symbol-chain resolution, not word lookup) before
+implementation, beyond what "inspect `sym2weight` first" anticipated.
+Decision pending: whether to invest in that redesign, or let Route B
+(which makes no structural assumptions and has no equivalent blocker)
+absorb the priority Route A was slated for. **Not decided as of this
+entry — discussion ongoing, no Route A/B/P1 code written yet.**
+
+## Parallel batch and dependencies
+
+```
+P1 (region extraction)  ──┬──> Route B implementation ──> B jobs
+                          └──> Route A implementation ──> A jobs
+                                    ^
+                                    └── needs the parquet role columns (independent work, start now)
+
+Route N  ── no dependency on P1 ──> N jobs   (start immediately)
+Route D  ── no dependency at all ──> D job   (start immediately)
+```
+
+**Start immediately, in parallel, no blockers:**
+
+| # | work | kind |
+|---|---|---|
+| N1, N2 | Born / GELU gated CIFAR runs | cluster jobs (after a small code change) |
+| D | text-tower capacity probe (below) | small script + 1 job |
+| P1 | region extraction | code only, blocks A and B |
+| A-data | subj/verb/obj columns into the SVO parquets | data pipeline, blocks A only |
+
+**Then, in parallel once P1 lands:**
+
+| # | job | control | criterion |
+|---|---|---|---|
+| B1 | SVO, `SCORE_HEAD=trilinear`, `REGION_LEVEL=1` | cosine head, same tower/config | beat 0.5323 Probes **and** widen the real-vs-shuffled-caption gap beyond 5.9 pts |
+| B2 | as B1 with `REGION_LEVEL=2` (16 regions) | B1 | — |
+| A1 | SVO, `SCORE_HEAD=role_grounded`, `REGION_LEVEL=1` | cosine head, same tower/config | same as B1 |
+
+Baseline config for every SVO row: **A1+B1+cp_rank=128+triplet_weight=100**
+(the S1 recipe, SVO-Probes 0.5323).
+
+## Route D — text-tower capacity probe (cheap, never run)
+
+The image tower was found to be catastrophically broken *because* a
+supervised probe was run on it. The same probe has never been run on
+`EinsumModel`, and Routes A and B both assume its per-symbol tensors are
+meaningful.
+
+Mirror `ttn_supervised_probe.py` on the text side: train a linear
+classifier on caption embeddings to predict the SVO verb (or object)
+class, top-20 classes, against a majority baseline and a bag-of-words
+logistic-regression reference. Report kNN class consistency on caption
+embeddings as well. If the text tower is at chance, Routes A and B are
+built on sand and that must be known first.
+
+## Reporting requirement for all routes
+
+Report the **real-vs-shuffled-caption ablation gap** (via
+`qnlp/discoviz/diagnostic/image_ablation.py --task svo`) alongside
+accuracy for every SVO run. Accuracy near chance carries little
+information on its own; the coupling gap measures the thing these routes
+are designed to fix. Current reference: 0.5234 real vs 0.4648 shuffled =
+**5.9 points**.
