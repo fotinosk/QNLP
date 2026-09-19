@@ -260,12 +260,17 @@ def main() -> None:
         logger.info(f"[einsum] epoch {epoch:02d} train_acc={train_acc:.4f} val_acc={val_acc:.4f}")
         status = early_stopping(val_acc)
         if status == ModelTrainingStatus.improved:
-            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            # EinsumModel.state_dict() injects non-tensor symbols_list/sizes_list
+            # entries (see ContrastiveVLM.load_state_dict's docstring for why) --
+            # filter to real tensors; restoring parameter values within this same
+            # live model instance doesn't need those two entries, since symbols/
+            # sizes don't change during training.
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items() if torch.is_tensor(v)}
         elif status == ModelTrainingStatus.stop:
             logger.info(f"[einsum] early stopping at epoch {epoch}")
             break
     if best_state is not None:
-        model.load_state_dict(best_state)
+        model.load_state_dict(best_state, strict=False)
     _, test_acc = _run_epoch(model, test_loader, optimizer, device, train=False)
 
     majority = Counter(splits["test"]["labels"]).most_common(1)[0][1] / len(splits["test"]["labels"])
