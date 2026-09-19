@@ -2090,3 +2090,226 @@ zero (~0.001) with no separating trend — unlike B1, which at least showed
 strong (if non-generalising) train-side discrimination by this point.
 Watching for whether this changes with more epochs before drawing a
 conclusion.
+
+---
+
+# Route B variations (2026-09-19) — diagnosis and next batch
+
+**Audience: an implementing agent with no other context.** Self-contained.
+Builds on `qnlp/domain/models/vlm/score_heads.py`'s `TrilinearScoreHead`
+and the B1 result above (SVO-Probes 0.5168, below the 0.5323 cosine
+baseline).
+
+## Diagnosis: the failure is memorisation, and the region index is why
+
+B1's signature is unambiguous: train `hard_neg_acc` 0.57 → 0.92 over 11
+epochs while val stayed at 0.51–0.52 throughout. Not collapse, not an
+optimisation failure — the head added capacity without adding the right
+inductive bias.
+
+The specific defect is in the score's third factor:
+
+```
+score(t, R) = sum_j sum_r (u_r · t) (v_r · R_j) (w_r)_j
+                                                 ^^^^^^^
+                                    indexed by ABSOLUTE region position
+```
+
+`w_r` is indexed by region index `j` — an absolute spatial slot (region 0
+is always the top-left quadrant). The head therefore learns statements of
+the form "caption feature `r` matches *the top-left quadrant*." For
+SVO-Probes, where a subject can appear anywhere in the frame, this is
+close to the worst available bias: it is a direct route to memorising
+"this caption pairs with the image whose top-left quadrant looks like X."
+
+**This is the third instance of the same pattern in this document.**
+Per-position parameters keep losing to position-agnostic sharing:
+
+| change | Δ vs. its baseline |
+|---|---|
+| B2 — per-pixel leaves | -0.146 |
+| C-a — per-patch embedding | -0.127 |
+| B1 — region-indexed trilinear weights | -0.016 (0.5168 vs 0.5323) |
+
+The region-index factor was introduced deliberately, to avoid the
+degenerate-pooling trap flagged in the Route B spec ("a weighted sum of
+per-region dot products collapses to pooling the regions first"). It
+avoids that trap and substitutes a worse one. **Any replacement must be
+permutation-invariant over regions while still not collapsing to
+pooling-first** — that is the precise design constraint for everything
+below.
+
+## Note: the multilinear constraint has been retired, deliberately
+
+Route N's result ("adopt GELU-gated non-linearity as the new Track 2
+baseline, replacing the pure-multilinear tree") means non-linear
+aggregation over regions — `max`, `log-sum-exp`, `|·|²` — is now
+available in the score head. V2 and V3 below depend on this. Record it as
+a deliberate, measured relaxation (gate values quantify what it bought),
+not an unremarked drift.
+
+## Variations
+
+### V1 — gated residual trilinear (run this first)
+
+```
+score = cosine(t, pooled(R)) + gate * trilinear(t, R)     gate init exactly 0.0
+```
+
+**Rationale: every change that has worked in this project has been a
+strict generalisation of the working model, initialised to recover it
+exactly** — A1's isometric init, B1's opt-in flag, Route N's gate-init-0.
+B1 as launched *replaced* cosine outright, discarding the 0.5323 baseline
+behaviour rather than building on it. Made additive, the structured term
+can only earn its way in, and the learned gate value is a free
+measurement of how much it contributes.
+
+- `gate`: single `nn.Parameter(torch.zeros(1))` on the head.
+- At gate=0 the head must be numerically identical to the cosine head.
+- Log the gate per epoch.
+
+### V2 — Born-rule region pooling (best-motivated)
+
+```
+score = sum_j |<t, R_j>|^2        (equivalently ||R t||^2)
+```
+
+- **Permutation-invariant** over regions — no positional memorisation
+  surface at all.
+- **Does not collapse to pooling-first**: it is quadratic in the regions,
+  not linear, which is exactly what the degenerate-pooling trap requires
+  it to avoid.
+- It is the natural generalisation of cosine from a single image vector
+  to a *set* of regional states, and it is the Born rule — the same
+  principle Route N validated one level down in the tree.
+- Normalise `t` and each `R_j` first so terms stay bounded, and scale by
+  `1/n_regions`.
+
+### V3 — position-agnostic aggregation via max / log-sum-exp
+
+```
+score = sum_r (u_r · t) * max_j (v_r · R_j)          (or LSE_j for smooth gradients)
+```
+
+Encodes the bias the task actually needs — *does this entity appear
+anywhere in the image* — rather than *in a particular quadrant*. Drops
+`w_r` entirely. Use LSE if max's sparse gradients stall training.
+
+### V4 — capacity reduction and bounded terms (cheap control)
+
+The failure signature is memorisation, so the direct response belongs in
+the batch even though it is the least interesting row: `rank` 32 → 8, tie
+`u = v`, L2-normalise `t` and each `R_j` before scoring so every term is
+a cosine, and apply weight decay to the head's parameters.
+
+### V5 — do NOT run `REGION_LEVEL=2` yet
+
+16 regions multiply the positional-memorisation surface by 4. Hold it
+until V1-V3 identify a head that generalises at `REGION_LEVEL=1`.
+
+## Orthogonal: freeze a CIFAR-pretrained image tower (F1)
+
+SVO has ~8,600 training rows against a ~2.3M-parameter image tower. **Most
+of the memorisation capacity is in the backbone, not in the ~8K-parameter
+score head**, so head-only variations may be unable to fix B1's
+train/val gap on their own.
+
+There is now a tower that provably encodes real-image semantics — Route
+N2's CIFAR-10 checkpoint at 0.5857. Load it into the SVO run, freeze it,
+and train only the score head and text tower. This removes the dominant
+capacity source and puts the one validated asset this project has built
+to work. Never tried on SVO; config-level plus a checkpoint-loading path
+analogous to `_warm_start_from_aro` in `qnlp/scripts/svo/run.py`.
+
+Also worth one variant with the tower loaded but *unfrozen* (warm start
+rather than freeze), to separate "good initialisation" from "reduced
+trainable capacity."
+
+## Batch — all independent, run in parallel
+
+Baseline for every row: **A1+B1+cp_rank=128+triplet_weight=100,
+`REGION_LEVEL=1`, SVO-Probes 0.5323** (the S1 cosine result).
+
+| job | change | criterion |
+|---|---|---|
+| V1 | gated residual trilinear, gate init 0 | beat 0.5323; report final gate value |
+| V2 | Born-rule region pooling | beat 0.5323 |
+| V3 | max / LSE aggregation, `w_r` removed | beat 0.5323 |
+| V4 | rank=8, tied `u=v`, normalised terms, head weight decay | beat 0.5323 |
+| F1 | V1 config + **frozen** N2 CIFAR-pretrained image tower | beat 0.5323 |
+| F2 | V1 config + N2 tower warm-started, unfrozen | separates init from capacity |
+
+**Report the real-vs-shuffled-caption ablation gap on every row**
+(`image_ablation.py --task svo`; current reference 5.9 pts). With train at
+0.92 and val at chance, accuracy alone does not distinguish a head that
+grounds from a head that memorises.
+
+**Also report train `hard_neg_acc` alongside val for every row.** B1's
+train-side climb to 0.92 is what identified the failure mode; a variant
+that fixes the bias should show a *smaller* train/val gap, not
+necessarily a higher train number.
+
+## Hold Route A unchanged until it finishes
+
+A1's in-progress signature — chance on **both** train and val, scores
+near zero with no separating trend — is categorically different from
+B1's (strong train-side discrimination that fails to generalise). If it
+persists, it points at the role-tensor plumbing (`forward_roles`,
+`get_verb_chain`, the `_verb_matrix` projection) rather than at the
+scoring idea, and should be debugged as such. Do not apply the V1-V4
+variations to Route A until that distinction is settled.
+
+## V1-V4, F1, F2 implemented and launched (2026-09-19)
+
+Per "Hold Route A unchanged until it finishes" — none of these touch
+Route A; A1 (job 7432897) keeps running unmodified alongside this batch.
+
+**New score heads** in `qnlp/domain/models/vlm/score_heads.py`:
+- `GatedResidualTrilinearScoreHead` (V1) — extends `TrilinearScoreHead`;
+  verified locally that at `gate=0` its `score_matrix` is exactly
+  `cosine(text_proj(t), mean_j(region_proj(R)))`, bit-identical (not just
+  close) to the pure-cosine term with the trilinear contribution zeroed.
+- `BornRuleScoreHead` (V2) — `sum_j |<t,R_j>|^2 / n_regions`.
+- `AggregationScoreHead` (V3) — `agg="max"` or `"lse"`, drops the
+  region-indexed `w_r` factor entirely.
+- V4 is config on the existing `TrilinearScoreHead`: `tie_uv` (share `u`
+  and `v`) and `normalize_terms` (L2-normalise `t`/`R_j` before scoring),
+  plus `rank=8` and higher `head_weight_decay` set at launch time — no new
+  class needed.
+
+**F1/F2** needed an artifact that didn't exist yet: `ttn_supervised_probe.py`
+only ever kept its best backbone in memory (`best_state`), discarding it
+on exit — so N2's validated 0.5857 CIFAR-10 checkpoint was never actually
+saved to disk. Fixed: it now writes
+`runs/checkpoints/ttn_supervised_probe/backbone_ttn_nonlin-{nonlinearity}_best.pt`
+(`{"backbone_state_dict", "test_acc", "val_acc"}`) whenever `arch == "ttn"`.
+N2 (gelu) relaunched to produce it — **F1/F2 wait on that job**, not
+launched in this immediate batch. `run.py` gained
+`_load_pretrained_image_tower` (loads the checkpoint; `freeze=True` for F1
+sets `requires_grad_(False)` + `.eval()` and excludes the tower from the
+optimizer's param groups entirely, rather than relying on `requires_grad`
+alone — confirmed `Trainer` never calls `.train()/.eval()` itself, so the
+frozen tower's eval-mode dropout sticks for the whole run without being
+reset each epoch).
+
+Verified locally: all four new heads pass the same forward+backward+
+`SVOHardNegStep` integration smoke test used for B1/A1, with the added V1
+gate=0 identity assertion.
+
+### Batch launched
+
+Baseline unchanged: A1+B1+cp_rank=128+triplet_weight=100,
+`SVO_ML_REGION_LEVEL=1`, SVO-Probes 0.5323 (S1).
+
+| job | `SVO_ML_SCORE_HEAD` + config | notes |
+|---|---|---|
+| V1 | `trilinear_gated` | gate value is the headline number to watch |
+| V2 | `born` | |
+| V3 | `aggregation`, `SVO_ML_AGGREGATION_FN=max` | |
+| V4 | `trilinear`, `SVO_ML_RANK=8`, `SVO_ML_TIE_UV=true`, `SVO_ML_NORMALIZE_TERMS=true`, `SVO_ML_HEAD_WEIGHT_DECAY=0.01` | |
+
+F1/F2 pending N2's backbone checkpoint (relaunched as a prerequisite, see
+above) — will launch once that job finishes.
+
+**Per the spec: report train `hard_neg_acc` alongside val for every row**,
+since B1's diagnosis came from the train/val gap, not accuracy alone.

@@ -111,6 +111,9 @@ class SVOHardNegStep:
             # Structured heads (Routes A/B): score_pairs/hard_neg_acc etc. are
             # already logged by StructuredContrastiveLoss above — the cosine-
             # specific diagnostics below don't apply to non-flat representations.
+            gate = getattr(score_head, "gate", None)
+            if gate is not None:
+                metrics["score_head_gate"] = gate.detach()
             return loss, metrics
 
         with torch.no_grad():

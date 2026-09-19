@@ -64,15 +64,41 @@ class SVOExperimentConfig(BaseSettings):
     pretrained_checkpoint: str | None = None
 
     # Routes A/B (TTN_CIFAR_EXPERIMENTS.md's "Implementation spec: Routes N,
-    # B, A"). "cosine" (default) reproduces every existing run bit-for-bit —
-    # image_head/text_head/ImageContrastiveLoss, no score head at all.
-    # "trilinear" (Route B) and "role_grounded" (Route A) both need P1
-    # (TTNImageModel.forward_regions) and route through StructuredContrastiveLoss
-    # instead. "role_grounded" additionally needs subj/verb/obj columns
-    # (added to svo_{train,val,test}_probes.parquet by prepare_datasets.py).
-    score_head: Literal["cosine", "trilinear", "role_grounded"] = "cosine"
+    # B, A", then "Route B variations"). "cosine" (default) reproduces every
+    # existing run bit-for-bit — image_head/text_head/ImageContrastiveLoss,
+    # no score head at all. All others need P1 (TTNImageModel.forward_regions)
+    # and route through StructuredContrastiveLoss instead:
+    #   trilinear      Route B (B1) — diagnosed as memorising an absolute
+    #                  region index; SVO-Probes 0.5168, below the 0.5323
+    #                  cosine baseline. Kept for reference/re-runs.
+    #   trilinear_gated  V1 — cosine(t, pooled(R)) + gate * trilinear(t, R),
+    #                  gate init 0.0.
+    #   born           V2 — sum_j |<t, R_j>|^2, permutation-invariant.
+    #   aggregation    V3 — max/LSE region aggregation, drops the region-
+    #                  indexed factor entirely. See `aggregation_fn`.
+    #   role_grounded  Route A — needs subj/verb/obj columns (added to
+    #                  svo_{train,val,test}_probes.parquet by prepare_datasets.py).
+    score_head: Literal["cosine", "trilinear", "trilinear_gated", "born", "aggregation", "role_grounded"] = "cosine"
     region_level: int = 1  # P1: 4**region_level regions, root-indexed
     score_dim: int = 128
-    rank: int = 32  # Route B's CP rank
+    rank: int = 32  # CP rank (trilinear / trilinear_gated / aggregation)
+    aggregation_fn: Literal["max", "lse"] = "max"  # V3 only
+
+    # V4 (capacity reduction / bounded terms) — applies to score_head=trilinear
+    # or trilinear_gated. tie_uv shares one CP factor between text/region
+    # projections instead of learning them independently; normalize_terms
+    # L2-normalises t and each R_j before scoring so every term is bounded.
+    tie_uv: bool = False
+    normalize_terms: bool = False
+
+    # F1/F2 (TTN_CIFAR_EXPERIMENTS.md's "Route B variations" — Orthogonal:
+    # freeze a CIFAR-pretrained image tower). Path to a checkpoint saved by
+    # qnlp/discoviz/diagnostic/ttn_supervised_probe.py (a real,
+    # image-grounded TTNImageModel backbone, not random init). None trains
+    # the image tower from scratch as before. freeze_pretrained_image_tower
+    # controls whether it's frozen (F1, isolates capacity) or warm-started
+    # and left trainable (F2, isolates initialisation).
+    pretrained_image_tower_checkpoint: str | None = None
+    freeze_pretrained_image_tower: bool = True
 
     model_config = SettingsConfigDict(env_prefix="SVO_ML_")

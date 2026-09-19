@@ -46,6 +46,7 @@ from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision import transforms
 from torchvision.models import resnet18
 
+from qnlp.constants import constants
 from qnlp.discoviz.models.image_model import TTNImageModel, image_model_hyperparams
 from qnlp.utils.logging import setup_logger
 from qnlp.utils.seeding import set_seed
@@ -301,6 +302,23 @@ def train_and_eval(
     majority = _majority_baseline(test_loader)
 
     logger.info(f"[{arch}] FINAL test_acc={test_acc:.4f} majority_baseline={majority:.4f} params={n_params}")
+
+    if arch == "ttn" and hasattr(model, "backbone"):
+        # TTN_CIFAR_EXPERIMENTS.md's F1/F2 (Route B variations): a real,
+        # image-grounded TTNImageModel backbone this probe validated, saved
+        # so it can be loaded (frozen or warm-started) into an SVO run
+        # instead of training from random init. Previously this checkpoint
+        # only ever lived in memory (`best_state`) and was discarded when
+        # the process exited.
+        nonlin = image_model_hyperparams.nonlinearity
+        ckpt_path = constants.checkpoints_path / "ttn_supervised_probe" / f"backbone_{arch}_nonlin-{nonlin}_best.pt"
+        ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {"backbone_state_dict": model.backbone.state_dict(), "test_acc": test_acc, "val_acc": best_val_acc},
+            ckpt_path,
+        )
+        logger.info(f"[{arch}] backbone checkpoint saved to {ckpt_path}")
+
     return {"arch": arch, "test_acc": test_acc, "majority_baseline": majority, "params": n_params}
 
 

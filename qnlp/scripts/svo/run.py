@@ -34,7 +34,14 @@ from qnlp.discoviz.models.image_model import TTNImageModel, image_model_hyperpar
 from qnlp.domain.datasets.dataloader import get_dataloaders
 from qnlp.domain.datasets.dataset import collect_symbol_sizes
 from qnlp.domain.models.vlm.contrastive_vlm import ContrastiveVLM
-from qnlp.domain.models.vlm.score_heads import RoleGroundedScoreHead, ScoreHead, TrilinearScoreHead
+from qnlp.domain.models.vlm.score_heads import (
+    AggregationScoreHead,
+    BornRuleScoreHead,
+    GatedResidualTrilinearScoreHead,
+    RoleGroundedScoreHead,
+    ScoreHead,
+    TrilinearScoreHead,
+)
 from qnlp.scripts.coco_multi_caption.evaluate import evaluate_svo, log_banner, print_full_report
 from qnlp.scripts.svo.config import SVOExperimentConfig
 from qnlp.scripts.svo.step import SVOHardNegStep
@@ -91,6 +98,30 @@ def _warm_start_from_aro(text_model: EinsumModel, image_model: TTNImageModel, ch
     )
 
 
+def _load_pretrained_image_tower(image_model: TTNImageModel, checkpoint_path: str, freeze: bool, device) -> None:
+    """F1/F2 (TTN_CIFAR_EXPERIMENTS.md's "Route B variations" — Orthogonal:
+    freeze a CIFAR-pretrained image tower). SVO has ~8,600 training rows
+    against a ~2.3M-parameter image tower — most of B1's memorisation
+    capacity is plausibly in the backbone, not the ~8K-parameter score
+    head. Loads a real, image-grounded backbone (saved by
+    ttn_supervised_probe.py) instead of training from random init.
+    freeze=True (F1) removes that capacity source entirely, training only
+    the score head and text tower; freeze=False (F2) warm-starts but keeps
+    it trainable, separating "good init" from "reduced capacity"."""
+    logger.info(f"Loading pretrained image tower from {checkpoint_path} (freeze={freeze})")
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    image_model.load_state_dict(checkpoint["backbone_state_dict"], strict=True)
+    logger.info(
+        f"Image tower loaded (probe test_acc={checkpoint.get('test_acc', '?')}, "
+        f"val_acc={checkpoint.get('val_acc', '?')})."
+    )
+    if freeze:
+        for p in image_model.parameters():
+            p.requires_grad_(False)
+        image_model.eval()
+        logger.info("Image tower frozen (F1): 0 trainable image-tower parameters.")
+
+
 def _build_score_head(cfg: SVOExperimentConfig, image_model: TTNImageModel) -> ScoreHead | None:
     """Routes A/B (TTN_CIFAR_EXPERIMENTS.md). None reproduces every existing
     run bit-for-bit (cosine head, ImageContrastiveLoss)."""
@@ -110,6 +141,37 @@ def _build_score_head(cfg: SVOExperimentConfig, image_model: TTNImageModel) -> S
             score_dim=cfg.score_dim,
             rank=cfg.rank,
             region_level=cfg.region_level,
+            tie_uv=cfg.tie_uv,
+            normalize_terms=cfg.normalize_terms,
+        )
+    if cfg.score_head == "trilinear_gated":
+        return GatedResidualTrilinearScoreHead(
+            text_dim=cfg.embedding_dim,
+            region_dim=region_dim,
+            n_regions=n_regions,
+            score_dim=cfg.score_dim,
+            rank=cfg.rank,
+            region_level=cfg.region_level,
+            tie_uv=cfg.tie_uv,
+            normalize_terms=cfg.normalize_terms,
+        )
+    if cfg.score_head == "born":
+        return BornRuleScoreHead(
+            text_dim=cfg.embedding_dim,
+            region_dim=region_dim,
+            n_regions=n_regions,
+            score_dim=cfg.score_dim,
+            region_level=cfg.region_level,
+        )
+    if cfg.score_head == "aggregation":
+        return AggregationScoreHead(
+            text_dim=cfg.embedding_dim,
+            region_dim=region_dim,
+            n_regions=n_regions,
+            score_dim=cfg.score_dim,
+            rank=cfg.rank,
+            region_level=cfg.region_level,
+            agg=cfg.aggregation_fn,
         )
     if cfg.score_head == "role_grounded":
         return RoleGroundedScoreHead(
@@ -191,6 +253,11 @@ def run():
     if cfg.pretrained_checkpoint:
         _warm_start_from_aro(text_model, image_model, cfg.pretrained_checkpoint, device)
 
+    if cfg.pretrained_image_tower_checkpoint:
+        _load_pretrained_image_tower(
+            image_model, cfg.pretrained_image_tower_checkpoint, cfg.freeze_pretrained_image_tower, device
+        )
+
     score_head = _build_score_head(cfg, image_model)
 
     model = ContrastiveVLM(
@@ -221,8 +288,15 @@ def run():
 
     param_groups = [
         {"params": text_model.parameters(), "lr": cfg.text_lr, "weight_decay": cfg.text_weight_decay},
-        {"params": image_model.parameters(), "lr": cfg.image_lr, "weight_decay": cfg.image_weight_decay},
     ]
+    # F1 (frozen pretrained image tower): exclude it from the optimizer
+    # entirely rather than relying on requires_grad=False alone, so AdamW
+    # never allocates momentum state for parameters that will never update.
+    trainable_image_params = [p for p in image_model.parameters() if p.requires_grad]
+    if trainable_image_params:
+        param_groups.append(
+            {"params": trainable_image_params, "lr": cfg.image_lr, "weight_decay": cfg.image_weight_decay}
+        )
     # NoOpHead (use_alignment_head=False) has no parameters — AdamW errors on
     # an empty param group, so only add it when there's something to train.
     head_params = list(model.image_head.parameters()) + list(model.text_head.parameters())
