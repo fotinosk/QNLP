@@ -3234,3 +3234,43 @@ strongest config found so far for each arm.
 
 **Launched: jobs 7435134 (CLIP) and 7435135 (TTN)**, both R4's config
 plus `SVO_ML_USE_WEIGHT_NORM=false` and `SVO_ML_TEXT_WEIGHT_DECAY=0.01`.
+
+## Rectified rerun result: neither fix moves either arm beyond R4
+
+**R5 CLIP: SVO-Probes 0.6201** (obj_neg 0.7188, subj_neg 0.5714, verb_neg
+0.5979), SVO-Swap 0.6327. vs. R4's 0.6262: **essentially flat (-0.006)**.
+A mid-training val plateau at 0.665-0.675 (epochs 4-10) did not hold at
+the final checkpoint-selected test evaluation — the same
+don't-trust-mid-training-val lesson learned once before in this project
+(the T1 sweep).
+
+**R5 TTN: SVO-Probes 0.5424** (obj_neg 0.6154, subj_neg 0.5275, verb_neg
+0.5186) vs. R4's 0.5506: -0.008. Still within noise relative to baseline
+either way.
+
+### Honest conclusion
+
+**Neither structural rectification (removing the weight-norm gauge-fix;
+matching `weight_decay` to 0.01) moved either arm beyond what R4 already
+achieved.** Both were real, previously-unaccounted differences from the
+reference, but neither turns out to be a meaningful contributor to the
+remaining gap. Updated full tally:
+
+| row | CLIP | delta vs baseline | TTN | delta vs baseline |
+|---|---|---|---|---|
+| baseline | 0.5811 | — | 0.5323 | — |
+| R1 | 0.6229 | +0.042 | 0.5304 | -0.002 |
+| R2 | 0.6137 | +0.033 | 0.5558 | +0.024 |
+| R3 | 0.6039 | +0.023 | 0.5183 | -0.014 |
+| R4 (R1+R2+R3) | 0.6262 | +0.045 | 0.5506 | +0.018 |
+| R5 (R4 + weight-norm off + wd=0.01) | 0.6201 | +0.039 | 0.5424 | +0.010 |
+
+Gap to the DisCoCLIP target (0.8355) remains at ~0.215 (CLIP arm),
+~84% unclosed. **The one remaining identified, real structural
+difference is the deferred one**: their pipeline parses raw sentences
+then relabels tree leaves with lemmas afterward; ours lemmatises before
+parsing. Testing that requires reordering
+`qnlp/preprocessing_pipelines/svo/pipeline.py`'s steps and a full CCG
+recompile of the SVO atlas — a real undertaking, not a quick diagnostic
+run, and the next candidate worth pursuing if this investigation
+continues.
