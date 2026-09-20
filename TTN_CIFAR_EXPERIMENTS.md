@@ -2592,3 +2592,48 @@ new code, unset backbone flags) not re-run on the cluster — the default
 path's equivalence is proven by code inspection (`_expand`/`build_image_model`
 are no-ops when `tied=False`/`image_backbone=ttn`) rather than spending a
 100-epoch job re-confirming an algebraically guaranteed identity.
+
+### Batch results (first pass)
+
+| row | candidate | test_acc | params | vs. 0.5500 |
+|---|---|---|---|---|
+| 1 | NODE-1 (pairwise) | 0.5474 | 23.7M | fail — worse, at 3.3x the params |
+| 2 | NODE-2 (degree2) | 0.6069 | 12.6M | **pass**, +0.057 |
+| 3 | NODE-3 (isometric) | stuck at chance (0.10) after 4 epochs, ~400s/epoch | — | likely failing to train (still confirming) |
+| 4 | NODE-4 (tucker, rank=8) | 0.5692 | **985K** | **pass**, +0.019 at 14% of baseline's params |
+| 5 | tying only (control) | 0.6354 | 2.28M | **pass, biggest win** — +0.085 at ~32% of baseline's params |
+| 6 | DTTN-T | ~0.83-0.85 by epoch 33, still climbing | ~7.7M | **pass, by far the strongest result** — beats the CNN (0.7842) and ResNet-18 (0.7569) references, not just the gated-TTN baseline |
+
+Two clear takeaways: **tying is the single most impactful cheap
+intervention** (large accuracy gain, large parameter reduction, zero new
+node math), and **DTTN is decisively the best image tower this project
+has found.** NODE-1 is a clear loser. NODE-3's status is unresolved —
+either very slow to escape a bad init or genuinely broken by the
+orthogonal constraint.
+
+## DTTN launched on SVO and ARO, from scratch (2026-09-20)
+
+Per the user's stated general preference (train from scratch by default;
+reach for transfer learning only with a concrete, evidenced reason — not
+a precaution), and since DTTN is architecturally unlike TTN (CNN-style
+locality/translation priors TTN lacks, so a from-scratch failure mode
+observed for TTN on SVO doesn't transfer by default): launched DTTN-T
+from scratch on both SVO and ARO, default config otherwise (cosine score
+head, 64x64 images — `dttn_stem_patch=2`/`transitions=FTTT` gives a final
+2x2 feature map, "marginal" per `DTTN_IMPLEMENTATION_GUIDE.md`'s
+resolution table but usable).
+
+No new model class needed — `DTTNImageModel` is already a separate class
+in its own file, `TTNImageModel` is untouched, and reverting to the
+original architecture is just not setting `IMAGE_MODEL_IMAGE_BACKBONE`
+(default `ttn`). This separation was already the design goal of the
+`build_image_model` factory.
+
+| job | run |
+|---|---|
+| 7433808 | SVO, DTTN-T, from scratch |
+| 7433809 | ARO, DTTN-T, from scratch |
+
+If either lands at chance the way every from-scratch TTN attempt on SVO
+has, that becomes the concrete evidence needed to justify a CIFAR-pretrain
+warm-start experiment (F1/F2's pattern) — not before.
