@@ -3231,3 +3231,6 @@ Applying both fixes on top of R4's already-best-tested combination
 (`dataset_suffix=_thresh50`, `triplet_weight=0`, `text_lr=0.003`,
 `batch_size=64`) rather than the plain baseline, since R4 is the
 strongest config found so far for each arm.
+
+**Launched: jobs 7435134 (CLIP) and 7435135 (TTN)**, both R4's config
+plus `SVO_ML_USE_WEIGHT_NORM=false` and `SVO_ML_TEXT_WEIGHT_DECAY=0.01`.
