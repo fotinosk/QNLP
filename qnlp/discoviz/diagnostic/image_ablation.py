@@ -35,7 +35,7 @@ from torchvision import transforms
 
 from qnlp.constants import constants
 from qnlp.discoviz.models.einsum_model import EinsumModel
-from qnlp.discoviz.models.image_model import TTNImageModel, image_model_hyperparams
+from qnlp.discoviz.models.image_model import build_image_model, image_model_hyperparams
 from qnlp.domain.datasets.dataloader import vlm_collate_fn
 from qnlp.domain.datasets.dataset import VLMDataset
 from qnlp.domain.models.vlm.contrastive_vlm import ContrastiveVLM
@@ -60,7 +60,7 @@ def load_model(checkpoint_path: Path) -> ContrastiveVLM:
 
     model = ContrastiveVLM(
         EinsumModel(non_linear_contractions=non_linear),
-        TTNImageModel(embedding_dim),
+        build_image_model(embedding_dim),
         embedding_dim=embedding_dim,
         use_mlp_head=use_mlp,
         use_projection_head=use_proj,

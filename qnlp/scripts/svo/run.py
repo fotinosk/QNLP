@@ -30,7 +30,7 @@ from qnlp.core.training.losses.image_contrastive import ImageContrastiveLoss
 from qnlp.core.training.losses.structured_contrastive import StructuredContrastiveLoss
 from qnlp.core.training.trainer import Trainer
 from qnlp.discoviz.models.einsum_model import EinsumModel
-from qnlp.discoviz.models.image_model import TTNImageModel, image_model_hyperparams
+from qnlp.discoviz.models.image_model import build_image_model, image_model_hyperparams
 from qnlp.domain.datasets.dataloader import get_dataloaders
 from qnlp.domain.datasets.dataset import collect_symbol_sizes
 from qnlp.domain.models.vlm.contrastive_vlm import ContrastiveVLM
@@ -60,7 +60,7 @@ COMPILED_COLUMNS = [("diagram", "symbols", "caption", "path")]
 SYMBOL_COLS = ["symbols"]
 
 
-def _warm_start_from_aro(text_model: EinsumModel, image_model: TTNImageModel, checkpoint_path: str, device) -> None:
+def _warm_start_from_aro(text_model: EinsumModel, image_model: torch.nn.Module, checkpoint_path: str, device) -> None:
     """Load an aro_contrastive checkpoint's image tower in full, and transfer
     text-tower symbols (words) that exist in both vocabularies with matching
     shape. See SVOExperimentConfig.pretrained_checkpoint for the rationale."""
@@ -98,7 +98,7 @@ def _warm_start_from_aro(text_model: EinsumModel, image_model: TTNImageModel, ch
     )
 
 
-def _load_pretrained_image_tower(image_model: TTNImageModel, checkpoint_path: str, freeze: bool, device) -> None:
+def _load_pretrained_image_tower(image_model: torch.nn.Module, checkpoint_path: str, freeze: bool, device) -> None:
     """F1/F2 (TTN_CIFAR_EXPERIMENTS.md's "Route B variations" — Orthogonal:
     freeze a CIFAR-pretrained image tower). SVO has ~8,600 training rows
     against a ~2.3M-parameter image tower — most of B1's memorisation
@@ -143,7 +143,7 @@ def _load_pretrained_image_tower(image_model: TTNImageModel, checkpoint_path: st
         logger.info("Image tower frozen (F1): 0 trainable image-tower parameters.")
 
 
-def _build_score_head(cfg: SVOExperimentConfig, image_model: TTNImageModel) -> ScoreHead | None:
+def _build_score_head(cfg: SVOExperimentConfig, image_model: torch.nn.Module) -> ScoreHead | None:
     """Routes A/B (TTN_CIFAR_EXPERIMENTS.md). None reproduces every existing
     run bit-for-bit (cosine head, ImageContrastiveLoss)."""
     if cfg.score_head == "cosine":
@@ -269,7 +269,7 @@ def run():
     logger.info(f"Collected {len(symbols)} unique symbols.")
 
     text_model = EinsumModel(symbols, sizes, non_linear_contractions=cfg.use_non_linear_contractions).to(device)
-    image_model = TTNImageModel(cfg.embedding_dim).to(device)
+    image_model = build_image_model(cfg.embedding_dim).to(device)
 
     if cfg.pretrained_checkpoint:
         _warm_start_from_aro(text_model, image_model, cfg.pretrained_checkpoint, device)

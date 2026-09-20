@@ -9,7 +9,7 @@ from qnlp.constants import constants
 from qnlp.core.training.losses.contrastive import ContrastiveLoss
 from qnlp.core.training.trainer import Trainer
 from qnlp.discoviz.models.einsum_model import EinsumModel
-from qnlp.discoviz.models.image_model import TTNImageModel, image_model_hyperparams
+from qnlp.discoviz.models.image_model import build_image_model, image_model_hyperparams
 from qnlp.domain.datasets.dataloader import get_dataloaders
 from qnlp.domain.datasets.dataset import collect_symbol_sizes
 from qnlp.domain.models.vlm.contrastive_vlm import ContrastiveVLM
@@ -97,7 +97,7 @@ def run():
     logger.info(f"Collected {len(symbols)} unique symbols.")
 
     text_model = EinsumModel(symbols, sizes, non_linear_contractions=nlc).to(device)
-    image_model = TTNImageModel(cfg.embedding_dim).to(device)
+    image_model = build_image_model(cfg.embedding_dim).to(device)
     model = ContrastiveVLM(
         text_model, image_model, embedding_dim=cfg.embedding_dim, use_projection_head=cfg.use_alignment_head
     ).to(device)

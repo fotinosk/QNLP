@@ -2526,3 +2526,21 @@ capacity/initialisation axis directly:
 - Sweep V4's capacity-reduction knobs further (smaller `rank`, stronger
   weight decay) now that it's confirmed to be a working, independent
   lever.
+
+# NODE_ARCHITECTURE_PLAN.md — row 0 result (2026-09-20)
+
+Excess kurtosis of `merged` (the 4-way Hadamard product inside
+`CPQuadRankLayer`), measured on N2's trained checkpoint (0.5857,
+gelu-gated, `cp_rank=256`), 512 real CIFAR-10 images:
+
+| layer | excess kurtosis | shape |
+|---|---|---|
+| 0 | 1035.4 | (512, 64, 256) |
+| 1 | 163.3 | (512, 16, 256) |
+| 2 | 9301.2 | (512, 4, 256) |
+| 3 | 313.9 | (512, 1, 256) |
+
+**Overwhelmingly heavy-tailed** — not close to Gaussian (0) or even a
+Laplace tail (excess kurtosis 3); every layer is two to four orders of
+magnitude past that. **NODE-2 (degree reduction) is well-motivated and
+included in the batch.**

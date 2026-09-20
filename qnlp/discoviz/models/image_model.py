@@ -1,4 +1,5 @@
 import math
+from typing import Literal
 
 import torch
 from einops import rearrange
@@ -6,6 +7,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from torch import nn
 
 from qnlp.discoviz.models.cp_node import CPQuadRankLayer
+from qnlp.discoviz.models.node_variants import (
+    DegreeReducedNode,
+    PairwiseBinaryNode,
+    TuckerNode,
+    apply_isometric_parametrization,
+)
 
 
 class ImageModelSettings(BaseSettings):
@@ -64,9 +71,55 @@ class ImageModelSettings(BaseSettings):
     # buys). gate inits at exactly 0.0 per layer, so this is a measurement,
     # not a capitulation -- at gate=0 the model is bit-for-bit unchanged.
     nonlinearity: str = "none"
+    # NODE_ARCHITECTURE_PLAN.md: per-node computation. "cp" (default) is
+    # today's 4-way CP-decomposed node, unchanged. "pairwise" = NODE-1
+    # (standard TTN, two nested binary contractions). "degree2" = NODE-2
+    # (sum of six pairwise products, gated on the kurtosis measurement
+    # showing `merged` is heavy-tailed). "isometric" = NODE-3 (today's CP
+    # node, tied, kept on the Stiefel manifold throughout training via
+    # orthogonal parametrisation -- requires tie_nodes != "none").
+    # "tucker" = NODE-4 (full Tucker core instead of CP's diagonal core --
+    # requires tie_nodes != "none", the core has rank^5 entries).
+    node_type: Literal["cp", "pairwise", "degree2", "isometric", "tucker"] = "cp"
+    # Cross-cutting tying option: one shared tensor per level instead of
+    # one per node. "none" (default, today's behaviour) | "all" (every
+    # layer) | "fine" (layers 0-1 only, leaving the 4-node/1-node layers
+    # per-node). Composes with every node_type; "isometric"/"tucker"
+    # require "all" or "fine" (never "none").
+    tie_nodes: Literal["none", "all", "fine"] = "none"
+    # DTTN_IMPLEMENTATION_GUIDE.md: drop-in alternative image tower. "ttn"
+    # (default) is TTNImageModel, unchanged. "dttn" selects DTTNImageModel
+    # instead -- construct via `build_image_model`, not TTNImageModel(...)
+    # directly, wherever a caller should respect this switch.
+    image_backbone: Literal["ttn", "dttn"] = "ttn"
+    dttn_variant: Literal["T", "S", "L"] = "T"
+    dttn_stem_patch: int = 2  # 1 for 32x32 inputs -- see the guide's resolution table
+    dttn_transitions: str = "FTTT"  # per-stage flags, 'T'/'F', length 4
+    dttn_use_ln: bool = True
+    dttn_scale: int = 3  # expansion ratio
 
 
 image_model_hyperparams = ImageModelSettings()
+
+
+def build_image_model(embedding_dim: int) -> nn.Module:
+    """Factory respecting IMAGE_MODEL_IMAGE_BACKBONE. Prefer this over
+    constructing TTNImageModel directly at any new call site so DTTN stays
+    a config switch rather than a per-caller branch (DTTN_IMPLEMENTATION_
+    GUIDE.md)."""
+    if image_model_hyperparams.image_backbone == "dttn":
+        from qnlp.discoviz.models.dttn_image_model import DTTNImageModel
+
+        return DTTNImageModel(
+            embedding_dim,
+            variant=image_model_hyperparams.dttn_variant,
+            stem_patch=image_model_hyperparams.dttn_stem_patch,
+            transitions=image_model_hyperparams.dttn_transitions,
+            use_ln=image_model_hyperparams.dttn_use_ln,
+            scale=image_model_hyperparams.dttn_scale,
+            in_channels=3 if image_model_hyperparams.use_color else 1,
+        )
+    return TTNImageModel(embedding_dim)
 
 
 class TTNImageModel(nn.Module):
@@ -143,6 +196,11 @@ class TTNImageModel(nn.Module):
 
         gains = [2.0, 1.5, 1.0, 1.0]
 
+        node_type = image_model_hyperparams.node_type
+        tie_mode = image_model_hyperparams.tie_nodes
+        if node_type in ("isometric", "tucker") and tie_mode == "none":
+            raise ValueError(f"node_type={node_type!r} requires tie_nodes != 'none' (see NODE_ARCHITECTURE_PLAN.md).")
+
         for i in range(self.depth):
             # Pruning: Remove residuals from Layer 0 & 1 to force feature learning
             use_res = True if i > 1 else False
@@ -150,20 +208,36 @@ class TTNImageModel(nn.Module):
             # depth every prior config used); deeper trees (e.g. B2's
             # per-pixel leaves, depth 5) fall back to the untuned default.
             gain = gains[i] if i < len(gains) else 1.0
+            # "fine" ties only layers 0-1 (the many-node layers, where
+            # per-position parameters are both most numerous and least
+            # plausibly meaningful); "all" ties every layer.
+            tied = tie_mode == "all" or (tie_mode == "fine" and i < 2)
 
-            self.layers.append(
-                CPQuadRankLayer(
-                    num_nodes=current_nodes,
-                    in_dim=in_dim,
-                    out_dim=in_dim * 2,
-                    rank=image_model_hyperparams.cp_rank,
-                    dropout_p=image_model_hyperparams.dropout,
-                    use_residual=use_res,
-                    gain_factor=gain,
-                    use_isometric_init=image_model_hyperparams.use_isometric_init,
-                    nonlinearity=image_model_hyperparams.nonlinearity,
-                )
+            layer_kwargs = dict(
+                num_nodes=current_nodes,
+                in_dim=in_dim,
+                out_dim=in_dim * 2,
+                rank=image_model_hyperparams.cp_rank,
+                dropout_p=image_model_hyperparams.dropout,
+                use_residual=use_res,
+                gain_factor=gain,
+                use_isometric_init=image_model_hyperparams.use_isometric_init,
+                nonlinearity=image_model_hyperparams.nonlinearity,
+                tied=tied,
             )
+            if node_type == "cp":
+                layer = CPQuadRankLayer(**layer_kwargs)
+            elif node_type == "isometric":
+                layer = apply_isometric_parametrization(CPQuadRankLayer(**layer_kwargs))
+            elif node_type == "pairwise":
+                layer = PairwiseBinaryNode(**layer_kwargs)
+            elif node_type == "degree2":
+                layer = DegreeReducedNode(**layer_kwargs)
+            elif node_type == "tucker":
+                layer = TuckerNode(**layer_kwargs)
+            else:
+                raise ValueError(f"Unknown node_type: {node_type!r}")
+            self.layers.append(layer)
             current_nodes //= 4
             in_dim *= 2
 

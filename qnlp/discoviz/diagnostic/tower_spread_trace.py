@@ -45,7 +45,7 @@ from einops import rearrange
 from torchvision import transforms
 
 from qnlp.constants import constants
-from qnlp.discoviz.models.image_model import TTNImageModel, image_model_hyperparams
+from qnlp.discoviz.models.image_model import build_image_model, image_model_hyperparams
 
 
 def load_images(parquet: Path, column: str, n: int) -> torch.Tensor:
@@ -130,7 +130,7 @@ def _report(tensor: torch.Tensor, label: str, ref_sim: torch.Tensor, labels: tor
 
 
 def trace(
-    model: TTNImageModel,
+    model: torch.nn.Module,
     x: torch.Tensor,
     labels: torch.Tensor | None = None,
     mean_center: bool = False,
@@ -214,7 +214,7 @@ def main() -> None:
         state_dict = {k[len("image_model.") :]: v for k, v in full.items() if k.startswith("image_model.")}
         embedding_dim = state_dict["head.weight"].shape[0]
 
-    model = TTNImageModel(embedding_dim)
+    model = build_image_model(embedding_dim)
     if state_dict is not None:
         model.load_state_dict(state_dict)
     model.eval()

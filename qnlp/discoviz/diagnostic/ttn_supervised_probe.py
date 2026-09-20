@@ -47,7 +47,7 @@ from torchvision import transforms
 from torchvision.models import resnet18
 
 from qnlp.constants import constants
-from qnlp.discoviz.models.image_model import TTNImageModel, image_model_hyperparams
+from qnlp.discoviz.models.image_model import build_image_model, image_model_hyperparams
 from qnlp.utils.logging import setup_logger
 from qnlp.utils.seeding import set_seed
 from qnlp.utils.torch_utils import get_device
@@ -80,7 +80,7 @@ class TTNClassifier(nn.Module):
 
     def __init__(self, num_classes: int, embedding_dim: int = 128):
         super().__init__()
-        self.backbone = TTNImageModel(embedding_dim)
+        self.backbone = build_image_model(embedding_dim)
         self.classifier = nn.Linear(embedding_dim, num_classes)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

@@ -29,7 +29,7 @@ from torchvision import transforms
 from qnlp.constants import constants
 from qnlp.core.training.retrieval_eval import retrieval_metrics
 from qnlp.discoviz.models.einsum_model import EinsumModel
-from qnlp.discoviz.models.image_model import TTNImageModel, image_model_hyperparams
+from qnlp.discoviz.models.image_model import build_image_model, image_model_hyperparams
 from qnlp.domain.datasets.dataloader import vlm_collate_fn
 from qnlp.domain.datasets.dataset import VLMDataset
 from qnlp.domain.datasets.winoground_dataset import WinogroundDataset, winoground_eval_collate_fn
@@ -90,7 +90,7 @@ def load_model(checkpoint_path: Path, device: torch.device) -> ContrastiveVLM:
         f"embedding_dim={embedding_dim} | non_linear={non_linear} | mlp_head={mlp_head}"
     )
     text_model = EinsumModel(non_linear_contractions=non_linear)
-    image_model = TTNImageModel(embedding_dim)
+    image_model = build_image_model(embedding_dim)
     model = ContrastiveVLM(text_model, image_model, embedding_dim=embedding_dim, use_mlp_head=mlp_head)
     model.load_state_dict(state_dict)
     del checkpoint, state_dict  # free the CPU-side optimizer state before moving to GPU
