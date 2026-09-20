@@ -3063,3 +3063,25 @@ though the closest any TTN-arm row has come to crossing it.
 Both completed rows point the same direction: real, meaningful gains for
 the CLIP arm (+0.023 to +0.033), no reliable effect on the TTN arm.
 Awaiting R1, then R4 (all three combined) once R1 reports.
+
+## R1 TTN result — third consecutive noise result for the TTN arm
+
+**R1 TTN (threshold=50): SVO-Probes 0.5304** (obj_neg 0.5337, subj_neg
+0.5385, verb_neg 0.5263) vs. S1's 0.5323 baseline: **-0.002**, essentially
+flat, clearly within noise. SVO-Swap 0.3061 (n=49 — the threshold=50
+swap set is much smaller than the default's 105, so this number carries
+more variance than the others).
+
+**All three TTN-arm rows now land within noise** (R1 -0.002, R2 +0.024,
+R3 -0.014) — no single-variable change tested so far produces a real
+effect on the TTN arm. R1 CLIP still running (epoch 18, val
+`hard_neg_acc` 0.647, tracking the same 0.61-0.65 range as R2/R3).
+
+## Phase 2 running tally (updated)
+
+| row | CLIP arm | delta | TTN arm | delta | verdict |
+|---|---|---|---|---|---|
+| baseline | 0.5811 | — | 0.5323 | — | — |
+| R1 (threshold=50) | pending | — | 0.5304 | -0.002 | TTN noise |
+| R2 (drop triplet) | 0.6137 | +0.033 | 0.5558 | +0.024 | CLIP real; TTN noise |
+| R3 (lr/batch) | 0.6039 | +0.023 | 0.5183 | -0.014 | CLIP real; TTN noise |
