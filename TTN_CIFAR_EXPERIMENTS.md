@@ -2920,4 +2920,32 @@ loss with zero hard-negative weighting, unlike our default
 `configs/svo_default.yaml`: `learning_rate: 0.003`, `batch_size: 64`,
 `bond_dim: 10`, `temperature: 0.07` — exactly as the plan states.
 
-## Phase 2 — bisection batch, in progress
+## Phase 2 — bisection batch launched (2026-09-20)
+
+R2/R3 need no data changes — launched immediately, both arms each. R1
+needs a regenerated dataset at `WORD_FREQ_THRESHOLD=50`; added
+`SVO_PREP_WORD_FREQ_THRESHOLD`/`SVO_PREP_OUTPUT_SUFFIX` to
+`prepare_datasets.py`/`build_svo_swap.py` (writes to `_thresh50`-suffixed
+parquets, leaving the default threshold-10 files every other experiment
+reads from untouched) and a matching `SVO_ML_DATASET_SUFFIX` on
+`svo/run.py` to select it. Regeneration launched as job 7434678; R1's two
+training jobs follow once it completes.
+
+Baselines, exactly as previously run: CLIP arm = `image_backbone=clip`
+only (job 7434139's config, `triplet_weight` at its default 40000 — never
+explicitly tuned for this arm); TTN arm = S1's recipe (A1+B1+cp_rank=128,
+`triplet_weight=100`). This asymmetry is pre-existing, not something
+Phase 2 introduces — R2/R3 move each arm from its own actual best
+config, not from a shared one.
+
+| job | row | arm | change |
+|---|---|---|---|
+| 7434678 | R1 (data) | — | regenerate parquets at threshold=50 |
+| 7434679 | R2 | CLIP | `triplet_weight` 40000 -> 0 |
+| 7434680 | R2 | TTN | `triplet_weight` 100 -> 0 |
+| 7434681 | R3 | CLIP | `text_lr` 0.001->0.003, `batch_size` 128->64 |
+| 7434682 | R3 | TTN | same, `triplet_weight` held at 100 |
+
+Per the plan: **a TTN-arm change only counts as real at +0.03 or more**
+(baseline ~0.53, where this project has documented differences below
+that are noise); the CLIP arm is the decision input.
