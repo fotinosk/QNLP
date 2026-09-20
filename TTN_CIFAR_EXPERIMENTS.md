@@ -2978,3 +2978,17 @@ arm sits near chance in both R2 and R3 — consistent with S1's tuned
 `triplet_weight=100` being load-bearing for that arm specifically. None
 of these are final; reporting only once each job completes or
 early-stops.
+
+### R3 CLIP result — first real movement toward the reference
+
+**Finished: SVO-Probes overall 0.6039** (obj_neg 0.6352, subj_neg 0.5876,
+verb_neg 0.5971), **SVO-Swap 0.6000**. Matching the reference's optimiser
+defaults (`text_lr=0.003`, `batch_size=64`) took the CLIP arm from the
+0.5811 baseline to 0.6039 — **closing ~9% of the 0.254-point gap to the
+0.8355 target on its own.** Swap is roughly flat (0.6095 -> 0.6000).
+First confirmed real, positive single-variable result in this batch.
+
+R1 (both arms) confirmed training correctly on the regenerated
+threshold=50 data (5463/1817/1827 rows loaded, matching Phase 0's row
+counts). At epoch 3: R1 CLIP val `hard_neg_acc` 0.639 (promising early);
+R1 TTN 0.512 (at chance, typical this early for the TTN arm).
