@@ -2773,3 +2773,45 @@ image-tower investigation, and it points toward pursuing a
 CLIP-pretrained-then-warm-started (or otherwise stronger-initialised)
 image tower for SVO specifically, rather than the text-tower
 investigation the prior conclusion had prioritised.
+
+## Frozen CLIP: final result — the best SVO number in this project (2026-09-20)
+
+Job 7434139 finished. **SVO-Probes overall 0.5811** (obj_neg 0.6303,
+subj_neg 0.5897, verb_neg 0.5606), **SVO-Swap 0.6095** (105 pairs). Both
+clear the previous best on either benchmark by a wide margin (S1's
+cosine-head config: 0.5323 Probes; best prior Swap number was in the
+0.42-0.61 range depending on config, never this consistently above
+chance on both simultaneously). `image_pairwise_cos_mean` stayed at
+0.696 throughout training and at test time — no collapse.
+
+**Verdict: the sanity check is decisive.** SVO's caption/image task is
+genuinely learnable with a strong, fixed image representation. Every
+from-scratch image tower this project has built and tested on SVO — TTN
+in every configuration (A1/B1/cp_rank sweeps/Route N/Route B variations/
+F1's CIFAR-pretrained-frozen variant) and DTTN from scratch — has failed
+to extract adequate visual features from SVO's own ~8,600-image training
+set, even though DTTN independently proved capable of excellent visual
+features on CIFAR-10 (0.8589). The bottleneck for SVO has been the image
+tower's ability to learn good-enough features from this specific,
+small, real-photo dataset — not the text tower, not the loss/triplet-
+weight design, not the data itself.
+
+**Implication for next steps:** the highest-value direction for Track 1
+is now getting a better-than-from-scratch image representation into SVO
+training — most directly, warm-starting (not necessarily freezing, per
+the ARO/SVO CIFAR-pretrained-TTN comparison — F2 beat F1) a tower
+pretrained on a larger, more diverse image dataset than SVO alone can
+supply. DTTN pretrained on CIFAR-10 (already have a checkpoint machinery
+for this, `ttn_supervised_probe.py` saves backbones) is the cheapest
+next experiment in that direction; unfreezing CLIP itself (fine-tuning
+rather than freezing) is a further option if a from-scratch-in-spirit
+result is still wanted without inheriting an external architecture.
+
+## NODE-3 final result: confirmed dead
+
+**test_acc = 0.1000**, exactly the majority baseline. Early-stopped at
+epoch 32 (best val_acc 0.1040 — indistinguishable from noise around
+chance). 32 epochs at ~400-500s each with zero learning. The orthogonal
+parametrisation (combined with the required tying) prevents this node
+from training at all, at least in this configuration — a clear, clean
+fail, not a resource-constrained inconclusive result.
