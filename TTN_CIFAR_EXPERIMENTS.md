@@ -3010,3 +3010,56 @@ outcome — S1's `text_lr=0.001`/`batch_size=128` was already close to
 optimal for the TTN arm, so moving toward the reference's defaults
 neither helps nor meaningfully hurts it, while the same change gives
 CLIP a real, if modest, gain.
+
+## ARO DTTN (from scratch, job 7433809) — final result
+
+Early-stopped at epoch 49 (best epoch 39).
+
+| task | N | acc | true_cos | false_cos |
+|---|---|---|---|---|
+| attribution | 4438 | 0.8053 | 0.8277 | 0.6216 |
+| relation | 3650 | 0.5942 | 0.5939 | 0.4493 |
+| overall | 8088 | 0.7101 | 0.7222 | 0.5438 |
+
+Winoground (22/22 pairs evaluated) and SugarCREPE swap_obj (4/159
+evaluated) both had too few evaluated pairs to be meaningful — likely a
+vocabulary-coverage gap in DTTN's cold-start text tower on those eval
+sets, not informative here.
+
+**Caveat, not yet resolved: `image_pairwise_cos_mean` finished at
+0.998** — essentially fully collapsed, the same concern flagged earlier
+in this run's trajectory (0.82 at epoch 2 -> 0.986 at epoch 6 -> 0.998 at
+the end). The attribution-over-relation asymmetry (0.80 vs 0.59) is the
+typical qualitative pattern for vision-language models on ARO generally
+(CLIP itself shows the same split), so the shape isn't obviously wrong —
+but with embeddings this collapsed, 0.7101 overall should not yet be
+trusted as genuine compositional understanding without an
+`image_ablation.py`-style real/shuffled/zeroed check, the same test that
+caught collapse-driven false positives elsewhere in this project's TTN
+work. Recorded as-is; verification is a follow-up, not done here.
+
+## R2 complete — biggest single-variable CLIP gain so far
+
+**R2 CLIP (drop triplet term): SVO-Probes 0.6137** (obj_neg 0.6661,
+subj_neg 0.6392, verb_neg 0.5869), SVO-Swap 0.5524. vs. 0.5811 baseline:
+**+0.033** — the largest single-variable gain in this batch, ahead of
+R3's +0.023. No collapse (`image_pairwise_cos_mean` 0.696).
+
+**R2 TTN: SVO-Probes 0.5558** (obj_neg 0.6042, subj_neg 0.5175, verb_neg
+0.5492), SVO-Swap 0.6095. vs. 0.5323 baseline: **+0.024** — just under
+the pre-committed +0.03 threshold, so still counts as noise by that rule,
+though the closest any TTN-arm row has come to crossing it.
+`image_pairwise_cos_mean` = 0.067 — real, non-collapsed embeddings.
+
+## Phase 2 running tally
+
+| row | CLIP arm | delta | TTN arm | delta | verdict |
+|---|---|---|---|---|---|
+| baseline | 0.5811 | — | 0.5323 | — | — |
+| R2 (drop triplet) | 0.6137 | **+0.033** | 0.5558 | +0.024 | CLIP real; TTN noise (just under threshold) |
+| R3 (lr/batch) | 0.6039 | +0.023 | 0.5183 | -0.014 | CLIP real; TTN noise |
+| R1 (threshold=50) | pending | — | pending | — | running |
+
+Both completed rows point the same direction: real, meaningful gains for
+the CLIP arm (+0.023 to +0.033), no reliable effect on the TTN arm.
+Awaiting R1, then R4 (all three combined) once R1 reports.
