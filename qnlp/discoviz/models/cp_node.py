@@ -95,6 +95,11 @@ class CPQuadRankLayer(nn.Module):
         # 3. Multilinear Product with Gain
         merged = p_tl * p_tr * p_bl * p_br
         merged = merged * self.gain.unsqueeze(0)
+        # NODE_ARCHITECTURE_PLAN.md's prerequisite measurement: excess
+        # kurtosis of this 4-way product, per layer, on a trained
+        # checkpoint. Cheap capture (detached, no grad-graph cost); read by
+        # qnlp/discoviz/diagnostic/node_kurtosis.py after a forward pass.
+        self._last_merged = merged.detach()
 
         # 4. Dropout and Output Projection
         if self.training and self.dropout_p > 0:
