@@ -2676,3 +2676,34 @@ train (0.59 -> 0.63 -> 0.65) — real generalisation, unlike SVO. But
 approaching the collapse regime documented for TTN's ARO image tower
 historically. Not yet conclusive either way — could plateau, could
 collapse further.
+
+## SVO DTTN finished: chance, decisively closing off the image-tower hypothesis (2026-09-20)
+
+**SVO-Probes overall 0.4879** (obj_neg 0.4967, subj_neg 0.5175, verb_neg
+0.4760), **SVO-Swap 0.4190**. At chance, on both benchmarks.
+
+This is the decisive result. DTTN just achieved 0.8589 on CIFAR-10 —
+comfortably the strongest image tower this project has built — trained
+from scratch directly on SVO's own images, and it reproduces SVO's exact
+failure signature anyway. Combined with F1 (a *validated, real-image-
+grounded* **frozen** TTN tower, also stuck at the same train/val gap) and
+this from-scratch DTTN result, the image tower is now ruled out as SVO's
+bottleneck from every angle this project has tried: frozen vs. trainable,
+weak vs. strong architecture, TTN vs. CNN-style. **The bottleneck is
+elsewhere** — most likely the text tower (17.7M unfrozen params, held
+constant across every one of these experiments), as flagged after the
+Route B variations batch. That is now the highest-value remaining
+direction for Track 1.
+
+## ARO DTTN: the collapse concern is confirmed, not just a risk
+
+By epoch 6, `image_pairwise_cos_mean` = **0.986** — essentially fully
+collapsed to a narrow cone — while `hard_neg_acc` still reads 0.65-0.66.
+This is the same anisotropic-collapse failure mode documented for TTN's
+ARO image tower: the model can satisfy the specific hard-negative
+triplets it trains on via near-identical embeddings, without necessarily
+preserving the general discriminative structure needed to generalise.
+The apparent hard_neg_acc "success" here may be fragile rather than real
+— continue watching, and treat the current 0.65-0.66 with the same
+scepticism as B1/T1's train-side numbers until a real generalisation
+check (e.g. `image_ablation.py`) is run.
