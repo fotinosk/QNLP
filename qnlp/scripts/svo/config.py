@@ -22,6 +22,12 @@ class SVOExperimentConfig(BaseSettings):
     # the validated 78% hard_neg_accuracy run.
     use_non_linear_contractions: bool = False
 
+    # DISCOCLIP_REPRODUCTION_PLAN.md's structural comparison: the reference
+    # EinsumModel has no equivalent of this per-symbol Frobenius-norm
+    # rescaling at all. Default True preserves every existing run; False
+    # matches the reference's unconstrained scaling exactly.
+    use_weight_norm: bool = True
+
     batch_size: int = 128
     text_lr: float = 0.001
     text_weight_decay: float = 0.001

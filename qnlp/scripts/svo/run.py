@@ -269,7 +269,12 @@ def run():
     )
     logger.info(f"Collected {len(symbols)} unique symbols.")
 
-    text_model = EinsumModel(symbols, sizes, non_linear_contractions=cfg.use_non_linear_contractions).to(device)
+    text_model = EinsumModel(
+        symbols,
+        sizes,
+        non_linear_contractions=cfg.use_non_linear_contractions,
+        use_weight_norm=cfg.use_weight_norm,
+    ).to(device)
     image_model = build_image_model(cfg.embedding_dim).to(device)
 
     if cfg.pretrained_checkpoint:

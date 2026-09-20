@@ -3168,3 +3168,66 @@ fallback: the next step is a structural, line-by-line comparison of this
 project's text encoder/pipeline against `discoclip`'s, not further
 single-variable configuration sweeps (R5 and beyond are not warranted by
 this data).
+
+# Structural comparison (2026-09-20)
+
+Diffed our text encoder/training loop against `discoclip`'s directly,
+file by file.
+
+**Confirmed identical (not the source of the gap):**
+- `CustomMPSAnsatz` — byte-for-byte identical logic (only quote-style/
+  line-wrapping differs).
+- `EinsumModel`'s init formula (`bound = 1 / mean(directed_cod)`) —
+  identical.
+- `InfoNCE` loss — identical code, and it normalises both embeddings
+  internally, so the fact that their `EinsumModel.forward` doesn't
+  L2-normalise its own output (ours does) is not actually a functional
+  difference for the loss — `normalize(normalize(x)) == normalize(x)`.
+- Gradient clipping (`max_norm=1.0`) and optimiser (AdamW) — identical.
+
+**Two real, previously-unaccounted structural differences found:**
+
+1. **Weight-norm gauge-fix.** Our `EinsumModel._forward_single` rescales
+   every symbol's tensor to its init Frobenius norm before each
+   contraction (`qnlp/discoviz/models/einsum_model.py`, "linear mode"
+   path) — a project-specific addition, originally justified as
+   preventing float overflow in larger (ARO/COCO) contractions. **The
+   reference has no equivalent at all.** This directly affects
+   optimisation dynamics (it's a per-forward-pass reparameterisation,
+   not just a final-output normalisation), not something that cancels
+   out downstream.
+2. **`weight_decay`: ours 0.001 vs. theirs 0.01** — a real, untested 10x
+   difference. Not part of R1-R4 (which only touched `text_lr`/
+   `batch_size`, not weight decay).
+
+**Found but deliberately not rectified (too invasive for a quick fix):**
+their `BobcatTextProcessor` **parses the raw, unlemmatised sentence
+first**, then relabels the CCG tree's leaves with lemmas afterward
+(`lemmatize_tree`) — CCG derivation happens on inflected surface forms.
+Our pipeline lemmatises *before* parsing
+(`RemoveTrailingDotsStep` -> `LemmatizeStep` -> `CCGCompilerStep`). This
+could plausibly affect parse shapes and definitely affects what a
+word-frequency filter counts. Rectifying this means reordering pipeline
+steps and recompiling the entire SVO CCG cache — out of scope for this
+pass; flagged for a future investigation if the two fixes below don't
+close more of the gap.
+
+## Fixes applied
+
+- `EinsumModel` gained `use_weight_norm: bool = True` (default preserves
+  every existing run bit-for-bit; `False` matches the reference's
+  unconstrained scaling exactly) — wired through to
+  `SVOExperimentConfig.use_weight_norm` / `SVO_ML_USE_WEIGHT_NORM`.
+- `text_weight_decay` set to `0.01` (matching the reference) for this
+  rerun, via the existing `SVO_ML_TEXT_WEIGHT_DECAY` config field — no
+  code change needed.
+
+Verified locally (forward+backward, both `use_weight_norm` values,
+finite output, real gradients) before touching the cluster.
+
+## Rerunning both arms with the two fixes, on top of R4's config
+
+Applying both fixes on top of R4's already-best-tested combination
+(`dataset_suffix=_thresh50`, `triplet_weight=0`, `text_lr=0.003`,
+`batch_size=64`) rather than the plain baseline, since R4 is the
+strongest config found so far for each arm.

@@ -45,10 +45,22 @@ def get_einsum_model(datasets: list):
 
 class EinsumModel(nn.Module):
     def __init__(
-        self, symbols: List[Symbol] = [], sizes: List[tuple[int, ...]] = [], non_linear_contractions: bool = False
+        self,
+        symbols: List[Symbol] = [],
+        sizes: List[tuple[int, ...]] = [],
+        non_linear_contractions: bool = False,
+        use_weight_norm: bool = True,
     ):
         """
         symbols: a list of strings (can be any words, with punctuation, etc.)
+        use_weight_norm: DISCOCLIP_REPRODUCTION_PLAN.md's structural comparison
+            found the reference implementation has no equivalent of this
+            per-symbol Frobenius-norm rescaling at all -- it's an addition
+            specific to this project, not something DisCoCLIP's training ever
+            had to contend with. Default True preserves every existing run's
+            behaviour; False reproduces the reference's unconstrained scaling
+            exactly, for testing whether this gauge-fix is itself part of
+            the unexplained SVO gap.
         """
         if len(symbols) != len(sizes):
             raise ValueError("Symbols and sizes must have the same length.")
@@ -60,6 +72,7 @@ class EinsumModel(nn.Module):
         self.symbols = list(symbols)
         self.sizes = list(sizes)
         self.non_linear_contractions = non_linear_contractions
+        self.use_weight_norm = use_weight_norm
         self.weights = nn.ParameterList([nn.Parameter(torch.empty(size)) for size in sizes])
 
         if non_linear_contractions:
@@ -210,7 +223,8 @@ class EinsumModel(nn.Module):
             # magnitudes so the contraction can no longer drift into float overflow.
             # (NLC mode is left untouched: its gate is non-linear, so rescaling inputs
             # would change the represented function.)
-            tensors = [self._target_norm(sym) * t / (t.norm() + 1e-8) for sym, t in zip(symbols, tensors)]
+            if self.use_weight_norm:
+                tensors = [self._target_norm(sym) * t / (t.norm() + 1e-8) for sym, t in zip(symbols, tensors)]
 
         try:
             x = self.contractions_function(einsum_expr, tensors, path, gate=gate)
