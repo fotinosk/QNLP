@@ -2707,3 +2707,38 @@ The apparent hard_neg_acc "success" here may be fragile rather than real
 — continue watching, and treat the current 0.65-0.66 with the same
 scepticism as B1/T1's train-side numbers until a real generalisation
 check (e.g. `image_ablation.py`) is run.
+
+## Frozen CLIP sanity check launched on SVO (2026-09-20)
+
+Every image tower tried on SVO has landed at chance — TTN in every
+configuration, and now DTTN from scratch despite hitting 0.8589 on
+CIFAR-10. Strong evidence the bottleneck is the text side, but not
+airtight: every one of those towers was still learning visual features
+from SVO's own small (~8,600 row) training set, leaving a residual doubt
+that SVO's images just don't carry enough signal for *any* from-scratch
+tower this little data can train. A frozen, externally-pretrained CLIP
+image encoder settles that directly.
+
+`CLIPImageModel` (`qnlp/discoviz/models/clip_image_model.py`) — a frozen
+`openai/clip-vit-base-patch32` (151M params, 0 trainable), inverting each
+caller's existing ImageNet normalisation back to ~[0,1] and re-normalising
+with CLIP's own stats internally, so no transform pipeline needed to
+change. Selected via `IMAGE_MODEL_IMAGE_BACKBONE=clip`. Explicitly a
+sanity check, not a candidate architecture — not quantum-inspired, not
+trained here, `forward_regions` deliberately unimplemented (cosine-only,
+matching SVO's default score head).
+
+Verified locally before touching the cluster: correct output shape,
+unit-norm output, 0 trainable params. Pre-downloaded the checkpoint via
+the login node first, since compute nodes may lack internet access.
+
+**Launched: job 7434139**, SVO, frozen CLIP, text tower trained from
+scratch as normal, cosine score head, everything else default.
+
+If this also lands at chance, that is decisive: the task is not learnable
+with a known-excellent fixed image representation, meaning the bottleneck
+is the text tower (or the loss/data design), not "the image side needs
+more/better data." If it clears chance, that would be the most important
+result in this entire investigation — it would mean the image towers
+built here specifically (TTN and DTTN alike) are the limiting factor
+after all, not the text side.
