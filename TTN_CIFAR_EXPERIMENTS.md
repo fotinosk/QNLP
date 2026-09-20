@@ -2949,3 +2949,32 @@ config, not from a shared one.
 Per the plan: **a TTN-arm change only counts as real at +0.03 or more**
 (baseline ~0.53, where this project has documented differences below
 that are noise); the CLIP arm is the decision input.
+
+### R1 data build and training launch
+
+`build_svo_swap` OOM'd at the default 16G (same recurring failure seen
+before) — `prepare_datasets` itself succeeded first: **9,107 rows** at
+threshold=50 (matches the figure already cited in this doc's earlier
+notes), split 5463/1817/1827, role-resolve 98.5-99.5%. Relaunched just
+`build_svo_swap` via `submit_svo_swap_only.sh` (32G) — succeeded: 89
+human/animal candidates, **49 swapped+compiled pairs** (smaller than the
+threshold=10 variant's 105, as expected with fewer surviving rows).
+
+**R1 training launched: jobs 7434827 (CLIP) and 7434828 (TTN)**, both on
+the `_thresh50` dataset variant.
+
+### R2/R3 mid-training snapshot (not final)
+
+| job | epoch | val `hard_neg_acc` |
+|---|---|---|
+| R2 CLIP (drop triplet) | 22 | 0.646 |
+| R2 TTN (drop triplet) | 14 | 0.543 |
+| R3 CLIP (lr/batch) | 15 | 0.624 |
+| R3 TTN (lr/batch) | 14 | 0.534 |
+
+Directionally matches the plan's pre-committed prediction: R2 tentatively
+helps the CLIP arm (above its ~0.61-0.62 baseline plateau) while the TTN
+arm sits near chance in both R2 and R3 — consistent with S1's tuned
+`triplet_weight=100` being load-bearing for that arm specifically. None
+of these are final; reporting only once each job completes or
+early-stops.
