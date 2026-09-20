@@ -2637,3 +2637,42 @@ original architecture is just not setting `IMAGE_MODEL_IMAGE_BACKBONE`
 If either lands at chance the way every from-scratch TTN attempt on SVO
 has, that becomes the concrete evidence needed to justify a CIFAR-pretrain
 warm-start experiment (F1/F2's pattern) — not before.
+
+## DTTN-T final CIFAR result, NODE-3 failure confirmed, early SVO/ARO signal (2026-09-20)
+
+**DTTN-T: test_acc 0.8589**, 7.6M params. Decisively the strongest image
+tower this project has produced — well past the CNN (0.7842) and
+ResNet-18 (0.7569) references that were the practical ceiling before
+this batch, and nowhere close to the gated-TTN baseline (0.5857). This
+is the headline architectural result of the whole node-architecture
+investigation.
+
+**NODE-3 (isometric): confirmed failing to train**, not just slow. 16
+epochs in, loss pinned at exactly 2.3027 (= ln 10) and val_acc
+oscillating randomly around 0.09-0.10 with zero trend. The orthogonal
+parametrisation (combined with tying, per the plan's requirement) is
+preventing any gradient signal from reaching the isometric factors. With
+`patience=20` and val fluctuating around chance, a spurious "new best"
+could reset the patience counter repeatedly and run the full 100 epochs
+at ~400-500s/epoch (~11+ hours) without ever escaping chance — worth
+killing early rather than letting it run to completion.
+
+**SVO DTTN (from scratch, job 7433808) — a third independent
+confirmation the image tower isn't SVO's bottleneck.** By epoch 8, train
+`hard_neg_acc` climbs to 0.82 while val sits at chance (0.48-0.51) — the
+identical train/val gap documented extensively for TTN on SVO (B1, V1-V4,
+F1/F2). Even a from-scratch backbone that just achieved 0.8589 on
+CIFAR-10 reproduces SVO's exact failure signature. Combined with F1's
+frozen-pretrained-TTN result (also stuck at the same gap), this closes
+off the image tower as a plausible explanation from two independent
+directions (a validated pretrained TTN, and a validated from-scratch
+DTTN) — the bottleneck is elsewhere, most likely the text tower as
+already hypothesised.
+
+**ARO DTTN (from scratch, job 7433809) — different signature, worth
+watching.** By epoch 3, val `hard_neg_acc` is actually climbing alongside
+train (0.59 -> 0.63 -> 0.65) — real generalisation, unlike SVO. But
+`image_pairwise_cos_mean` is climbing fast (0.82 -> 0.93 -> 0.96),
+approaching the collapse regime documented for TTN's ARO image tower
+historically. Not yet conclusive either way — could plateau, could
+collapse further.
