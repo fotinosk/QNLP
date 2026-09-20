@@ -3082,6 +3082,26 @@ effect on the TTN arm. R1 CLIP still running (epoch 18, val
 | row | CLIP arm | delta | TTN arm | delta | verdict |
 |---|---|---|---|---|---|
 | baseline | 0.5811 | — | 0.5323 | — | — |
-| R1 (threshold=50) | pending | — | 0.5304 | -0.002 | TTN noise |
+| R1 (threshold=50) | 0.6229 | **+0.042** | 0.5304 | -0.002 | CLIP real, biggest gain; TTN noise |
 | R2 (drop triplet) | 0.6137 | +0.033 | 0.5558 | +0.024 | CLIP real; TTN noise |
 | R3 (lr/batch) | 0.6039 | +0.023 | 0.5183 | -0.014 | CLIP real; TTN noise |
+
+## R1 CLIP result and Phase 2 rows 1-3 complete
+
+**R1 CLIP (threshold=50): SVO-Probes 0.6229** (obj_neg 0.6659, subj_neg
+0.5659, verb_neg 0.6256), SVO-Swap 0.5510 (n=49). vs. 0.5811 baseline:
+**+0.042 — the biggest single-variable CLIP gain of the three rows.**
+Text-tower size dropped from 17.7M params (1356 symbols) to **5.67M
+params (465 symbols)** — a real, large vocabulary reduction, though still
+well above Phase 0's reproduced 1.68M.
+
+**All three Phase 2 rows now complete for both arms.** Every single
+change helps the CLIP arm (R1 +0.042, R2 +0.033, R3 +0.023); none
+reliably help the TTN arm (all three within the noise band). R1
+(matching the paper's word-frequency protocol) is individually the
+strongest lever tested.
+
+**R4 launched: jobs 7434903 (CLIP) and 7434904 (TTN)** — all three
+changes combined (`dataset_suffix=_thresh50`, `triplet_weight=0`,
+`text_lr=0.003`, `batch_size=64`), both arms, per the plan's literal R4
+definition (not a per-arm re-optimisation).
