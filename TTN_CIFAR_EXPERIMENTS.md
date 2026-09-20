@@ -3137,3 +3137,34 @@ The three tested configurational differences (data protocol, loss
 shape, optimiser defaults) are real but collectively minor contributors
 to the gap — something else, not yet identified, accounts for the
 remaining ~82%.
+
+## R4 TTN result and Phase 2 closed out
+
+**R4 TTN: SVO-Probes 0.5506** (obj_neg 0.5938, subj_neg 0.5192, verb_neg
+0.5444) vs. S1's 0.5323 baseline: **+0.018** — below the +0.03 threshold,
+noise. SVO-Swap 0.5102.
+
+### Phase 2 final tally
+
+| row | change | CLIP | delta | TTN | delta | TTN verdict |
+|---|---|---|---|---|---|---|
+| baseline | — | 0.5811 | — | 0.5323 | — | — |
+| R1 | threshold 10->50 | 0.6229 | +0.042 | 0.5304 | -0.002 | noise |
+| R2 | drop triplet term | 0.6137 | +0.033 | 0.5558 | +0.024 | noise |
+| R3 | lr/batch to reference | 0.6039 | +0.023 | 0.5183 | -0.014 | noise |
+| R4 | R1+R2+R3 combined | 0.6262 | +0.045 | 0.5506 | +0.018 | noise |
+
+**Phase 2 conclusion.** Across all four rows, the TTN arm never once
+crossed the pre-committed +0.03 noise threshold — no configurational
+change tested moves it. The CLIP arm shows real, consistent gains in
+every row (+0.023 to +0.045), but they compose sub-additively: R4's
+combined effect (+0.045) is less than half of R1+R2+R3's naive sum
+(+0.098), and barely exceeds R1 alone. **Only 0.045 of the 0.254-point
+gap to the 0.8355 target is closed (~18%)**, triggering the plan's own
+stopping rule (needs >=50% to justify continued bisection).
+
+**Phase 2 is closed.** Per `DISCOCLIP_REPRODUCTION_PLAN.md`'s explicit
+fallback: the next step is a structural, line-by-line comparison of this
+project's text encoder/pipeline against `discoclip`'s, not further
+single-variable configuration sweeps (R5 and beyond are not warranted by
+this data).
