@@ -30,6 +30,7 @@ Usage:
     python -m qnlp.scripts.svo.build_svo_swap
 """
 
+import os
 import re
 
 import orjson
@@ -206,12 +207,16 @@ def _asdict_symbol(sym) -> dict:
 
 
 def run() -> None:
+    # DISCOCLIP_REPRODUCTION_PLAN.md's R1: mirrors prepare_datasets.py's
+    # SVO_PREP_OUTPUT_SUFFIX so the swap set is built from the matching
+    # word-frequency-threshold variant's test split, not the default one.
+    suffix = os.environ.get("SVO_PREP_OUTPUT_SUFFIX", "")
     manifest = pl.read_parquet(constants.atlases_path / "svo" / "data_manifest.parquet")
 
     # Restrict to the test split only — SVO-Swap is a held-out eval set, and
     # building it from the full manifest would leak: a swap pair's image could
     # be one the model already saw as a training positive.
-    test_probes = pl.read_parquet(constants.datasets_path / "svo_test_probes.parquet")
+    test_probes = pl.read_parquet(constants.datasets_path / f"svo_test_probes{suffix}.parquet")
     test_sample_ids = set(test_probes["sample_id"].to_list())
     n_before = len(manifest)
     manifest = manifest.filter(pl.col("sample_id").is_in(test_sample_ids))
@@ -281,10 +286,10 @@ def run() -> None:
     logger.info(f"Successfully swapped + compiled: {n_swapped}")
 
     out = pl.DataFrame(rows)
-    out_path = constants.datasets_path / "svo_swap_eval.parquet"
+    out_path = constants.datasets_path / f"svo_swap_eval{suffix}.parquet"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out.write_parquet(out_path)
-    logger.info(f"svo_swap_eval.parquet written to {out_path} ({len(out)} rows).")
+    logger.info(f"{out_path.name} written to {out_path} ({len(out)} rows).")
 
 
 if __name__ == "__main__":

@@ -218,9 +218,10 @@ def run():
     logger.info(f"  device: {device}")
     logger.info("========================================")
 
-    TRAIN_PARQUET = DATASETS_PATH / "svo_train_probes.parquet"
-    VAL_PARQUET = DATASETS_PATH / "svo_val_probes.parquet"
-    TEST_PARQUET = DATASETS_PATH / "svo_test_probes.parquet"
+    suffix = cfg.dataset_suffix
+    TRAIN_PARQUET = DATASETS_PATH / f"svo_train_probes{suffix}.parquet"
+    VAL_PARQUET = DATASETS_PATH / f"svo_val_probes{suffix}.parquet"
+    TEST_PARQUET = DATASETS_PATH / f"svo_test_probes{suffix}.parquet"
 
     size = image_model_hyperparams.image_size
     # Train/val previously used the IDENTICAL transform (no augmentation at all) — a
@@ -372,7 +373,13 @@ def run():
         test_metrics = trainer.fit()
 
         logger.info("--- SVO-Probes / SVO-Swap ---")
-        svo = evaluate_svo(model, device, cfg.batch_size)
+        svo = evaluate_svo(
+            model,
+            device,
+            cfg.batch_size,
+            probes_parquet=TEST_PARQUET,
+            swap_parquet=DATASETS_PATH / f"svo_swap_eval{suffix}.parquet",
+        )
 
         report_info = {
             **run_info,

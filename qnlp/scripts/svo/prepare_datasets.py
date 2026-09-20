@@ -41,6 +41,7 @@ Usage:
     python -m qnlp.scripts.svo.prepare_datasets
 """
 
+import os
 import re
 from collections import Counter
 
@@ -53,7 +54,12 @@ from qnlp.utils.logging import setup_logger
 
 logger = setup_logger(log_name="svo_prepare_datasets")
 
-WORD_FREQ_THRESHOLD = 10
+# DISCOCLIP_REPRODUCTION_PLAN.md's R1: override via SVO_PREP_WORD_FREQ_THRESHOLD
+# to test the paper's original threshold (50) without disturbing the default
+# threshold-10 parquets every other job in this project reads from — paired
+# with SVO_PREP_OUTPUT_SUFFIX so the output lands at a different filename
+# rather than overwriting them.
+WORD_FREQ_THRESHOLD = int(os.environ.get("SVO_PREP_WORD_FREQ_THRESHOLD", 10))
 # Was 50, matching the original paper. Every clean training run has landed
 # at chance regardless of architecture/loss/hyperparameters (see
 # SVO_EXPERIMENTS.md), and SVO's training set is ~7x smaller than ARO's
@@ -62,6 +68,7 @@ WORD_FREQ_THRESHOLD = 10
 # available training data, while each surviving word still occurs at least
 # 10 times (SVO's vocabulary is far smaller than COCO's, so this is a much
 # milder relaxation than the number alone suggests).
+OUTPUT_SUFFIX = os.environ.get("SVO_PREP_OUTPUT_SUFFIX", "")
 SPLIT_RATIOS = (0.6, 0.2, 0.2)
 SPLIT_SEED = 42
 _WORD_RE = re.compile(r"[a-z']+")
@@ -168,9 +175,9 @@ def run() -> None:
     # separately via evaluate_svo on the *_probes.parquet files below.
     for split_name, split_atoms in [("train", train_atoms), ("val", val_atoms), ("test", test_atoms)]:
         out = _build_train_split(split_atoms)
-        out_path = datasets_path / f"svo_{split_name}.parquet"
+        out_path = datasets_path / f"svo_{split_name}{OUTPUT_SUFFIX}.parquet"
         out.write_parquet(out_path)
-        logger.info(f"svo_{split_name}.parquet: {len(out)} rows")
+        logger.info(f"{out_path.name}: {len(out)} rows")
 
     # Eval-shape parquets (true/false image pairs): the actual SVO-Probes
     # benchmark accuracy, computed for val (mid-training sanity check) and test
@@ -183,9 +190,9 @@ def run() -> None:
         ("test", test_atoms, test_imgs),
     ]:
         out = _build_probes_split(split_atoms)
-        out_path = datasets_path / f"svo_{split_name}_probes.parquet"
+        out_path = datasets_path / f"svo_{split_name}_probes{OUTPUT_SUFFIX}.parquet"
         out.write_parquet(out_path)
-        logger.info(f"svo_{split_name}_probes.parquet: {len(out)} rows ({len(split_imgs)} unique positive images)")
+        logger.info(f"{out_path.name}: {len(out)} rows ({len(split_imgs)} unique positive images)")
         _log_role_resolve_rate(out, split_name)
 
 

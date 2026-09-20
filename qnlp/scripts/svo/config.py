@@ -101,4 +101,10 @@ class SVOExperimentConfig(BaseSettings):
     pretrained_image_tower_checkpoint: str | None = None
     freeze_pretrained_image_tower: bool = True
 
+    # DISCOCLIP_REPRODUCTION_PLAN.md's R1: selects which prepare_datasets.py
+    # output variant to train/eval on (see its SVO_PREP_OUTPUT_SUFFIX). ""
+    # (default) is the standard threshold-10 pipeline every other experiment
+    # in this project uses, untouched.
+    dataset_suffix: str = ""
+
     model_config = SettingsConfigDict(env_prefix="SVO_ML_")
