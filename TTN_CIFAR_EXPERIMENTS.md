@@ -2815,3 +2815,109 @@ chance). 32 epochs at ~400-500s each with zero learning. The orthogonal
 parametrisation (combined with the required tying) prevents this node
 from training at all, at least in this configuration — a clear, clean
 fail, not a resource-constrained inconclusive result.
+
+# DISCOCLIP_REPRODUCTION_PLAN.md execution (2026-09-20)
+
+## Phase 0 — anchor the target: SUCCESS
+
+Ran the reference `kinianlo/discoclip` repo as-is (already cloned locally
+at `~/Desktop/Dev/discoclip`, data already preprocessed to the paper's
+exact row count: 5288+1850+1850 - 3 headers = **8,984 pairs**, matching
+the paper exactly). Config: `configs/svo_default.yaml` (bobcat reader,
+embedding_dim 512, bond_dim 10, batch_size 64, lr 0.003, epochs 10,
+`hard_neg_loss_weight=0` — no triplet term at all by default, confirming
+Phase 1.4's question), device MPS (Apple Silicon).
+
+**Three trivial environment fixes needed, none of them bugs in the
+reference code:**
+- Missing `shtab` dependency (`pip install shtab`).
+- Missing `logs/`/`checkpoints/` output directories (README doesn't
+  mention creating them).
+- Missing NLTK data (`averaged_perceptron_tagger_eng`, `punkt`,
+  `punkt_tab`).
+- `requirements.txt` doesn't pin `transformers`, so pip installed the
+  latest (5.2.0) — incompatible with `lambeq`'s bundled
+  `BertForChartClassification` (`AttributeError:
+  'BertForChartClassification' object has no attribute
+  'all_tied_weights_keys'`). Pinned to `transformers==4.57.1`, matching
+  this project's own known-working version — fixed it immediately.
+
+**Result: test acc 0.8323** (subj 0.8190 n=431, verb 0.8029 n=893, obj
+0.8931 n=524) **against the paper's target 0.8355** — within 0.32 points,
+comfortably inside the plan's 2-point tolerance. Per-subset shape matches
+the paper's reported 80.74/82.42/87.79 reasonably closely. Training took
+under a minute for all 10 epochs (CLIP embeddings are precomputed, so
+each epoch is cheap — no image encoding at train time).
+
+**SVO-Swap (target 93.68%) not independently reproduced** — no dedicated
+eval script exists in the repo for `data/processed/svo_probes_swapped.csv`
+(searched `train_svo.py`, `test_aro.py`, notebooks; found none). Not
+gating: the plan's explicit Phase 0 success criterion is the Probes
+number, which passed cleanly. Revisit only if the Swap number becomes
+load-bearing later.
+
+**Verdict: the published target is real and reachable in this
+environment.** Every subsequent experiment is now a bisection between two
+known-good anchors (0.5811 ours, 0.8355 theirs), not a chase after an
+unreachable number.
+
+## Phase 1 — audits (2026-09-20)
+
+### 1.1 Evaluation protocol — resolved, matches ours
+
+Read `train_svo.py`'s test loop directly. **"Overall" is a per-row mean
+over the full test set**, not an average of the three subset accuracies
+— the subj/verb/obj numbers are computed separately, over near-disjoint
+subsets (431+893+524=1848 ≈ the ~1850-row test split, confirming each row
+belongs to essentially one subset). This is the same convention our own
+`evaluate_svo_probes`'s "overall" already uses — no discrepancy here.
+
+**Skip rate: 0.** `svo_tn_collate_fn` drops any row whose sentence failed
+to parse, printing `"Found N invalid samples"` if so — checked the
+Phase 0 reproduction log directly: **zero such warnings**, i.e. 100% of
+the test set was evaluated. A useful, stark contrast to this project's
+own Route A finding (silently evaluated only 19.7% of its test set).
+
+### 1.3 Model variant — resolved, model *is* the same construction
+
+`discoclip/utils/ansatz.py`'s `CustomMPSAnsatz` is — class name, default
+`max_order=3`, structure — **the same MPS bond-dimension factorisation
+this project's own `qnlp/discoviz/parser/asnsatz.py` implements.** The
+`reader="bobcat"` config (the default, and what Phase 0 used) is their
+"Compact" model. **This is not a different model from ours — it is the
+same construction**, resolving the plan's 1.3 concern. No R5 (variable-
+rank) experiment needed.
+
+### 1.2 Data/vocabulary — a real discrepancy found, flagged not resolved
+
+Queried the Phase 0 reproduction run's actual logged parameter count
+directly (`model_num_params` in its mlflow db): **1,677,312** — not the
+537,600 the plan cites. Since 1.3 confirms the architecture is identical
+to ours, and our own text tower runs ~13,100 params/symbol on average
+(17.7M params / 1356 symbols), 1.68M implies a vocabulary on the order of
+~130 symbols for this reproduction — far smaller than our 1356. Given
+row counts are comparable (8,984 vs our 8,609-9,107 depending on
+threshold), this points at a much more aggressive vocabulary reduction
+somewhere in their pipeline (tokenisation/lemmatisation folding more
+surface forms together, or a stricter frequency cutoff than word-count
+alone) — not yet identified precisely. **Flagging this honestly rather
+than reconciling it to the plan's cited number**: whichever of
+537,600/1,677,312 is the real reference figure, our 17.7M is
+substantially larger either way (10.6x-33x), so this doesn't change
+R1's rationale, but the exact target vocabulary size for R1 is now less
+certain than the plan assumed.
+
+### 1.4 Loss — confirmed, matches the plan's description
+
+`configs/svo_default.yaml`'s default `hard_neg_loss_weight: 0` — Phase 0's
+reproduction run used **no triplet term at all**, confirming "self-
+supervised contrastive loss" (their words) is a literal plain InfoNCE
+loss with zero hard-negative weighting, unlike our default
+`triplet_weight=40000` (or S1's 100).
+
+### 1.5 Optimisation defaults — confirmed
+
+`configs/svo_default.yaml`: `learning_rate: 0.003`, `batch_size: 64`,
+`bond_dim: 10`, `temperature: 0.07` — exactly as the plan states.
+
+## Phase 2 — bisection batch, in progress
