@@ -2544,3 +2544,51 @@ gelu-gated, `cp_rank=256`), 512 real CIFAR-10 images:
 Laplace tail (excess kurtosis 3); every layer is two to four orders of
 magnitude past that. **NODE-2 (degree reduction) is well-motivated and
 included in the batch.**
+
+## Implementation and batch launch (2026-09-20)
+
+All of NODE-1/2/3/4, tying, and DTTN implemented — see the git commit for
+full design notes. Summary:
+
+- `qnlp/discoviz/models/node_variants.py`: `PairwiseBinaryNode` (NODE-1),
+  `DegreeReducedNode` (NODE-2), `TuckerNode` (NODE-4, requires tying —
+  the core has `rank^5` entries). NODE-3 needs no new class:
+  `CPQuadRankLayer(tied=True)` + `torch.nn.utils.parametrizations
+  .orthogonal` on its five factor tensors.
+- Tying (`IMAGE_MODEL_TIE_NODES`) added to `CPQuadRankLayer` itself
+  (needed for row 5's control) by storing the tied dim as 1 and
+  `.expand`-ing it at forward time — a broadcasting view, so the default
+  untied path is provably unchanged (verified both by code inspection and
+  a local smoke test).
+- DTTN (`qnlp/discoviz/models/dttn_image_model.py`) per
+  `DTTN_IMPLEMENTATION_GUIDE.md`, selected via
+  `IMAGE_MODEL_IMAGE_BACKBONE=dttn` through a new `build_image_model()`
+  factory, wired into the 6 named construction sites.
+- Caught one real bug before it shipped: `TuckerNode`'s first einsum
+  attempt reused letter `b` for both the batch dimension and a rank
+  index — a silent shape-collision bug, caught by the local smoke test
+  (raised a clear `opt_einsum` shape-mismatch error), not by static
+  analysis.
+- All 8 `node_type` x `tie_nodes` combinations, plus DTTN at both 32x32
+  and 64x64, pass local forward+backward+`forward_regions` smoke tests
+  before touching the cluster.
+
+### Batch launched
+
+All pure-multilinear (`NONLINEARITY=none`) against the 0.5500 baseline,
+A1+B1, CIFAR-10 32x32/patch_size=2:
+
+| job | row | config |
+|---|---|---|
+| 7433281 | 1 | `NODE_TYPE=pairwise`, untied, `cp_rank=256` |
+| 7433282 | 2 | `NODE_TYPE=degree2`, untied, `cp_rank=256` |
+| 7433283 | 3 | `NODE_TYPE=isometric`, `TIE_NODES=all`, `cp_rank=256` |
+| 7433284 | 4 | `NODE_TYPE=tucker`, `TIE_NODES=all`, `cp_rank=8` (core is `rank^5`) |
+| 7433285 | 5 (control) | `NODE_TYPE=cp`, `TIE_NODES=all`, `cp_rank=256` — isolates tying alone |
+| 7433286 | 6 | DTTN-T, `stem_patch=1` (32x32-adapted) |
+
+Regression check (existing 0.5857 GELU-gated number reproducing with the
+new code, unset backbone flags) not re-run on the cluster — the default
+path's equivalence is proven by code inspection (`_expand`/`build_image_model`
+are no-ops when `tied=False`/`image_backbone=ttn`) rather than spending a
+100-epoch job re-confirming an algebraically guaranteed identity.
