@@ -2742,3 +2742,34 @@ more/better data." If it clears chance, that would be the most important
 result in this entire investigation — it would mean the image towers
 built here specifically (TTN and DTTN alike) are the limiting factor
 after all, not the text side.
+
+## Frozen CLIP result: a stable above-chance signal — the leading hypothesis reverses (2026-09-20)
+
+By epoch 12, val `hard_neg_acc` has plateaued at **~0.61-0.62** across four
+consecutive epochs (9: 0.613, 10: 0.616, 11: 0.617, 12: 0.608) — durable,
+not noise. Train is at 0.97 (real overfitting on top of the real signal),
+but `image_pairwise_cos_mean` stays flat at ~0.69 throughout — **no
+collapse**. This is a real, sustained validation signal above chance that
+**no from-scratch image tower tried in this project — TTN in any
+configuration, or DTTN — has ever produced on SVO.**
+
+**This reverses the project's leading hypothesis.** The prior conclusion
+("image tower ruled out, bottleneck is the text side") rested on F1 (a
+frozen *pretrained-on-CIFAR* TTN) and DTTN-from-scratch both failing. But
+neither of those is a strong, general-purpose image representation:
+CIFAR-10 pretraining is a narrow, small-image-classification skill, and
+DTTN's demonstrated strength was specifically on CIFAR-10, not
+necessarily transferable when trained from scratch on SVO's ~8,600
+images. A genuinely strong, externally-validated representation (CLIP)
+clears chance and holds there. **The evidence now points at the
+from-scratch image towers built in this project failing to learn
+adequate visual features from SVO's small dataset — not the text tower,
+not the loss design, not the data.**
+
+Still to confirm: the final test-set number (once training finishes/
+early-stops) and whether the 0.61-0.62 plateau holds or drifts. But
+directionally this is now the single most important result in the whole
+image-tower investigation, and it points toward pursuing a
+CLIP-pretrained-then-warm-started (or otherwise stronger-initialised)
+image tower for SVO specifically, rather than the text-tower
+investigation the prior conclusion had prioritised.
