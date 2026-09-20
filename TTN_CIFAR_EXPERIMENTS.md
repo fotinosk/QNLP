@@ -3105,3 +3105,35 @@ strongest lever tested.
 changes combined (`dataset_suffix=_thresh50`, `triplet_weight=0`,
 `text_lr=0.003`, `batch_size=64`), both arms, per the plan's literal R4
 definition (not a per-arm re-optimisation).
+
+## R4 CLIP result: sharply sub-additive — the plan's stopping rule triggers
+
+**R4 CLIP: SVO-Probes 0.6262** (obj_neg 0.7428, subj_neg 0.5797, verb_neg
+0.5960), SVO-Swap 0.6327 (n=49). vs. 0.5811 baseline: **+0.045**.
+
+**The combination is sharply sub-additive.** Naively summing R1/R2/R3's
+individual deltas (+0.042, +0.033, +0.023) predicts +0.098 combined; the
+actual combined gain is less than half that, and R4's result (0.6262) is
+barely above R1 alone (0.6229) — R2 and R3 contribute almost nothing once
+R1 (the word-frequency threshold) is already applied. (A mid-training
+snapshot at epoch 15 showed val 0.678, which looked more promising —
+this is a case of the final checkpoint-selected test number landing
+below a mid-training fluctuation; don't read into intermediate val
+numbers on this task, a lesson already learned once before in this
+project's T1 sweep.)
+
+**This triggers the plan's own pre-committed stopping rule.** R4 has
+closed only 0.045 of the 0.254-point gap to 0.8355 (~18%), far short of
+the "at least half the gap" (0.127) threshold required to keep
+bisecting. Per `DISCOCLIP_REPRODUCTION_PLAN.md`: *"if Phase 2 closes less
+than half the 0.254 gap, stop bisecting and diff our text encoder against
+theirs line by line instead — the divergence is structural rather than
+configurational."*
+
+**Recommendation: stop Phase 2 bisection here (no R5, no further single-
+variable rows) and move to a structural, line-by-line comparison of our
+text encoder against `discoclip`'s**, per the plan's explicit fallback.
+The three tested configurational differences (data protocol, loss
+shape, optimiser defaults) are real but collectively minor contributors
+to the gap — something else, not yet identified, accounts for the
+remaining ~82%.
