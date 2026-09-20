@@ -91,12 +91,18 @@ class ImageModelSettings(BaseSettings):
     # (default) is TTNImageModel, unchanged. "dttn" selects DTTNImageModel
     # instead -- construct via `build_image_model`, not TTNImageModel(...)
     # directly, wherever a caller should respect this switch.
-    image_backbone: Literal["ttn", "dttn"] = "ttn"
+    # "clip" selects CLIPImageModel -- a frozen, externally-pretrained
+    # sanity check (qnlp/discoviz/models/clip_image_model.py's docstring),
+    # not a candidate architecture: it answers "is the task learnable at
+    # all with a known-excellent image representation", not "should we
+    # adopt this backbone".
+    image_backbone: Literal["ttn", "dttn", "clip"] = "ttn"
     dttn_variant: Literal["T", "S", "L"] = "T"
     dttn_stem_patch: int = 2  # 1 for 32x32 inputs -- see the guide's resolution table
     dttn_transitions: str = "FTTT"  # per-stage flags, 'T'/'F', length 4
     dttn_use_ln: bool = True
     dttn_scale: int = 3  # expansion ratio
+    clip_model_name: str = "openai/clip-vit-base-patch32"
 
 
 image_model_hyperparams = ImageModelSettings()
@@ -119,6 +125,10 @@ def build_image_model(embedding_dim: int) -> nn.Module:
             scale=image_model_hyperparams.dttn_scale,
             in_channels=3 if image_model_hyperparams.use_color else 1,
         )
+    if image_model_hyperparams.image_backbone == "clip":
+        from qnlp.discoviz.models.clip_image_model import CLIPImageModel
+
+        return CLIPImageModel(embedding_dim, model_name=image_model_hyperparams.clip_model_name)
     return TTNImageModel(embedding_dim)
 
 
