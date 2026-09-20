@@ -2992,3 +2992,21 @@ R1 (both arms) confirmed training correctly on the regenerated
 threshold=50 data (5463/1817/1827 rows loaded, matching Phase 0's row
 counts). At epoch 3: R1 CLIP val `hard_neg_acc` 0.639 (promising early);
 R1 TTN 0.512 (at chance, typical this early for the TTN arm).
+
+### R3 complete — clean split between arms, as the plan anticipated
+
+**R3 TTN: SVO-Probes 0.5183** (obj_neg 0.5244, subj_neg 0.4577, verb_neg
+0.5336) vs. S1's 0.5323 baseline — a drop of 0.014, **below the
+pre-committed +0.03 threshold: not a real effect, within noise.**
+SVO-Swap 0.6095.
+
+| arm | baseline | R3 | delta | verdict |
+|---|---|---|---|---|
+| CLIP | 0.5811 | 0.6039 | +0.023 | real movement toward the target |
+| TTN | 0.5323 | 0.5183 | -0.014 | noise (below +0.03 threshold) |
+
+Exactly the clean split the plan flagged as a plausible, non-contradictory
+outcome — S1's `text_lr=0.001`/`batch_size=128` was already close to
+optimal for the TTN arm, so moving toward the reference's defaults
+neither helps nor meaningfully hurts it, while the same change gives
+CLIP a real, if modest, gain.
