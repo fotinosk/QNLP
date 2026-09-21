@@ -5,6 +5,16 @@ is reproduced, "our tensor network improves on DisCoCLIP" is not
 measurable — any comparison would be against our own weakened
 reimplementation rather than the published result.
 
+**Standing note (2026-09-21): use the paper's split for future SVO
+experiments.** Phase 5.2 (below) found our `split_by_groups` split is
+stricter than the reference's — it forbids any positive-image overlap
+between train/val/test, while 39.4% of the reference's test rows share
+their exact (caption, positive image) pair with a train row. Any SVO
+experiment intended to be comparable to DisCoCLIP's published numbers
+should use `SVO_PREP_SPLIT_MODE=row` (`qnlp/scripts/svo/prepare_datasets.py`)
+going forward, not the default `grouped` mode — see the "row-split
+retrain" work below.
+
 ## The gap
 
 DisCoCLIP (Lo, Hawashin, Abbaszadeh, Limback-Stokin, Wazni, Sadrzadeh;
