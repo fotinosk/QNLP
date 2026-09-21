@@ -3495,3 +3495,33 @@ Every delta is below the plan's +0.03 real-effect threshold; CLIP's
 SVO-Swap is exactly unchanged. Not a real driver of the remaining gap —
 `image_as_anchor` stays off by default. R6 remains the best confirmed
 result.
+
+## Phase 5.1: S1's own-best TTN config on clean data — negative claim survives
+
+The project's central negative claim (from-scratch TTN can't learn
+adequate visual features from SVO) had only ever been tested on
+corrupted data (S1: 0.5323) or on clean data with CLIP-tuned settings
+(R6 TTN: 0.4864, `triplet_weight=0` — mistuned for the tower, per Phase
+2's predicted R2 split). Ran S1's own recipe (A1 default + B1 feature
+map + `cp_rank=128` + `triplet_weight=100`, `batch_size=128`,
+`text_lr=0.001`) on the clean `_thresh50_lemmafix` data (job 7436933;
+first attempt 7436840 crashed on a transient GPU-contention error before
+training started, relaunched excluding that node).
+
+**Result: SVO-Probes 0.5542** (obj_neg 0.6134, subj_neg 0.5248,
+verb_neg 0.5390), **SVO-Swap 0.5000**.
+
+| against | delta | real (+0.03)? |
+|---|---|---|
+| S1 (corrupted data) 0.5323 | +0.0219 | **no** |
+| R6 TTN (clean, CLIP-tuned) 0.4864 | +0.0678 | yes |
+| R6 CLIP (clean) 0.6649 | -0.1107 | — |
+
+Below the pre-committed +0.03 threshold against S1 — the comparison this
+run was designed to settle. **The central negative claim survives its
+strongest challenge**: even clean data plus the tower's own best-known
+configuration isn't enough to move it meaningfully beyond its prior
+best. Configuration matters (real +0.0678 vs. the CLIP-tuned settings)
+but data quality alone does not. Can now be stated with confidence: the
+from-scratch image tower, not the pipeline or hyperparameters, is SVO's
+bottleneck.

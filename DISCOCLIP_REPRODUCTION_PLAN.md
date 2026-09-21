@@ -512,6 +512,32 @@ single-variable axes:**
   hedged. That is a genuinely useful outcome too, and the reason this
   run is worth its slot regardless of direction.
 
+**Result (job 7436933, first attempt 7436840 crashed on a transient GPU
+contention error before any training — relaunched excluding that node):**
+
+**SVO-Probes 0.5542** (obj_neg 0.6134, subj_neg 0.5248, verb_neg 0.5390),
+**SVO-Swap 0.5000**.
+
+| against | isolates | prior number | delta | real (+0.03)? |
+|---|---|---|---|---|
+| S1 on corrupted data | data quality | 0.5323 | **+0.0219** | **no** |
+| R6 TTN on clean data | configuration | 0.4864 | +0.0678 | yes |
+| R6 CLIP on clean data | image tower | 0.6649 | -0.1107 | — |
+
+**Verdict: the central negative claim survives its strongest challenge.**
+Against S1's own historical number — the comparison this run was
+designed to settle — the +0.0219 gain from clean data is below the
+plan's own pre-committed +0.03 real-effect threshold. Clean data and the
+tower's own best-known configuration together are not enough to move the
+from-scratch tower meaningfully beyond its prior best. The tower does
+respond to *configuration* (real, +0.0678, vs. the CLIP-tuned settings
+R6 TTN used) — confirming Phase 2's predicted split (R2-style low-
+triplet-weight settings help CLIP, hurt TTN) was real and not an
+artefact — but not to data quality alone. This can now be stated with
+confidence rather than hedged: the from-scratch image tower, not the
+data pipeline or the loss/hyperparameter path, is the bottleneck for
+SVO-Probes.
+
 ## 5.2 — Variable-rank audit — SUPERSEDED, already resolved
 
 This item duplicates the audit already completed earlier in this
