@@ -69,6 +69,17 @@ WORD_FREQ_THRESHOLD = int(os.environ.get("SVO_PREP_WORD_FREQ_THRESHOLD", 10))
 # 10 times (SVO's vocabulary is far smaller than COCO's, so this is a much
 # milder relaxation than the number alone suggests).
 OUTPUT_SUFFIX = os.environ.get("SVO_PREP_OUTPUT_SUFFIX", "")
+# DISCOCLIP_REPRODUCTION_PLAN.md's Phase 5.2 finding: the reference's SVO
+# train/val/test CSVs are a plain per-row 60/20/20 split with NO positive-
+# image dedup -- 39.4% of its test rows share their exact (caption, positive
+# image) pair with a train row. Our default "grouped" mode partitions on
+# pos_image_id specifically to forbid that overlap, making 0.8355 and our
+# numbers not comparable tasks. "row" mode replicates the reference's looser
+# protocol (group_column="sample_id", i.e. no grouping at all) so a like-
+# for-like comparison can be run; it does not recover their exact split
+# (no script for it exists in their repo, only the pre-built CSVs) but
+# matches the actual property that made the comparison unlike-for-like.
+SPLIT_MODE = os.environ.get("SVO_PREP_SPLIT_MODE", "grouped")
 SPLIT_RATIOS = (0.6, 0.2, 0.2)
 SPLIT_SEED = 42
 _WORD_RE = re.compile(r"[a-z']+")
@@ -147,11 +158,12 @@ def run() -> None:
     atoms = _filter_by_word_frequency(atoms, WORD_FREQ_THRESHOLD)
     atoms = _assign_image_groups(atoms)
 
+    group_col = "sample_id" if SPLIT_MODE == "row" else "image_group"
+    logger.info(f"Split mode: {SPLIT_MODE!r} (group_column={group_col!r})")
     train_atoms, val_atoms, test_atoms = split_by_groups(
-        atoms, ratios=SPLIT_RATIOS, seed=SPLIT_SEED, group_column="image_group"
+        atoms, ratios=SPLIT_RATIOS, seed=SPLIT_SEED, group_column=group_col
     )
 
-    # Assert no POSITIVE image leaks across splits (negative images may repeat).
     def _pos_image_ids(split: pl.DataFrame) -> set[str]:
         return set(split["pos_image_id"].cast(pl.String).to_list())
 
@@ -160,9 +172,20 @@ def run() -> None:
         _pos_image_ids(val_atoms),
         _pos_image_ids(test_atoms),
     )
-    assert not (train_imgs & val_imgs), "train/val positive-image overlap"
-    assert not (train_imgs & test_imgs), "train/test positive-image overlap"
-    assert not (val_imgs & test_imgs), "val/test positive-image overlap"
+    if SPLIT_MODE == "row":
+        # Deliberate: "row" mode replicates the reference's looser protocol,
+        # which does not forbid positive-image reuse across splits. Log the
+        # overlap rather than asserting it away, so it's visible in every run.
+        logger.info(
+            f"Positive-image overlap (expected in row mode): "
+            f"train/val={len(train_imgs & val_imgs)}, train/test={len(train_imgs & test_imgs)}, "
+            f"val/test={len(val_imgs & test_imgs)}"
+        )
+    else:
+        # Assert no POSITIVE image leaks across splits (negative images may repeat).
+        assert not (train_imgs & val_imgs), "train/val positive-image overlap"
+        assert not (train_imgs & test_imgs), "train/test positive-image overlap"
+        assert not (val_imgs & test_imgs), "val/test positive-image overlap"
 
     datasets_path = constants.datasets_path
     datasets_path.mkdir(parents=True, exist_ok=True)
