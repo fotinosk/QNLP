@@ -3473,3 +3473,25 @@ recompile of the default SVO atlas (same fix, no threshold-50 filter, no
 suffix) would very plausibly change results for every prior from-scratch
 TTN experiment too, not just this reproduction plan — flagged as a
 separate, project-wide follow-up, not yet done.
+
+## R9: InfoNCE anchor-direction test — no real effect
+
+Line-by-line diff also found a real, previously-unflagged code
+difference: discoclip's (byte-identical) `InfoNCE` is called with images
+as the anchor/query row; ours has always called it caption-anchored.
+Since the in-batch similarity matrix isn't symmetric across a
+(caption, image) batch, this is a genuine training-objective difference,
+not cosmetic. Added `ImageContrastiveLoss(image_as_anchor: bool = False)`
+and tested it on top of R6's config, both arms (jobs 7435931/7435932).
+
+| | SVO-Probes | delta vs R6 | SVO-Swap | delta vs R6 |
+|---|---|---|---|---|
+| R6 CLIP | 0.6649 | — | 0.7692 | — |
+| R9 CLIP | 0.6722 | +0.0073 | 0.7692 | +0.0000 |
+| R6 TTN | 0.4864 | — | 0.4519 | — |
+| R9 TTN | 0.5059 | +0.0195 | 0.4615 | +0.0096 |
+
+Every delta is below the plan's +0.03 real-effect threshold; CLIP's
+SVO-Swap is exactly unchanged. Not a real driver of the remaining gap —
+`image_as_anchor` stays off by default. R6 remains the best confirmed
+result.

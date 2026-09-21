@@ -425,8 +425,28 @@ this is purely a training-objective difference, not an eval one.
 
 Added `ImageContrastiveLoss(image_as_anchor: bool = False)` (default
 preserves every existing run) and wired it through
-`SVOExperimentConfig.image_as_anchor` / `SVO_ML_IMAGE_AS_ANCHOR`. Not yet
-run — next candidate row, on top of R6's configuration, both arms.
+`SVOExperimentConfig.image_as_anchor` / `SVO_ML_IMAGE_AS_ANCHOR`.
+
+## R9 result: no real effect on either arm
+
+Jobs 7435931 (CLIP) / 7435932 (TTN), `image_as_anchor=true` on top of
+R6's full configuration, both arms.
+
+| | SVO-Probes | delta vs R6 | SVO-Swap | delta vs R6 |
+|---|---|---|---|---|
+| R6 CLIP | 0.6649 | — | 0.7692 | — |
+| R9 CLIP | 0.6722 (obj_neg 0.7746, subj_neg 0.6811, verb_neg 0.6234) | **+0.0073** | 0.7692 | **+0.0000** |
+| R6 TTN | 0.4864 | — | 0.4519 | — |
+| R9 TTN | 0.5059 (obj_neg 0.5125, subj_neg 0.4861, verb_neg 0.5105) | **+0.0195** | 0.4615 | +0.0096 |
+
+Both arms move less than the plan's +0.03 real-effect threshold on every
+metric — CLIP's SVO-Swap is exactly unchanged. **The InfoNCE anchor
+direction is not a real driver of the remaining gap.** `image_as_anchor`
+stays off by default; not adopted.
+
+This closes the InfoNCE-direction lead. R6 remains the best confirmed
+configuration (CLIP 0.6649 SVO-Probes / 0.7692 SVO-Swap), gap to the
+DisCoCLIP target (0.8355) still ~0.163.
 
 ## Thesis framing note — applies now, not at the end
 
