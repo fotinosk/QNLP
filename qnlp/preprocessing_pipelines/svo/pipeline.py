@@ -4,6 +4,7 @@ from qnlp.core.data_engine.processing.compiler_step import CCGCompilerStep
 from qnlp.core.data_engine.processing.conform_rank_step import UnifyEinsumRankStep
 from qnlp.core.data_engine.processing.lemmatize_step import LemmatizeStep
 from qnlp.core.data_engine.processing.pipeline import Pipeline
+from qnlp.core.data_engine.processing.symbol_lemmatize_step import SymbolLemmatizeStep
 
 # SVO has one sentence per row — no flatten step needed.
 # `corrected_sentence` (Llama-3.2-3B grammar/spelling fix) is the positive caption;
@@ -27,6 +28,14 @@ ccg_parsing_step = CCGCompilerStep(
     worker_batch_size=200,
 )
 unification_step = UnifyEinsumRankStep()
+# DISCOCLIP_REPRODUCTION_PLAN.md's structural-comparison "corrected fix": the
+# reference lemmatizes purely for vocabulary/symbol identity, AFTER parsing —
+# a different operation from lemma_step's pre-parse grammatical finitization
+# (which stays, unchanged, to preserve the rank-1 diagram guarantee). Runs
+# after CCGCompilerStep so `compiled_bytes` already exists; before
+# UnifyEinsumRankStep is fine since that step only touches the diagram's
+# output indices, never `symbols`.
+symbol_lemma_step = SymbolLemmatizeStep()
 
 svo_atlas = constants.atlases_path / "svo"
 
@@ -38,7 +47,7 @@ svo_atlas = constants.atlases_path / "svo"
 svo_pipeline = Pipeline(
     atlas_dir=svo_atlas,
     lmdb_path=constants.lmdb_path,
-    steps=[schema_step, remove_dots_step, lemma_step, ccg_parsing_step, unification_step],
+    steps=[schema_step, remove_dots_step, lemma_step, ccg_parsing_step, symbol_lemma_step, unification_step],
     derived_name="derived_v1",
     keep_columns=[
         "pos_local_image_path",
