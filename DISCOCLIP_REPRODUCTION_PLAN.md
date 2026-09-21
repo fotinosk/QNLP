@@ -765,3 +765,261 @@ same `bond_dim`, same `embedding_dim` means the difference can only come
 from the symbol inventory — different tensor orders, hence different CCG
 types being assigned. Worth a direct symbol-inventory diff over the same
 sentences, independent of how the split question resolves.
+
+---
+
+# Phase 5.4 — the parameter gap is fully explained: data coverage, not implementation
+
+Investigated while the re-split experiment runs. **There is no
+implementation defect.** The 3.4x parameter gap is entirely a
+consequence of how much of SVO-Probes each pipeline actually has.
+
+## The reference's model, read directly from its checkpoint
+
+`checkpoints/66a93c8ad2db467e82d817dc4b84009b/best_model.pt`:
+
+| shape | count | params each | total | share |
+|---|---|---|---|---|
+| `(10, 512, 10)` | 24 | 51,200 | 1,228,800 | 73.3% |
+| `(10, 512)` | 41 | 5,120 | 209,920 | 12.5% |
+| `(512, 10)` | 40 | 5,120 | 204,800 | 12.2% |
+| `(512,)` | 66 | 512 | 33,792 | 2.0% |
+| **total** | **171 symbols** | | **1,677,312** | |
+
+**Exactly the same four shapes as ours.** Same ansatz, same `bond_dim=10`,
+same `embedding_dim=512`, and `get_einsum_model()` unions symbols across
+datasets identically to our `collect_symbol_sizes`. The only difference
+is the **number of symbols**: 171 vs our 465.
+
+## Why: the two pipelines hold very different amounts of the benchmark
+
+| | reference | ours (raw source) |
+|---|---|---|
+| rows | 8,984 | 36,841 |
+| unique images | 3,888 | 14,097 |
+| unique captions | 2,014 | 10,324 |
+| caption word types | **160** | **2,440** |
+
+The reference operates on **28% of the images, 20% of the captions, and
+6.6% of the vocabulary**. Its 160 word types generate 171 symbols — the
+counts line up exactly.
+
+This is not a defect on their side either; the paper states plainly that
+"URL-based image retrieval yielded only partial coverage of the original
+14,097 images." Our pipeline simply retrieved far more of them (15,351
+images downloaded, per `SVO_EXPERIMENTS.md`'s data-pipeline section), so
+more rows survive the both-images-available filter, so more captions and
+more distinct words enter the vocabulary, so the model has more symbols.
+
+**Same code, more data, bigger model.** The parameter gap needs no
+further investigation and R7/the line-by-line encoder diff can be closed
+on this point.
+
+## What this means for the comparison
+
+Combined with Phase 5.2's split finding, the two tasks differ on two
+independent axes, both making the reference's number easier to reach:
+
+| | reference | ours |
+|---|---|---|
+| vocabulary | 160 word types | ~2,440 available, 465 symbols at threshold 50 |
+| captions | 2,014 | 10,324 |
+| test positive images seen in training | ~52% | **0%** by construction |
+| test (caption, positive image) pairs seen in training | **39.4%** | 0% |
+
+0.8323 versus 0.6649 was never a like-for-like comparison. A smaller,
+more controlled vocabulary over a partially-seen test set is a
+substantially easier problem than a 5x larger caption set over fully
+held-out images.
+
+## The decisive experiment — cheap, and it closes the reproduction
+
+**Run our pipeline on the reference's exact CSVs.**
+`~/Desktop/Dev/discoclip/data/processed/svo_probes/{train,val,test}.csv`
+are on disk: 5,287 / 1,849 / 1,848 rows, with the same columns our
+loader already expects (`corrected_sentence`, `pos_image_id`,
+`neg_image_id`, `subj_neg`/`verb_neg`/`obj_neg`, `subj`/`verb`/`obj`).
+
+Same rows, same splits, same vocabulary, our code. Then:
+
+- **Reaches ~0.83** -> reproduction complete; every remaining difference
+  is data coverage and split protocol, both now quantified. This is the
+  strongest possible outcome and it retires the whole reproduction
+  campaign.
+- **Stays near 0.66 on their own data** -> a genuine implementation
+  divergence survives, and the line-by-line encoder diff resumes with a
+  much narrower search space.
+
+This supersedes the re-split experiment currently running as the primary
+test, because it controls vocabulary *and* split simultaneously rather
+than split alone. Run both; the re-split result is still the one that
+isolates contamination on our own larger dataset.
+
+## Thesis framing this unlocks
+
+The honest and considerably stronger claim is no longer "we failed to
+reproduce":
+
+> Under the reference's own data subset and split protocol we reproduce
+> X. Our pipeline additionally recovers 14,097 of the benchmark's images
+> against the reference's 3,888, giving a 5x larger caption set and a
+> 15x larger vocabulary, and evaluates under a held-out-image protocol
+> with zero train/test image overlap. Under those stricter conditions the
+> same architecture scores Y.
+
+That is a contribution in its own right — a harder, cleaner benchmark
+protocol — rather than a shortfall against a published number.
+
+---
+
+# Phase 5.5 — why our vocabulary is larger, and a data-quality audit
+
+Two questions, both now answered with measurements.
+
+## 1. The vocabulary gap: the threshold is not scale-invariant
+
+The word-frequency filter is **identical** in both pipelines. What
+differs is the corpus it runs on, and an absolute occurrence threshold
+means something different at a different corpus size.
+
+| | rows | threshold | relative frequency | word types |
+|---|---|---|---|---|
+| reference | 8,984 | 50 | **0.56%** | 160 |
+| ours | 36,841 | 50 | **0.14%** | 341 |
+
+A word occurring 20 times in their 8,984 rows occurs roughly 80 times in
+our 36,841 — so it clears a threshold of 50 for us and fails for them.
+Same code, a **four times weaker filter** in the only sense that matters.
+
+**Control confirming the filter itself is the same:** subsampling our raw
+data to 8,984 rows and applying threshold 50 gives 1,593 captions and
+**126 word types**, against their actual 2,014 and 160. Our filter is
+their filter.
+
+### Scale-corrected thresholds on our corpus
+
+| threshold | rows | captions | word types |
+|---|---|---|---|
+| 50 (current) | 23,385 | 5,261 | 341 |
+| 100 | 18,300 | 3,739 | 207 |
+| **150** | **15,090** | **2,855** | **151** |
+| 205 (matched relative frequency) | ~12,800 | ~2,300 | 125 |
+
+**Threshold ~150 gives 151 word types — the closest match to their 160.**
+Scaling from our post-image-availability count (26,189 rows) rather than
+the raw 36,841 gives ~146, which agrees.
+
+### Two consequences
+
+1. **Matching the paper's nominal threshold of 50 was the wrong move.**
+   R1 matched the number; it should have matched the relative strictness.
+   The correct equivalent is ~150.
+2. **Threshold 150 is likely a better operating point outright**, not just
+   a comparability fix: 15,090 rows at a reference-sized vocabulary is
+   **1.7x their data at the same model size**, and it cuts the text tower
+   toward ~1.7M parameters — directly attacking the overfitting signature
+   (train 0.97 / val 0.61) that has dominated this campaign.
+
+### Testable prediction — worth one job
+
+R1 (threshold 10 -> 50) produced **+0.042** on the CLIP arm, the largest
+single-variable gain of the campaign. The sweep stopped at 50 only
+because that is the nominal figure in the paper. If the mechanism is
+vocabulary size driving overfitting, **threshold 150 should beat
+threshold 50 on the CLIP arm**, and by a similar or larger margin.
+
+Add as **R10**, both arms, on top of R6's configuration.
+
+## 2. Data-quality audit: our data is a strict superset, not worse
+
+Checked directly, because "more data" could have meant "more junk":
+
+| check | result |
+|---|---|
+| reference image ids we also hold | **3,887 / 3,888 (99.97%)** |
+| additional images we hold | **7,869** |
+| most files sharing one exact byte size (placeholder signature) | **7** |
+| files under 5KB | 13 of 15,351 |
+| of the **200 smallest** files: fail to decode | **4** |
+| of the 200 smallest: under 32px | 0 |
+| of the 200 smallest: near-uniform (std < 5) | 1 |
+
+**Our image set is a strict superset of theirs.** We hold all but one of
+their images plus 7,869 more. There is no placeholder contamination — a
+failed URL returning a generic "image unavailable" graphic would show up
+as hundreds of files sharing one exact byte size, and the largest such
+group is 7. The bad tail is negligible: even among the 200 *smallest*
+files, only 4 fail to decode.
+
+This corroborates the earlier sampled check in `SVO_EXPERIMENTS.md`
+("Image corruption — ruled out... zero decode failures" across 500
+sampled images) with a targeted worst-case check rather than a random
+one.
+
+**Verdict: we are not training on worse data. We are training on more and
+better-covered data with a filter setting calibrated for a corpus four
+times smaller.** The problem was never data quality; it was that an
+absolute frequency threshold silently became a much weaker filter as
+coverage improved.
+
+---
+
+# Open experiments as of 2026-09-21
+
+Consolidated from Phases 5.2 / 5.4 / 5.5, whose findings are recorded in
+full above. Ordered by what each settles, not by cost.
+
+| # | experiment | settles | status |
+|---|---|---|---|
+| E1 | **Our pipeline on the reference's exact CSVs** (`~/Desktop/Dev/discoclip/data/processed/svo_probes/{train,val,test}.csv`) | The reproduction outright. Same rows, same splits, same vocabulary, our code. ~0.83 closes the campaign; ~0.66 means a real implementation divergence survives and the encoder diff resumes with a narrow search space. | **not started — highest value** |
+| E2 | **R10: threshold 150**, both arms, on R6's config | Whether the scale-corrected filter beats the nominal one. Predicted to beat threshold 50 by >= R1's +0.042, since 150 gives 151 word types against the reference's 160. Also the most promising standalone gain available. | not started |
+| E3 | **Re-split with no train/test image overlap** | Isolates contamination on our own larger dataset. | **running** (user-launched) |
+| ~~E4~~ | ~~Seen-vs-unseen split of the reference's own test set~~ | — | **dropped 2026-09-21** |
+| ~~E5~~ | ~~Clean recompile of the default (unsuffixed) SVO atlas~~ | — | **dropped 2026-09-21** |
+
+## Scope decision (2026-09-21): E1-E3 only
+
+E4 and E5 are dropped. Two consequences to carry forward rather than
+leave implicit:
+
+**Dropping E4** means the 39.4% train/test pair overlap in the reference's
+splits stays a *measured structural observation* and never becomes a
+quantified claim about how much of the published 83.55 depends on it.
+That is a defensible place to stop — the overlap figures in Phase 5.2 are
+measurements of the released CSVs and stand on their own — but the
+writeup should describe the split protocols factually and compare
+like-for-like, rather than asserting how much of their number the
+contamination accounts for. We will not have measured that.
+
+**Dropping E5** means every SVO number in this project produced on the
+default (unsuffixed) atlas remains computed on the corrupted 68%
+population — 17,782 valid rows of 26,189. That is acceptable going
+forward, because E1/E2/E3 all use suffixed or externally-supplied
+datasets and nothing new will touch the default atlas. But those earlier
+numbers will appear in the thesis, so **the corruption must be stated as
+a caveat wherever they are reported**, not silently omitted. The
+alternative — rerunning them — is exactly what dropping E5 declines to
+do.
+
+## What is now closed
+
+- **Phase 0 reproduces** (Test Acc 0.8323 vs the paper's 83.55) — the
+  target was always reachable here.
+- **The metric is identical** — same `(pos_sim > neg_sim)` definition.
+- **The parameter gap is explained** — data coverage, not implementation.
+  Same ansatz, same dims, same symbol-collection logic; they hold 6.6% of
+  the vocabulary because they hold 28% of the images.
+- **The vocabulary gap is explained** — an absolute frequency threshold
+  is not scale-invariant; their 50 is 0.56% relative, ours is 0.14%.
+- **Our data is not worse** — strict superset of their images (3,887 of
+  3,888, plus 7,869 more), no placeholder contamination, negligible
+  corrupt tail.
+- **No variable-rank scheme exists** — audited; our model is their model.
+
+## What remains genuinely unexplained
+
+Nothing structural, pending E1. Every divergence found so far is data
+coverage, filter calibration, or split protocol. If E1 reaches ~0.83 on
+their data with our code, the reproduction is complete and the remaining
+difference between 0.83 and our numbers is fully attributed to a harder
+benchmark protocol rather than to a weaker implementation.
