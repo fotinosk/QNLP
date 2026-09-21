@@ -42,6 +42,7 @@ from nltk.corpus import wordnet as wn
 from qnlp.constants import constants
 from qnlp.core.data_engine.processing.common_steps import RemoveTrailingDotsStep
 from qnlp.core.data_engine.processing.lemmatize_step import LemmatizeStep
+from qnlp.core.data_engine.processing.symbol_lemmatize_step import _lemmatize_word
 from qnlp.core.non_linear_contraction.determine_optimal_contraction_path import get_contraction_path_and_cost
 from qnlp.discoviz.models.bobcat_text_processor import BobcatTextProcessor
 from qnlp.discoviz.parser.asnsatz import CustomMPSAnsatz
@@ -185,6 +186,18 @@ def _compile_diagram(text_processor: BobcatTextProcessor, text: str) -> tuple[st
         return None
 
     symbols = [[_asdict_symbol(sym), size] for sym, size in symbol_size_pairs]
+    # Mirror SymbolLemmatizeStep's post-parse relabeling so this eval set's
+    # vocabulary matches the (also relabeled) train/test symbol names exactly
+    # — otherwise "holds" here vs. "hold" in training would be an out-of-vocab
+    # mismatch for a word the model actually learned.
+    for entry in symbols:
+        sym_dict = entry[0]
+        name = sym_dict.get("name", "")
+        if "_" in name:
+            base, rest = name.split("_", 1)
+            lemma = _lemmatize_word(base)
+            if lemma != base:
+                sym_dict["name"] = f"{lemma}_{rest}"
     shapes = tuple(size for _, size in symbols)
     try:
         path, _largest = get_contraction_path_and_cost(diagram, shapes)
