@@ -3274,3 +3274,92 @@ parsing. Testing that requires reordering
 recompile of the SVO atlas — a real undertaking, not a quick diagnostic
 run, and the next candidate worth pursuing if this investigation
 continues.
+
+## R6: post-parse symbol lemmatization + three real bugs found in the R3-R5 harness
+
+Investigated the deferred parse-order difference. Rather than moving
+`LemmatizeStep` after parsing (which grammatically finitises verb forms
+to guarantee a rank-1 diagram — moving it would risk breaking that
+guarantee), added a new `SymbolLemmatizeStep`
+(`qnlp/core/data_engine/processing/symbol_lemmatize_step.py`) that runs
+*after* `CCGCompilerStep` and WordNet-lemmatises each compiled symbol's
+word stem only (vocabulary consolidation, matching discoclip's actual
+post-parse relabelling), leaving `LemmatizeStep` and the parse untouched.
+Also applied to `build_svo_swap.py`'s independently-compiled diagrams so
+the swap set's vocabulary stays consistent.
+
+**Bug found while wiring this up**: `svo_pipeline`'s `derived_name` was
+hardcoded to `"derived_v1"` instead of reading `constants.derived_name` —
+harmless until now, but it would have made a `PARSER_VERSION`-scoped
+recompile silently no-op (Pipeline's delta-detection would see every
+sample_id already present in the existing `derived_v1` and process
+nothing). Fixed; no-op for every existing unversioned run. Recompiled
+under `PARSER_VERSION=lemmafix` (fresh, isolated LMDB + derived dir, so
+every sentence is genuinely recompiled rather than skipped as a cache
+hit against the shared bobcat store used by every other project) +
+threshold=50: 26,180 -> 15,199 rows survive the frequency filter (up
+from 9,107 at threshold 50 pre-fix — merging inflected forms raises word
+frequencies, so more words clear the bar; a good sign the relabelling is
+doing real work). Role-resolve rate 97.6-98.3%. Swap set: 104 rows.
+
+**Two more bugs found while relaunching training, both affecting R3/R4/R5's
+historical numbers:**
+
+1. `run_frozen.py` — a separate, rarely-used standalone CLIP script —
+   was created once and never updated when `dataset_suffix` /
+   `use_weight_norm` were added; TRAIN/VAL/TEST/SWAP paths were hardcoded
+   unsuffixed and `EinsumModel` never got `use_weight_norm`. **This
+   script turned out not to be what R1-R5's "CLIP arm" actually used** —
+   see below — so this bug never affected any reported number, but it's
+   fixed anyway since it's still a real script in the repo. It also
+   surfaced a separate, genuine `EinsumModel` bug: `load_state_dict`,
+   when called *directly* on an `EinsumModel` instance (as
+   `run_frozen.py` does), recreates `self.weights` via
+   `nn.Parameter(torch.empty(size))` with no device argument, silently
+   moving all weights back to CPU after the model was `.to(device)`'d —
+   crashes the next forward pass with a CUDA/CPU device-mismatch error.
+   `run.py`'s `Trainer._load_checkpoint` never hits this because
+   `nn.Module.load_state_dict` called on a *parent* module (`ContrastiveVLM`)
+   copies values in place via `_load_from_state_dict`, bypassing a child
+   module's overridden `load_state_dict` entirely — that's why R1-R5
+   never crashed. Left un-fixed for now (not on the critical path); worth
+   fixing if `run_frozen.py` is ever used directly again.
+2. **The actual CLIP-arm entrypoint is `run.py` + `IMAGE_MODEL_IMAGE_BACKBONE=clip`**
+   (`build_image_model()`'s own `IMAGE_MODEL_`-prefixed settings class,
+   independent of `SVOExperimentConfig`'s `SVO_ML_` prefix) — confirmed
+   by inspecting job 7434903's ("r4_clip") actual log output, which
+   carries `submit_svo.sh`'s echo lines (`Non-linear:`,
+   `Pretrained checkpoint:`), not `submit_svo_frozen.sh`'s. Both
+   `submit_svo.sh` and `submit_svo_frozen.sh` also had an unconditional
+   `export SVO_ML_BATCH_SIZE=128` that silently clobbered every `-v
+   SVO_ML_BATCH_SIZE=...` passed at qsub time — confirmed via job logs
+   that **R3, R4, and R5 (both arms) all actually trained at
+   batch_size=128**, despite every one of those rows documenting an
+   intended batch_size=64. The "batch size" component of the bisection
+   was never actually tested in any of those runs. Fixed both scripts
+   with the `: "${VAR:=default}"` idiom (only applies the default when
+   the caller didn't already set it).
+
+**Net effect**: R3/R4/R5's `text_lr` and `triplet_weight=0` components
+were real; the `batch_size=64` component was not (silently ran at 128
+throughout), and the CLIP arm's `dataset_suffix`/`use_weight_norm`
+components were only genuinely exercised once `IMAGE_MODEL_IMAGE_BACKBONE=clip`
+is confirmed as the actual mechanism (it reads `SVOExperimentConfig` for
+those two fields same as the TTN arm, so they likely *were* real for
+CLIP too — only `batch_size` is confirmed wrong for certain). This
+plausibly explains some of R4's documented sub-additivity, though not
+all of it.
+
+**Relaunched both arms** with every fix now correctly applied — first
+verified `Batch size: 64` in each job's log before letting it run
+unattended:
+- TTN: job 7435369 (`r6_ttn`, via `submit_svo.sh`, default `image_backbone=ttn`).
+- CLIP: job 7435368 (`r6_clip` via `submit_svo_frozen.sh`) crashed at
+  final eval with exactly the `EinsumModel.load_state_dict` device bug
+  predicted above — confirming `run_frozen.py` is not a viable path.
+  Relaunched correctly as job 7435541 (`r6_clip`, via `submit_svo.sh` +
+  `IMAGE_MODEL_IMAGE_BACKBONE=clip`).
+
+Both: `SVO_ML_DATASET_SUFFIX=_thresh50_lemmafix`, `SVO_ML_TRIPLET_WEIGHT=0`,
+`SVO_ML_TEXT_LR=0.003`, `SVO_ML_BATCH_SIZE=64`, `SVO_ML_USE_WEIGHT_NORM=false`,
+`SVO_ML_TEXT_WEIGHT_DECAY=0.01`. Results pending.
