@@ -41,7 +41,12 @@ export XDG_CACHE_HOME=$CACHE_DIR/.xdg_cache
 # --- Experiment config (SVO_ML_ prefix — see qnlp/scripts/svo/config.py) ---
 # embedding_dim must stay 512 (CLIP ViT-B/32's output dim) — config.py's
 # default already matches, no override needed.
-export SVO_ML_BATCH_SIZE=128
+# `:=` (not `export ...=128`) so a qsub -v override survives — an
+# unconditional export here silently clobbered every `-v
+# SVO_ML_BATCH_SIZE=...` passed at submit time (R3/R4/R5 all actually ran
+# at 128 despite intending 64 — see TTN_CIFAR_EXPERIMENTS.md).
+: "${SVO_ML_BATCH_SIZE:=128}"
+export SVO_ML_BATCH_SIZE
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 

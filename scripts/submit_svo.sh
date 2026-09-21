@@ -44,7 +44,12 @@ export XDG_CACHE_HOME=$CACHE_DIR/.xdg_cache
 # -v SVO_ML_<FIELD>=<value> to qsub for one-off deviations instead of
 # hardcoding them here, so this script can't silently shadow config.py
 # again the way SVO_ML_USE_NON_LINEAR_CONTRACTIONS=true did.
-export SVO_ML_BATCH_SIZE=128
+# `:=` (not `export ...=128`) so a qsub -v override survives — an
+# unconditional export here silently clobbered every `-v
+# SVO_ML_BATCH_SIZE=...` passed at submit time (R3/R4/R5 all actually ran
+# at 128 despite intending 64 — see TTN_CIFAR_EXPERIMENTS.md).
+: "${SVO_ML_BATCH_SIZE:=128}"
+export SVO_ML_BATCH_SIZE
 
 # --- Reduce fragmentation from CUDA allocations ---
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
