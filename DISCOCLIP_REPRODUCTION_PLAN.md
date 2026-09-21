@@ -1052,3 +1052,14 @@ paying off with a smaller vocabulary still — something about the 10-to-50
 step specifically mattered (row-count reduction, different symbols
 dropped, or the initial cut removing a specific class of noisy/rare
 captions) that a further 50-to-150 cut does not repeat.
+
+## E4 (new): threshold 150 combined with the row-split protocol
+
+E2 (threshold 150) and E3 (row-split) each vary one axis independently
+against R6. Neither has been tested combined. E4 launches
+`SVO_ML_DATASET_SUFFIX=_thresh150_lemmafix_rowsplit` (job 7437388's prep,
+threshold 150 + `SVO_PREP_SPLIT_MODE=row`) to check whether the two
+effects interact — e.g. if E2's null result was masked by the vocabulary
+cut fighting against the strict split's harder task, the same cut might
+show a real effect once the split is also relaxed to the reference's
+looser protocol. Both arms, same R6/S1 hyperparameters as E2/E3.
