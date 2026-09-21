@@ -24,8 +24,22 @@ class ImageContrastiveLoss:
         triplet_weight: float = 0.5,
         triplet_margin: float = 0.2,
         distance: str = "cosine",
+        image_as_anchor: bool = False,
     ):
+        """
+        image_as_anchor: DISCOCLIP_REPRODUCTION_PLAN.md's line-by-line diff
+            found discoclip's SVO training calls its (byte-identical)
+            InfoNCE as `criterion(image_emb, text_emb)` -- image as the
+            anchor/query row of the in-batch similarity matrix -- while
+            this loss has always called it as `(caption_emb, true_emb)`,
+            text as anchor. Since the cross-caption/image similarity
+            matrix isn't symmetric, these are two different loss functions,
+            not a cosmetic argument-order difference. Default False
+            preserves every existing run; True reproduces discoclip's
+            direction exactly.
+        """
         self._infonce = InfoNCE(temperature=temperature)
+        self.image_as_anchor = image_as_anchor
 
         if distance == "cosine":
             dist_fn = lambda x, y: 1 - nn.CosineSimilarity(dim=-1)(x, y)
@@ -46,7 +60,10 @@ class ImageContrastiveLoss:
         true_emb = outputs["true_image_embeddings"]
         false_emb = outputs.get("false_image_embeddings")
 
-        infonce_loss, accuracy = self._infonce(caption_emb, true_emb)
+        if self.image_as_anchor:
+            infonce_loss, accuracy = self._infonce(true_emb, caption_emb)
+        else:
+            infonce_loss, accuracy = self._infonce(caption_emb, true_emb)
 
         metrics: dict[str, Tensor] = {
             "loss": infonce_loss,

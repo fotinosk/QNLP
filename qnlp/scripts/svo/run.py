@@ -310,6 +310,7 @@ def run():
             triplet_weight=cfg.triplet_weight,
             triplet_margin=cfg.triplet_margin,
             distance=cfg.distance,
+            image_as_anchor=cfg.image_as_anchor,
         ).to(device)
     step = SVOHardNegStep(loss_fn=loss_fn, device=device)
 

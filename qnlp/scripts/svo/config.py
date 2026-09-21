@@ -28,6 +28,12 @@ class SVOExperimentConfig(BaseSettings):
     # matches the reference's unconstrained scaling exactly.
     use_weight_norm: bool = True
 
+    # DISCOCLIP_REPRODUCTION_PLAN.md's line-by-line diff: their (byte-
+    # identical) InfoNCE is called with images as the anchor/query row;
+    # ours has always called it with captions as anchor. Default False
+    # preserves every existing run; True reproduces their direction.
+    image_as_anchor: bool = False
+
     batch_size: int = 128
     text_lr: float = 0.001
     text_weight_decay: float = 0.001

@@ -401,6 +401,33 @@ Requested full structural diff, in progress. Two findings so far:
 Diff continues on the remaining pieces (loss internals, evaluation
 methodology, training-loop specifics) not yet compared line by line.
 
+## R9 candidate found: InfoNCE anchor direction
+
+Their `InfoNCE` (`discoclip/models/criteria.py`) is byte-identical to
+ours (`qnlp/domain/models/other/loss.py`) — same formula, same
+docstring, evidently copy-pasted at some point. But the two call sites
+pass arguments in **opposite order**:
+
+- theirs (`train_svo.py`): `contrastive_criterion(pos_image_embeddings,
+  sentence_embeddings)` — `text_emb=image`, `pos_emb=caption` — **image
+  is the anchor/query row**.
+- ours (`ImageContrastiveLoss.__call__`, and the legacy ARO loss too):
+  `self._infonce(caption_emb, true_emb)` — **caption is the anchor**.
+
+Since `InfoNCE`'s in-batch similarity matrix is `text_emb @ pos_emb.T`
+and cross-entropy softmaxes row-wise, swapping which side is the anchor
+is not cosmetic — `S` and `S.T` give different losses and gradients for
+a non-symmetric batch of (caption, image) pairs (verified: same batch,
+`image_as_anchor=False` gives loss 4.349, `=True` gives 4.109). Their
+hard-negative *evaluation* (`pos_sim > neg_sim`) is still caption-
+anchored regardless of which direction training used, same as ours — so
+this is purely a training-objective difference, not an eval one.
+
+Added `ImageContrastiveLoss(image_as_anchor: bool = False)` (default
+preserves every existing run) and wired it through
+`SVOExperimentConfig.image_as_anchor` / `SVO_ML_IMAGE_AS_ANCHOR`. Not yet
+run — next candidate row, on top of R6's configuration, both arms.
+
 ## Thesis framing note — applies now, not at the end
 
 The TTN arm sits at chance (R6: 0.4864) while CLIP reaches 0.6649 on the

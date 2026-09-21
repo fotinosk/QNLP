@@ -292,6 +292,7 @@ def run() -> None:
         triplet_weight=cfg.triplet_weight,
         triplet_margin=cfg.triplet_margin,
         distance=cfg.distance,
+        image_as_anchor=cfg.image_as_anchor,
     ).to(device)
 
     optimizer = torch.optim.AdamW(
