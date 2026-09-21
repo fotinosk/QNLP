@@ -48,7 +48,7 @@ svo_pipeline = Pipeline(
     atlas_dir=svo_atlas,
     lmdb_path=constants.lmdb_path,
     steps=[schema_step, remove_dots_step, lemma_step, ccg_parsing_step, symbol_lemma_step, unification_step],
-    derived_name="derived_v1",
+    derived_name=constants.derived_name,
     keep_columns=[
         "pos_local_image_path",
         "neg_local_image_path",
