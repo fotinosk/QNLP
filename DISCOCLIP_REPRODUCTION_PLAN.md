@@ -1063,3 +1063,30 @@ effects interact — e.g. if E2's null result was masked by the vocabulary
 cut fighting against the strict split's harder task, the same cut might
 show a real effect once the split is also relaxed to the reference's
 looser protocol. Both arms, same R6/S1 hyperparameters as E2/E3.
+
+## E3 result (job 7437357, CLIP arm): the split-contamination hypothesis confirmed, dramatically
+
+Row-split protocol (no positive-image dedup, matching the reference's
+looser split), threshold 50, R6's hyperparameters otherwise.
+
+| | SVO-Probes | SVO-Swap |
+|---|---|---|
+| R6 (strict grouped split) | 0.6649 | 0.7692 |
+| **E3 (row-split)** | **0.8981** (obj_neg 0.9652, subj_neg 0.9180, verb_neg 0.8624) | **0.9255** |
+| DisCoCLIP target | 0.8355 | 0.9368 |
+
+**E3 SVO-Probes (0.8981) exceeds the reference's own published number
+(0.8355)**, and SVO-Swap (0.9255) lands within 0.011 of theirs (0.9368).
++0.233 vs. R6 on Probes alone — the split-contamination effect (Phase
+5.2's 39.4% train/test pair overlap finding on the reference's own data)
+is not a minor artefact; on our much larger, more diverse dataset it is
+the dominant driver of accuracy, far outweighing any modelling
+difference this whole campaign has chased. This is the single largest
+effect measured anywhere in the reproduction campaign.
+
+**Reading this correctly**: this is not "our model is actually better
+than DisCoCLIP" — it is a strong confirmation that a model can partially
+memorise seen (caption, image) pairs when the split allows it, and that
+effect alone can close (and exceed) the entire 0.254-point gap this
+campaign spent weeks chasing as if it were a modelling or data-coverage
+problem. TTN's counterpart (job 7437358) still running.
