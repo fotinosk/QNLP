@@ -252,10 +252,11 @@ def run() -> None:
     logger.info(f"  device: {device}")
     logger.info("========================================")
 
-    TRAIN_PARQUET = DATASETS_PATH / "svo_train_probes.parquet"
-    VAL_PARQUET = DATASETS_PATH / "svo_val_probes.parquet"
-    TEST_PARQUET = DATASETS_PATH / "svo_test_probes.parquet"
-    SWAP_PARQUET = DATASETS_PATH / "svo_swap_eval.parquet"
+    suffix = cfg.dataset_suffix
+    TRAIN_PARQUET = DATASETS_PATH / f"svo_train_probes{suffix}.parquet"
+    VAL_PARQUET = DATASETS_PATH / f"svo_val_probes{suffix}.parquet"
+    TEST_PARQUET = DATASETS_PATH / f"svo_test_probes{suffix}.parquet"
+    SWAP_PARQUET = DATASETS_PATH / f"svo_swap_eval{suffix}.parquet"
 
     train_ds = _make_probes_ds(TRAIN_PARQUET, cfg.use_non_linear_contractions)
     val_ds = _make_probes_ds(VAL_PARQUET, cfg.use_non_linear_contractions)
@@ -281,7 +282,9 @@ def run() -> None:
             f"({cfg.embedding_dim}). Set SVO_ML_EMBEDDING_DIM=512 to match ViT-B/32."
         )
 
-    text_model = EinsumModel(symbols, sizes, non_linear_contractions=cfg.use_non_linear_contractions).to(device)
+    text_model = EinsumModel(
+        symbols, sizes, non_linear_contractions=cfg.use_non_linear_contractions, use_weight_norm=cfg.use_weight_norm
+    ).to(device)
     text_head = nn.Linear(cfg.embedding_dim, cfg.embedding_dim).to(device)
 
     loss_fn = ImageContrastiveLoss(
