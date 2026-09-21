@@ -376,6 +376,31 @@ Phase 4's earlier structural-comparison pass (which found the
 weight-norm gauge-fix and `weight_decay` — both already applied). R7 and
 R8 (attribution) are deprioritized under this outcome.
 
+## Line-by-line diff: found the real driver, retracted a wrong "fix"
+
+Requested full structural diff, in progress. Two findings so far:
+
+1. **`SymbolLemmatizeStep` (added for the "corrected fix") was
+   redundant.** Our own `BobcatTextProcessor` already tokenises raw text,
+   WordNet-lemmatises separately, and relabels the CCG tree's leaves with
+   lemmas before diagram conversion — the exact mechanism discoclip's
+   processor uses. Verified: the *original* default LMDB already stores
+   `hold_0__n.r@B` for "holds", not `holds_0`. The parse-order concern
+   was based on a wrong premise; the step is a harmless no-op, and the
+   earlier "structural fix" framing is retracted.
+2. **The real driver of R6's data-side gain: a corrupted, unscoped
+   Bobcat parser cache silently discarded 31% of the SVO corpus** in the
+   default `derived_v1` population (17,782/26,189 valid vs. 26,180/26,189
+   after a fresh cache). Root cause and fix documented in full in
+   `TTN_CIFAR_EXPERIMENTS.md`'s "Correction" section — `svo/pipeline.py`,
+   `winoground/pipeline.py`, and `compile_shard.py` all fixed.
+   **This affects every past default-config SVO experiment, not just
+   this reproduction plan** — a clean recompile of the default (non-
+   suffixed) atlas is a separate, project-wide follow-up.
+
+Diff continues on the remaining pieces (loss internals, evaluation
+methodology, training-loop specifics) not yet compared line by line.
+
 ## Thesis framing note — applies now, not at the end
 
 The TTN arm sits at chance (R6: 0.4864) while CLIP reaches 0.6649 on the

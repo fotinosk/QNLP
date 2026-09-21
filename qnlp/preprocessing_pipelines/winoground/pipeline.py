@@ -46,6 +46,7 @@ ccg_step = CCGCompilerStep(
     lmdb_path=constants.lmdb_path,
     bond_dim=constants.bond_dim,
     embedding_dim=constants.embedding_dim,
+    cache_path=str(constants.bobcat_cache_path),
 )
 unify_step = UnifyEinsumRankStep()
 

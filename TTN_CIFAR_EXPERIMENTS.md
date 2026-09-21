@@ -3398,3 +3398,78 @@ Final tally (CLIP arm; TTN stays flat at chance throughout, not repeated):
 | baseline | 0.5811 | — |
 | R4 (confounded — batch_size silently 128) | 0.6262 | 0.6327 (R5) |
 | R6 (batch_size=64 genuine, + lemma-fix data, + weight-norm off) | **0.6649** | **0.7692** |
+
+## Correction: R6's "lemma-fix" data gain was a corrupted-cache fix in disguise, not lemmatization
+
+Started the user-requested full line-by-line diff of the two text
+encoders. Two findings, one that retracts part of R6's narrative and one
+that's a genuine, previously-undiagnosed infrastructure bug.
+
+**`SymbolLemmatizeStep` was redundant — the lemma relabelling already
+existed.** Our own `BobcatTextProcessor.sentences2trees()`
+(`qnlp/discoviz/models/bobcat_text_processor.py`) already tokenises the
+raw (unlemmatised) surface text, WordNet-lemmatises separately via its
+own internal `Tokenizer`, and relabels the CCG tree's leaves with the
+lemmas via `lemmatize_tree` **before** `.to_diagram()` — line-for-line
+the same mechanism `discoclip`'s `BobcatTextProcessor` uses. Verified
+directly: querying the *original* (pre-`lemmafix`) default LMDB for "A
+father holds a baby." returns symbol names `hold_0__n.r@B`, `hold_1...`,
+`hold_2...` — **already lemma-form**, not `holds_*`. The new step was a
+safe no-op on top of an already-lemmatised symbol space; the parse-order
+concern that motivated it was based on a wrong premise (that our symbol
+names were unlemmatised) — left in place since it's harmless and correct
+for what it claims to do, but the earlier "structural fix" framing was
+incorrect and is retracted here.
+
+**The real driver: the original `derived_v1` atlas silently lost ~31% of
+SVO to a corrupted, unscoped Bobcat parser cache.** Directly compared
+`enrich_atoms()` output over the identical 26,189-row manifest:
+
+| population | valid diagram/symbols | success rate |
+|---|---|---|
+| `derived_v1` (default LMDB, `~/.cache/lambeq/bobcat/diskcache`) | 17,782 | 68% |
+| `derived_lemmafix` (fresh LMDB + fresh Bobcat cache) | 26,180 | 99.97% |
+
+Root cause, confirmed by inspecting the default LMDB's `error` fields
+across its 8,424 unique hashes: **2,628 (31%) carry a compile error**,
+overwhelmingly `"database disk image is malformed"` (884),
+`"file is not a database"` (511, both sqlite corruption signatures), and
+a downstream symptom `"not enough values to unpack (expected 1, got 0)"`
+(1,229). `qnlp/preprocessing_pipelines/svo/pipeline.py`'s
+`CCGCompilerStep` and `qnlp/scripts/svo/compile_shard.py` (the SGE
+job-array compile path, `scripts/submit_svo_compile_array.sh`, up to 16
+concurrent tasks x 2 workers = 32 processes across many physical nodes)
+never passed `cache_path`, defaulting to the single shared
+`~/.cache/lambeq/bobcat/diskcache` — the exact concurrent-write-over-NFS
+risk `compile_shard.py`'s own docstring already identified and mitigated
+**for the LMDB output** (each task writes its own shard), but missed for
+the underlying Bobcat parse-tree cache. `winoground/pipeline.py` has the
+identical bug (never passes `cache_path` either) — its data has not been
+checked for the same corruption but should be treated as suspect.
+`coco/pipeline.py` and `aro`'s loader already pass
+`cache_path=str(constants.bobcat_cache_path)` correctly.
+
+The `lemmafix` run avoided this by accident, not by design: it ran as a
+single non-array job (2 local workers, one node), so it never triggered
+concurrent access to the shared cache regardless of path. Every past
+`submit_svo_compile_array.sh` run remains at risk of recurring this.
+
+**Fixed**: `svo/pipeline.py` and `winoground/pipeline.py` now pass
+`cache_path=str(constants.bobcat_cache_path)` (matching COCO/ARO).
+`compile_shard.py` goes further — gives **each array task its own cache
+directory** (`constants.bobcat_cache_path.parent / "svo_shards" /
+f"shard_{i}"`), mirroring the LMDB-output sharding already there, which
+actually eliminates the concurrent-access risk rather than just
+relocating a still-shared file.
+
+**Implication for R6 and every other default-config SVO number**: R6's
+real, novel contribution was mostly **a nearly-complete, uncorrupted
+27% larger usable dataset**, plus the genuinely-applied `batch_size=64`
+and weight-norm/decay fixes — not the lemmatization framing given
+earlier. More importantly, **every existing SVO experiment in this
+project that used the default (non-suffixed) dataset** was silently
+trained on the corrupted, 68%-complete `derived_v1` population. A clean
+recompile of the default SVO atlas (same fix, no threshold-50 filter, no
+suffix) would very plausibly change results for every prior from-scratch
+TTN experiment too, not just this reproduction plan — flagged as a
+separate, project-wide follow-up, not yet done.

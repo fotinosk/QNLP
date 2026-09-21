@@ -33,6 +33,14 @@ from qnlp.utils.logging import setup_logger
 logger = setup_logger(log_name="svo_compile_shard")
 
 SHARD_LMDB_ROOT = constants.lmdb_path.parent / f"{constants.lmdb_path.name}_svo_shards"
+# Mirrors the LMDB-output sharding above: `CCGCompilerStep`'s default
+# `cache_path` (~/.cache/lambeq/bobcat/diskcache) is a single shared sqlite
+# file. Concurrent SGE array tasks all writing to it caused silent, large-
+# scale corruption ("database disk image is malformed") that discarded
+# ~31% of the SVO corpus in one past run — every task needs its own cache
+# dir, exactly like the LMDB shards, not just a differently-located shared
+# one (constants.bobcat_cache_path is still a single shared path).
+SHARD_BOBCAT_CACHE_ROOT = constants.bobcat_cache_path.parent / "svo_shards"
 
 
 def _resolve_shard_args() -> tuple[int, int, int]:
@@ -86,12 +94,15 @@ def run() -> None:
         logger.info("Empty shard, nothing to do.")
         return
 
+    shard_cache_path = SHARD_BOBCAT_CACHE_ROOT / f"shard_{shard_index}"
+    shard_cache_path.mkdir(parents=True, exist_ok=True)
     compiler = CCGCompilerStep(
         lmdb_path=constants.lmdb_path,  # only used to skip already-cached texts
         bond_dim=constants.bond_dim,
         embedding_dim=constants.embedding_dim,
         max_workers=max_workers,
         worker_batch_size=max(10, len(shard_texts) // (max_workers * 4) or 1),
+        cache_path=str(shard_cache_path),
     )
     df = pl.DataFrame({"processed_text": shard_texts})
     df = compiler.process(df)

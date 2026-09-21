@@ -26,6 +26,7 @@ ccg_parsing_step = CCGCompilerStep(
     embedding_dim=constants.embedding_dim,
     max_workers=2,
     worker_batch_size=200,
+    cache_path=str(constants.bobcat_cache_path),
 )
 unification_step = UnifyEinsumRankStep()
 # DISCOCLIP_REPRODUCTION_PLAN.md's structural-comparison "corrected fix": the
