@@ -460,3 +460,150 @@ our pipeline is still 0.17 short of the reference. The honest statement
 is: *on our pipeline, frozen CLIP reaches 0.66 where our from-scratch
 tower reaches 0.49.* The gap decomposition only becomes a claim about the
 tower once the baseline reproduces. Write it the first way until then.
+
+---
+
+# Phase 5 — next batch (2026-09-21)
+
+Three items. One cluster job, two desk tasks. Nothing blocks anything
+else, so all three start immediately.
+
+## 5.1 — S1's TTN configuration on clean data (one job, highest value)
+
+**The question this settles.** The project's central negative claim is
+that the from-scratch image tower cannot learn adequate visual features
+from SVO. Every run supporting it was either (a) trained on the
+corrupted `derived_v1` population — 17,782 valid rows of 26,189, **68%**
+— or (b) trained on clean data but in the **CLIP-optimal** configuration
+rather than the tower's own best one.
+
+R6's TTN arm is case (b): it ran `triplet_weight=0, text_lr=0.003,
+batch_size=64` — settings tuned on the CLIP arm. The tower's best-known
+configuration is S1's `triplet_weight=100`. Phase 2 explicitly predicted
+this split: *"R2 plausibly helps CLIP and hurts TTN. That is
+informative, not contradictory."* R6 TTN (0.4864) landing below S1 on
+corrupted data (0.5323) is consistent with the predicted split, not with
+a demonstrated tower failure.
+
+**So the tower has never been tested on clean data in its own best
+configuration.** This run does that.
+
+**Config:** S1 (A1 isometric init + B1 feature map + `cp_rank=128`,
+`triplet_weight=100`) on `SVO_ML_DATASET_SUFFIX=_thresh50_lemmafix`.
+Everything else at S1's settings, not R6's.
+
+**Comparisons — this run sits at the intersection of two
+single-variable axes:**
+
+| against | isolates | prior number |
+|---|---|---|
+| S1 on corrupted data | **data quality** (corrupt -> clean) | 0.5323 |
+| R6 TTN on clean data | **configuration** (CLIP-optimal -> tower-optimal) | 0.4864 |
+| R6 CLIP on clean data | **image tower** (CLIP -> TTN), same pipeline | 0.6649 |
+
+**Criterion:** the plan's standing +0.03 threshold against 0.5323.
+
+**Outcomes:**
+- **Clears 0.5323 meaningfully** -> the tower's failure was partly an
+  artefact of corrupted data and/or a mistuned configuration, and the
+  central negative claim needs rewriting before it goes in the thesis.
+- **Stays at ~0.53 or below** -> the negative claim survives its
+  strongest challenge, and can be stated with confidence rather than
+  hedged. That is a genuinely useful outcome too, and the reason this
+  run is worth its slot regardless of direction.
+
+## 5.2 — Variable-rank audit — SUPERSEDED, already resolved
+
+This item duplicates the audit already completed earlier in this
+document ("A — Audit result: no variable-rank scheme exists; same
+model", above). Re-confirmed rather than re-litigated: `discoclip`'s
+`CustomMPSAnsatz`/`EinsumModel` are line-for-line the same classes we
+have, its `svo_default.yaml` sets `bond_dim: 10` as a single uniform
+scalar, and no per-symbol rank parameter exists anywhere in the code.
+"Compact... variable-rank tensors" describes the MPS decomposition's
+per-symbol *core count* (already replicated via `_split_ar`), not a
+bond-dimension value. **Verdict stands: same model, R7 not warranted.**
+Skipped as redundant rather than re-run.
+
+Original text, kept for reference below.
+
+Scheduled as Phase 1.3, deferred through three phases. It remains the
+largest unexplained structural divergence from the reference.
+
+**The gap it targets:** our text tower is **3.4x** the reference's
+parameter count (5.67M at threshold 50, vs Phase 0's reproduced 1.68M),
+and no configurational change — data protocol, loss shape, learning
+rate, batch size — has moved it. DisCoCLIP's 83.55% model is
+**"Compact": CCG-based with variable-rank tensors**; ours uses a uniform
+bond dimension of 10. A per-symbol rank scheme would produce exactly this
+signature.
+
+**Determine from `github.com/kinianlo/discoclip`:**
+
+1. How per-symbol ranks are assigned — by CCG category, by word
+   frequency, by tensor order, or learned.
+2. The resulting parameter count, and whether it accounts for 1.68M.
+3. Whether our uniform bond-10 scheme is the same model with a different
+   setting, or **a different model entirely**.
+
+Outcome (3) matters for the thesis independently of accuracy. If we have
+been comparing against a different model than the one that produced
+83.55%, that must be stated plainly rather than found in review.
+
+**Decision gate:**
+- Real difference found -> implement as **R7**, both arms, one variable,
+  on top of R6's configuration.
+- No meaningful difference -> the Phase 4 stopping rule applies: stop
+  bisecting, diff the text encoders line by line, and if that finds
+  nothing either, close the reproduction at ~33% of the gap with the
+  residual documented.
+
+## 5.3 — Winoground data soundness check (cheap script)
+
+**Why.** `qnlp/preprocessing_pipelines/winoground/pipeline.py` has the
+**identical bug** that corrupted the SVO atlas: it never passes
+`cache_path`, so it defaults to the single shared
+`~/.cache/lambeq/bobcat/diskcache` and is exposed to the same
+concurrent-write-over-NFS corruption. It was flagged as suspect when the
+SVO corruption was diagnosed and has not been checked.
+
+**Check.** Mirror the diagnosis already used for SVO:
+1. Run `enrich_atoms()` over the Winoground manifest and record the
+   valid-diagram/symbols rate. SVO's corrupted population showed **68%**
+   against **99.97%** for a fresh cache — anything materially below
+   ~99% indicates the same problem.
+2. Inspect the LMDB's `error` fields for the sqlite corruption
+   signatures: `"database disk image is malformed"`, `"file is not a
+   database"`, and the downstream `"not enough values to unpack
+   (expected 1, got 0)"`.
+
+**If corrupted:** every Winoground number in this project is unsound and
+must not be reported. Recompile with `cache_path` passed (the fix already
+applied to `svo/pipeline.py`), and re-run anything that depended on it.
+
+**Result: clean.** `enrich_atoms()` over the full 800-row manifest:
+**784/800 (98%) valid**. Inspected the LMDB `error` field for all 800
+unique hashes: 16 failures, **all** genuine Bobcat parse errors
+(`"Bobcat failed to parse 'Theres...'"` — an unrelated apostrophe-
+stripping issue in Winoground's captions), **zero** instances of the
+sqlite corruption signatures (`"database disk image is malformed"`,
+`"file is not a database"`) that identified SVO's corruption. Winoground
+never hit the concurrent-write bug in practice — presumably because it
+was never compiled via a concurrent SGE array job the way SVO's
+`compile_shard.py` was. Existing Winoground numbers are sound; the
+`cache_path` fix already applied to `winoground/pipeline.py` prevents
+this from becoming a problem in any future recompile, but no re-run is
+required.
+
+**Also audit the remaining pipelines** for the same omission.
+`coco/pipeline.py` and the ARO loader already pass `cache_path`
+correctly; SVO and Winoground did not. Confirm no others do, so this
+class of bug is closed rather than patched twice.
+
+## Note on the clean default-atlas recompile
+
+A full clean recompile of the default (unsuffixed) SVO atlas is queued
+separately. It is not in this batch's critical path — 5.1 uses the
+already-clean `_thresh50_lemmafix` data — but every unsuffixed SVO number
+in the project sits on the corrupted 68% population until it lands, and
+no prior SVO result should be reported without noting that.
