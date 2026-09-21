@@ -3362,4 +3362,39 @@ unattended:
 
 Both: `SVO_ML_DATASET_SUFFIX=_thresh50_lemmafix`, `SVO_ML_TRIPLET_WEIGHT=0`,
 `SVO_ML_TEXT_LR=0.003`, `SVO_ML_BATCH_SIZE=64`, `SVO_ML_USE_WEIGHT_NORM=false`,
-`SVO_ML_TEXT_WEIGHT_DECAY=0.01`. Results pending.
+`SVO_ML_TEXT_WEIGHT_DECAY=0.01`.
+
+## R6 result: CLIP's best result yet, TTN stays at exact chance
+
+**R6 CLIP: SVO-Probes 0.6649** (obj_neg 0.7693, subj_neg 0.6362, verb_neg
+0.6292), **SVO-Swap 0.7692** (104/104 evaluated). vs. R4 (0.6262 /
+0.6327... in the previously-mislabeled comparison — see caveat below):
+SVO-Probes **+0.0387** (clears the plan's +0.03 real-effect threshold),
+SVO-Swap **+0.14** (large jump). Gap to the DisCoCLIP target (0.8355) is
+now ~0.171, down from ~0.215 at R4 — real, meaningful progress, though
+still the majority of the gap is unclosed.
+
+**R6 TTN: SVO-Probes 0.4864** (obj_neg 0.4705, subj_neg 0.4706, verb_neg
+0.4994), SVO-Swap 0.4519. Exactly at chance, consistent with every
+from-scratch TTN result in this entire investigation regardless of which
+fix is applied — reconfirms the from-scratch image tower (not text
+tower, not loss, not data pipeline) is the TTN arm's bottleneck.
+
+**Important caveat on comparability**: this is the first run where
+`batch_size=64`, `dataset_suffix`, and `use_weight_norm` were all
+*simultaneously and correctly* applied on the CLIP arm — R3/R4/R5's CLIP
+numbers were confounded by the batch-size-clobbering bug (see above), so
+R6 isn't a clean single-variable ablation against R4; it's the first
+trustworthy combined-fixes data point. The improvement is real and
+substantial regardless, but which individual fix(es) drove it (the new
+lemmatization data vs. the finally-correct batch_size=64 vs. weight-norm
+off) is unknown without a further bisection — not undertaken here since
+the plan's goal was closing the reproduction gap, not attributing it.
+
+Final tally (CLIP arm; TTN stays flat at chance throughout, not repeated):
+
+| row | CLIP SVO-Probes | CLIP SVO-Swap |
+|---|---|---|
+| baseline | 0.5811 | — |
+| R4 (confounded — batch_size silently 128) | 0.6262 | 0.6327 (R5) |
+| R6 (batch_size=64 genuine, + lemma-fix data, + weight-norm off) | **0.6649** | **0.7692** |
