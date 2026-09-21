@@ -1023,3 +1023,32 @@ coverage, filter calibration, or split protocol. If E1 reaches ~0.83 on
 their data with our code, the reproduction is complete and the remaining
 difference between 0.83 and our numbers is fully attributed to a harder
 benchmark protocol rather than to a weaker implementation.
+
+---
+
+# E2 result (job 7437372, CLIP arm): the prediction did not hold
+
+Threshold 150 on R6's configuration, grouped split. Text-tower: 260
+symbols, 3.1M params (down from R6's threshold-50 count, but still
+~1.85x the reference's 1.68M — not the close match Phase 5.5 projected
+from the 151-vs-160 word-type estimate).
+
+| | SVO-Probes | delta vs R6 | SVO-Swap | delta vs R6 |
+|---|---|---|---|---|
+| R6 (threshold 50) | 0.6649 | — | 0.7692 | — |
+| **E2 (threshold 150)** | **0.6639** (obj_neg 0.7230, subj_neg 0.6350, verb_neg 0.6497) | **-0.0010** | **0.7821** | +0.0129 |
+
+**Essentially flat — both deltas are well below the plan's +0.03
+real-effect threshold.** The predicted mechanism ("threshold 150 should
+beat threshold 50 by a similar or larger margin than R1's +0.042,
+because it drives the text tower toward the reference's parameter
+scale") did not materialize. Cutting the vocabulary further, once
+already past R6's threshold-50 cut, buys no additional accuracy on this
+arm. TTN's counterpart (job 7437373) still running — report pending.
+
+This suggests the earlier R1 gain (threshold 10 -> 50, +0.042) was not
+purely a "smaller vocabulary reduces overfitting" effect that keeps
+paying off with a smaller vocabulary still — something about the 10-to-50
+step specifically mattered (row-count reduction, different symbols
+dropped, or the initial cut removing a specific class of noisy/rare
+captions) that a further 50-to-150 cut does not repeat.
