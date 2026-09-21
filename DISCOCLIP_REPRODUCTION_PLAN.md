@@ -633,3 +633,125 @@ separately. It is not in this batch's critical path — 5.1 uses the
 already-clean `_thresh50_lemmafix` data — but every unsuffixed SVO number
 in the project sits on the corrupted 68% population until it lands, and
 no prior SVO result should be reported without noting that.
+
+---
+
+# Phase 5.2 — pipeline comparison results (2026-09-21)
+
+Compared the reference implementation (`~/Desktop/Dev/discoclip`) against
+ours directly. Four findings, the last of which likely accounts for most
+of the remaining gap.
+
+## 1. Phase 0 did reproduce — the target is reachable here
+
+`logs/train_66a93c8ad2db467e82d817dc4b84009b.log` (run 2026-09-20, device
+`mps`, seed 42):
+
+```
+Test Loss: 1.8940, Test Acc: 0.8323
+Test [subj] Acc: 0.8190 (n=431)
+Test [verb] Acc: 0.8029 (n=893)
+Test [obj]  Acc: 0.8931 (n=524)
+```
+
+Against the paper (83.55 / 80.74 / 82.42 / 87.79): within ~2 points per
+subset. **The reference reproduces on this hardware**, so bisection has a
+valid anchor and the target was never unreachable.
+
+## 2. The metric is identical — no metric mismatch
+
+`train_svo.py:452`:
+
+```python
+hard_neg_acc = (pos_sim > neg_sim).float().mean().item()
+```
+
+Character-for-character the same definition as ours. Their reported
+SVO-Probes accuracy is the same binary positive-vs-negative image choice,
+not an in-batch retrieval score. This hypothesis is dead.
+
+(Note: their `contrastive_criterion(pos_image_embeddings,
+sentence_embeddings)` passes images into the parameter named `text_emb` —
+the image-as-anchor difference already tested in R9 and found immaterial.
+Consistent.)
+
+## 3. Data counts confirm the filtering protocol
+
+train 5,287 / val 1,849 / test 1,848 = **8,984** — exactly the paper's
+figure, and consistent with our threshold-50 protocol (9,107). Confirms
+R1's direction was right.
+
+## 4. The splits are constructed differently, and the test sets are not equivalent
+
+**This is the substantive finding.** Measured directly on their CSVs:
+
+| measure | value |
+|---|---|
+| test positive images also appearing as train positives | **591 / 1,146 = 51.6%** |
+| test positive images appearing anywhere in train (pos or neg) | 625 / 1,146 = **54.5%** |
+| test captions appearing verbatim in train | 642 / 990 = **64.8%** |
+| **test rows whose exact (caption, positive image) pair appears in train** | **728 / 1,848 = 39.4%** |
+| test rows that are exact duplicate triples of a train row | 0 / 1,848 = 0.0% |
+
+No row is duplicated outright, but **39.4% of test rows ask the model
+about a caption-image pairing it was trained on.**
+
+Our pipeline forbids this by construction. `split_by_groups` partitions on
+`pos_image_id`, giving **zero** positive-image overlap across splits — a
+deliberate choice recorded in `SVO_EXPERIMENTS.md`'s data-pipeline
+section ("group by `pos_image_id` only; allow negative images to repeat
+across splits").
+
+**Consequence: 0.8323 and 0.6649 are not measured on equivalent tasks.**
+Ours is a fully held-out test set; theirs is roughly half-seen. This also
+explains a trajectory detail that never fitted a "harder model" story —
+the reference reaches **val acc 0.8069 after a single epoch**, before it
+could plausibly have learned general caption-image grounding, which is
+what partial recall of seen pairings would look like.
+
+Note their ARO preprocessing (`scripts/preprocess_aro.py`) *does* split by
+image (`train_test_split(images, ...)`); the SVO CSVs are pre-built and
+do not appear to use that path.
+
+## The confirmatory test
+
+Do not treat this as settled until measured. The clean test needs no
+retraining and uses their own checkpoint
+(`checkpoints/66a93c8ad2db467e82d817dc4b84009b/best_model.pt`):
+
+1. Add a boolean column to their `test.csv` marking rows whose
+   `pos_image_id` appears in `train.csv`.
+2. Their `train_svo.py` already evaluates per-subset by column (it does
+   this for `subj_neg`/`verb_neg`/`obj_neg`) — point it at the new column.
+3. Report `hard_neg_acc` on **seen** versus **unseen** rows separately.
+
+Interpretation:
+- **Unseen-row accuracy drops toward ~0.66** -> the gap is largely a
+  split-methodology artefact, our pipeline is solving the harder task,
+  and the reproduction is effectively complete once measured
+  like-for-like.
+- **Unseen-row accuracy stays near 0.83** -> contamination is not the
+  driver, and the remaining divergence is still open.
+
+## What this does not claim
+
+Split methodology differences are common and the stricter choice is ours,
+not theirs. The point is **comparability**, not correctness: our numbers
+have been benchmarked against a figure computed on a differently
+constructed test set, and any thesis comparison must either match their
+protocol or report both.
+
+If the confirmatory test lands as expected, the correct framing for the
+thesis is: *reproduced the reference to within X points under its own
+split protocol; under a held-out-image protocol the same pipeline scores
+Y* — which is a stronger and more defensible contribution than the
+reproduction alone.
+
+## Still unexplained
+
+The **3.4x text-tower parameter gap** (ours 5.67M at threshold 50 vs the
+reference's 1.68M) is not addressed by any of the above. Same ansatz,
+same `bond_dim`, same `embedding_dim` means the difference can only come
+from the symbol inventory — different tensor orders, hence different CCG
+types being assigned. Worth a direct symbol-inventory diff over the same
+sentences, independent of how the split question resolves.
