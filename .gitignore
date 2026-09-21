@@ -29,3 +29,4 @@ mlartifacts
 data/atlases/*
 *.mdb
 data/datasets/*
+data/svo/discoclip_reference/*
