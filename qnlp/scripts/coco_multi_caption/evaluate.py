@@ -28,6 +28,7 @@ from torchvision import transforms
 
 from qnlp.constants import constants
 from qnlp.core.training.retrieval_eval import retrieval_metrics
+from qnlp.discoviz.models.clip_text_model import caption_compiled_columns
 from qnlp.discoviz.models.einsum_model import EinsumModel
 from qnlp.discoviz.models.image_model import build_image_model, image_model_hyperparams
 from qnlp.domain.datasets.dataloader import vlm_collate_fn
@@ -45,15 +46,29 @@ COCO_COMPILED_COLUMNS = [("diagram", "symbols", "caption", "path")]
 
 ARO_MANIFEST = constants.atlases_path / "aro" / "data_manifest.parquet"
 
-ARO_COMPILED_COLUMNS = [
-    ("true_diagram", "true_symbols", "true_caption", "true_path"),
-    ("false_diagram", "false_symbols", "false_caption", "false_path"),
-]
-SUGARCREPE_COMPILED_COLUMNS = [
-    ("true_diagram", "true_symbols", "true_caption", "true_path"),
-    ("false_diagram", "false_symbols", "false_caption", "false_path"),
-]
-SVO_PROBES_COMPILED_COLUMNS = [("diagram", "symbols", "caption", "path")]
+
+def _pair_compiled_columns() -> list[tuple]:
+    """PAPER_EXPERIMENTS_PLAN.md's M3-aware compiled_columns for a true/false
+    caption pair (ARO, SugarCREPE, SVO-Swap all share this shape)."""
+    return [
+        caption_compiled_columns("true_diagram", "true_symbols", "true_processed_text", "true_caption", "true_path"),
+        caption_compiled_columns(
+            "false_diagram", "false_symbols", "false_processed_text", "false_caption", "false_path"
+        ),
+    ]
+
+
+def _svo_probes_compiled_columns() -> list[tuple]:
+    return [caption_compiled_columns("diagram", "symbols", "processed_text", "caption")]
+
+
+def _known_symbols(model: ContrastiveVLM) -> set | None:
+    """None means "no fixed vocabulary" (PAPER_EXPERIMENTS_PLAN.md's M3:
+    frozen CLIP text) -- every caller's OOV filter should treat every row
+    as valid in that case, since sym2weight-style membership doesn't apply
+    to a model that can embed any string."""
+    sym2weight = getattr(model.text_model, "sym2weight", None)
+    return set(sym2weight.keys()) if sym2weight is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -149,10 +164,10 @@ def _winoground_pair_results(
         parquet, mode="eval", image_transform=_make_transform(size), use_non_linear_contractions=non_linear
     )
     loader = _make_loader(ds, batch_size, winoground_eval_collate_fn)
-    known = set(model.text_model.sym2weight.keys())
+    known = _known_symbols(model)
 
     def _all_known(cap) -> bool:
-        return all(s in known for s in cap[1])
+        return known is None or all(s in known for s in cap[1])
 
     per_pair: dict[str, tuple[bool, bool, bool]] = {}
     n_skipped = 0
@@ -289,13 +304,13 @@ def evaluate_aro(
 
     ds = VLMDataset(
         parquet,
-        compiled_columns=ARO_COMPILED_COLUMNS,
+        compiled_columns=_pair_compiled_columns(),
         image_transform=_make_transform(size),
         use_non_linear_contractions=non_linear,
     )
     task_map = _load_task_map(set(ds.df["sample_id"].to_list()))
     loader = _make_loader(ds, batch_size, vlm_collate_fn)
-    known = set(model.text_model.sym2weight.keys())
+    known = _known_symbols(model)
 
     correct_by_task: dict[str, list[bool]] = defaultdict(list)
     pos_by_task: dict[str, list[float]] = defaultdict(list)
@@ -308,11 +323,15 @@ def evaluate_aro(
             false_caps = batch["false_caption"]
             sample_ids = batch["sample_id"]
 
-            valid = [
-                i
-                for i in range(len(sample_ids))
-                if all(s in known for s in true_caps[i][1]) and all(s in known for s in false_caps[i][1])
-            ]
+            valid = (
+                list(range(len(sample_ids)))
+                if known is None
+                else [
+                    i
+                    for i in range(len(sample_ids))
+                    if all(s in known for s in true_caps[i][1]) and all(s in known for s in false_caps[i][1])
+                ]
+            )
             n_skipped += len(sample_ids) - len(valid)
             if not valid:
                 continue
@@ -378,12 +397,12 @@ def evaluate_sugarcrepe(
 
     ds = VLMDataset(
         parquet,
-        compiled_columns=SUGARCREPE_COMPILED_COLUMNS,
+        compiled_columns=_pair_compiled_columns(),
         image_transform=_make_transform(size),
         use_non_linear_contractions=non_linear,
     )
     loader = _make_loader(ds, batch_size, vlm_collate_fn)
-    known = set(model.text_model.sym2weight.keys())
+    known = _known_symbols(model)
 
     correct: list[bool] = []
     pos_cos: list[float] = []
@@ -395,11 +414,15 @@ def evaluate_sugarcrepe(
             true_caps = batch["true_caption"]
             false_caps = batch["false_caption"]
 
-            valid = [
-                i
-                for i in range(len(true_caps))
-                if all(s in known for s in true_caps[i][1]) and all(s in known for s in false_caps[i][1])
-            ]
+            valid = (
+                list(range(len(true_caps)))
+                if known is None
+                else [
+                    i
+                    for i in range(len(true_caps))
+                    if all(s in known for s in true_caps[i][1]) and all(s in known for s in false_caps[i][1])
+                ]
+            )
             n_skipped += len(true_caps) - len(valid)
             if not valid:
                 continue
@@ -459,7 +482,7 @@ def evaluate_svo_probes(
     ds = VLMDataset(
         parquet,
         image_columns=["true_local_image_path", "false_local_image_path"],
-        compiled_columns=SVO_PROBES_COMPILED_COLUMNS,
+        compiled_columns=_svo_probes_compiled_columns(),
         image_transform=_make_transform(size),
         use_non_linear_contractions=non_linear,
     )

@@ -61,7 +61,7 @@ class VLMDataset(Dataset):
         # compiled_columns entries are (diagram_col, symbols_col, output_key) or, for
         # non-linear contractions, (diagram_col, symbols_col, output_key, path_col).
         if use_non_linear_contractions:
-            missing = [spec for spec in self.compiled_columns if len(spec) < 4]
+            missing = [spec for spec in self.compiled_columns if len(spec) not in (2, 4)]
             if missing:
                 raise ValueError(
                     "use_non_linear_contractions=True requires a 4th path-column entry in each "
@@ -90,8 +90,15 @@ class VLMDataset(Dataset):
                     img = self.image_transform(img)
                 result[col] = img
 
-        # Bundle compiled (diagram, symbols[, path]) tuples
+        # Bundle compiled (diagram, symbols[, path]) tuples, or (2-tuple form)
+        # pass a raw column through verbatim under a renamed key -- used by
+        # PAPER_EXPERIMENTS_PLAN.md's M3 (frozen CLIP text has no diagram/
+        # symbols at all, just the raw caption string).
         for spec in self.compiled_columns:
+            if len(spec) == 2:
+                raw_col, output_key = spec
+                result[output_key] = row[raw_col]
+                continue
             diag_col, sym_col, output_key = spec[0], spec[1], spec[2]
             diagram = row[diag_col]
             symbols = _deserialize_symbols(row[sym_col])

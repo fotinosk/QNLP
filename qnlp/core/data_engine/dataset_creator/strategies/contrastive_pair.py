@@ -8,8 +8,10 @@ logger = setup_logger(log_name="contrastive_pair_strategy")
 _OUTPUT_COLUMNS = [
     "sample_id",
     "local_image_path",
+    "true_processed_text",
     "true_diagram",
     "true_symbols",
+    "false_processed_text",
     "false_diagram",
     "false_symbols",
 ]
@@ -17,8 +19,10 @@ _OUTPUT_COLUMNS = [
 _OUTPUT_SCHEMA = {
     "sample_id": pl.String,
     "local_image_path": pl.String,
+    "true_processed_text": pl.String,
     "true_diagram": pl.String,
     "true_symbols": pl.String,
+    "false_processed_text": pl.String,
     "false_diagram": pl.String,
     "false_symbols": pl.String,
 }
@@ -77,20 +81,32 @@ class ContrastivePairStrategy:
 
     def _reconstruct_labeled(self, atoms: pl.DataFrame, has_path: bool = False) -> pl.DataFrame:
         """Pair pre-labeled positive and negative atoms by sample_id."""
-        pos_cols = ["sample_id", "local_image_path", "diagram", "symbols"] + (["path"] if has_path else [])
-        neg_cols = ["sample_id", "diagram", "symbols"] + (["path"] if has_path else [])
+        pos_cols = ["sample_id", "local_image_path", "processed_text", "diagram", "symbols"] + (
+            ["path"] if has_path else []
+        )
+        neg_cols = ["sample_id", "processed_text", "diagram", "symbols"] + (["path"] if has_path else [])
         positives = (
             atoms.filter(pl.col("label"))
             .select(pos_cols)
             .rename(
-                {"diagram": "true_diagram", "symbols": "true_symbols", **({"path": "true_path"} if has_path else {})}
+                {
+                    "processed_text": "true_processed_text",
+                    "diagram": "true_diagram",
+                    "symbols": "true_symbols",
+                    **({"path": "true_path"} if has_path else {}),
+                }
             )
         )
         negatives = (
             atoms.filter(~pl.col("label"))
             .select(neg_cols)
             .rename(
-                {"diagram": "false_diagram", "symbols": "false_symbols", **({"path": "false_path"} if has_path else {})}
+                {
+                    "processed_text": "false_processed_text",
+                    "diagram": "false_diagram",
+                    "symbols": "false_symbols",
+                    **({"path": "false_path"} if has_path else {}),
+                }
             )
         )
         return positives.join(negatives, on="sample_id", how="inner")
@@ -122,7 +138,7 @@ class ContrastivePairStrategy:
 
         # Randomly select one atom per group to serve as the negative representative.
         # Shuffle first so that group_by().first() gives a random atom per group.
-        neg_cols = ["sample_id", "diagram", "symbols"] + (["path"] if has_path else [])
+        neg_cols = ["sample_id", "processed_text", "diagram", "symbols"] + (["path"] if has_path else [])
         neg_pool = (
             atoms.sample(fraction=1.0, shuffle=True, seed=int(rng.integers(0, 2**31)))
             .group_by("sample_id")
@@ -131,6 +147,7 @@ class ContrastivePairStrategy:
             .rename(
                 {
                     "sample_id": "neg_sample_id",
+                    "processed_text": "false_processed_text",
                     "diagram": "false_diagram",
                     "symbols": "false_symbols",
                     **({"path": "false_path"} if has_path else {}),
@@ -138,11 +155,18 @@ class ContrastivePairStrategy:
             )
         )
 
-        pos_cols = ["sample_id", "local_image_path", "diagram", "symbols"] + (["path"] if has_path else [])
+        pos_cols = ["sample_id", "local_image_path", "processed_text", "diagram", "symbols"] + (
+            ["path"] if has_path else []
+        )
         return (
             atoms.select(pos_cols)
             .rename(
-                {"diagram": "true_diagram", "symbols": "true_symbols", **({"path": "true_path"} if has_path else {})}
+                {
+                    "processed_text": "true_processed_text",
+                    "diagram": "true_diagram",
+                    "symbols": "true_symbols",
+                    **({"path": "true_path"} if has_path else {}),
+                }
             )
             .join(mapping, on="sample_id", how="left")
             .join(neg_pool, on="neg_sample_id", how="left")

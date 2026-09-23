@@ -285,9 +285,11 @@ def run() -> None:
             {
                 "sample_id": row["sample_id"],
                 "local_image_path": row["pos_local_image_path"],
+                "true_processed_text": true_text,
                 "true_diagram": true_diagram,
                 "true_symbols": true_symbols,
                 "true_path": true_path,
+                "false_processed_text": false_text,
                 "false_diagram": false_diagram,
                 "false_symbols": false_symbols,
                 "false_path": false_path,

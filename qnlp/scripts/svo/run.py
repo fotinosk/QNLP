@@ -29,6 +29,7 @@ from qnlp.constants import constants
 from qnlp.core.training.losses.image_contrastive import ImageContrastiveLoss
 from qnlp.core.training.losses.structured_contrastive import StructuredContrastiveLoss
 from qnlp.core.training.trainer import Trainer
+from qnlp.discoviz.models.clip_text_model import build_text_model, caption_compiled_columns, text_model_hyperparams
 from qnlp.discoviz.models.einsum_model import EinsumModel
 from qnlp.discoviz.models.image_model import build_image_model, image_model_hyperparams
 from qnlp.domain.datasets.dataloader import get_dataloaders
@@ -56,8 +57,11 @@ logger = setup_logger(log_name=EXPERIMENT_NAME)
 
 DATASETS_PATH = constants.datasets_path
 IMAGE_COLUMNS = ["true_local_image_path", "false_local_image_path"]
-COMPILED_COLUMNS = [("diagram", "symbols", "caption", "path")]
 SYMBOL_COLS = ["symbols"]
+
+
+def _compiled_columns() -> list[tuple]:
+    return [caption_compiled_columns("diagram", "symbols", "processed_text", "caption")]
 
 
 def _warm_start_from_aro(text_model: EinsumModel, image_model: torch.nn.Module, checkpoint_path: str, device) -> None:
@@ -254,7 +258,7 @@ def run():
         train_transform=train_transform,
         val_transform=val_transform,
         image_columns=IMAGE_COLUMNS,
-        compiled_columns=COMPILED_COLUMNS,
+        compiled_columns=_compiled_columns(),
         use_non_linear_contractions=cfg.use_non_linear_contractions,
     )
     train_loader, val_loader, test_loader = loaders
@@ -268,8 +272,10 @@ def run():
         remap={constants.embedding_dim: cfg.embedding_dim, constants.bond_dim: cfg.bond_dim},
     )
     logger.info(f"Collected {len(symbols)} unique symbols.")
+    logger.info(f"Text backbone: {text_model_hyperparams.text_backbone}")
 
-    text_model = EinsumModel(
+    text_model = build_text_model(
+        cfg.embedding_dim,
         symbols,
         sizes,
         non_linear_contractions=cfg.use_non_linear_contractions,

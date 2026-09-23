@@ -120,7 +120,7 @@ def _build_train_split(atoms: pl.DataFrame) -> pl.DataFrame:
 def _build_probes_split(atoms: pl.DataFrame) -> pl.DataFrame:
     has_path = "path" in atoms.columns
     cols = (
-        ["sample_id", "pos_local_image_path", "neg_local_image_path", "diagram", "symbols"]
+        ["sample_id", "pos_local_image_path", "neg_local_image_path", "processed_text", "diagram", "symbols"]
         + (["path"] if has_path else [])
         + ["subj_neg", "verb_neg", "obj_neg", "subj", "verb", "obj"]
     )

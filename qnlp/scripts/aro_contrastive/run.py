@@ -8,7 +8,7 @@ from torchvision import transforms
 from qnlp.constants import constants
 from qnlp.core.training.losses.contrastive import ContrastiveLoss
 from qnlp.core.training.trainer import Trainer
-from qnlp.discoviz.models.einsum_model import EinsumModel
+from qnlp.discoviz.models.clip_text_model import build_text_model, caption_compiled_columns, text_model_hyperparams
 from qnlp.discoviz.models.image_model import build_image_model, image_model_hyperparams
 from qnlp.domain.datasets.dataloader import get_dataloaders
 from qnlp.domain.datasets.dataset import collect_symbol_sizes
@@ -27,12 +27,19 @@ logger = setup_logger(log_name=EXPERIMENT_NAME)
 
 DATASETS_PATH = constants.datasets_path
 
-# 4th element is the pre-computed contraction path column (used only in non-linear mode).
-COMPILED_COLUMNS = [
-    ("true_diagram", "true_symbols", "true_caption", "true_path"),
-    ("false_diagram", "false_symbols", "false_caption", "false_path"),
-]
 SYMBOL_COLS = ["true_symbols", "false_symbols"]
+
+
+def _compiled_columns() -> list[tuple]:
+    """4th element is the pre-computed contraction path column (used only in
+    non-linear mode). PAPER_EXPERIMENTS_PLAN.md's M3 (text_backbone=clip)
+    gets the 2-tuple raw-passthrough form instead -- see caption_compiled_columns."""
+    return [
+        caption_compiled_columns("true_diagram", "true_symbols", "true_processed_text", "true_caption", "true_path"),
+        caption_compiled_columns(
+            "false_diagram", "false_symbols", "false_processed_text", "false_caption", "false_path"
+        ),
+    ]
 
 
 def run():
@@ -81,7 +88,7 @@ def run():
         batch_size=cfg.batch_size,
         train_transform=train_transform,
         val_transform=val_transform,
-        compiled_columns=COMPILED_COLUMNS,
+        compiled_columns=_compiled_columns(),
         use_non_linear_contractions=nlc,
     )
     train_loader, val_loader, test_loader = loaders
@@ -95,8 +102,11 @@ def run():
         remap={constants.embedding_dim: cfg.embedding_dim, constants.bond_dim: cfg.bond_dim},
     )
     logger.info(f"Collected {len(symbols)} unique symbols.")
+    logger.info(f"Text backbone: {text_model_hyperparams.text_backbone}")
 
-    text_model = EinsumModel(symbols, sizes, non_linear_contractions=nlc).to(device)
+    text_model = build_text_model(
+        cfg.embedding_dim, symbols, sizes, non_linear_contractions=nlc, use_weight_norm=True
+    ).to(device)
     image_model = build_image_model(cfg.embedding_dim).to(device)
     model = ContrastiveVLM(
         text_model, image_model, embedding_dim=cfg.embedding_dim, use_projection_head=cfg.use_alignment_head
