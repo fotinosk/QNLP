@@ -1115,3 +1115,64 @@ that this gap is plausibly still within its own noise floor, not
 independently verified further. TTN's counterpart (job 7437382) still
 running — that number is the one this whole campaign has been building
 toward.
+
+## E1 TTN result (job 7437382): 0.7457 — far above any prior TTN number, still below CLIP on this data
+
+**SVO-Probes 0.7457** (obj_neg 0.7786, subj_neg 0.7309, verb_neg 0.7335),
+**SVO-Swap 0.8000**. Same 167-symbol/1.66M-param text tower as E1 CLIP.
+Compared to E1 CLIP (0.8203/0.8316): -0.075/-0.032 — the tower trails the
+frozen-CLIP control on this small, reference-scale dataset, but by far
+less than on any of our own larger datasets, and reaches a level (0.75)
+no from-scratch TTN configuration had come close to before this batch.
+
+---
+
+# E2/E3/E4 TTN results — the headline comparison
+
+All remaining jobs finished. Consolidated:
+
+| config | SVO-Probes | vs. DisCoCLIP (0.8355) | SVO-Swap | vs. DisCoCLIP (0.9368) |
+|---|---|---|---|---|
+| E2 TTN (grouped split, threshold 150) | 0.5432 (obj_neg 0.6291, subj_neg 0.5353, verb_neg 0.5079) | -0.292 | 0.4359 | -0.501 |
+| **E3 TTN (row-split, threshold 50)** | **0.8915** (obj_neg 0.9596, subj_neg 0.9003, verb_neg 0.8595) | **+0.056** | 0.9043 | -0.033 |
+| E4 CLIP (row-split, threshold 150) | 0.9274 (obj_neg 0.9871, subj_neg 0.9554, verb_neg 0.8852) | +0.092 | 0.9524 | +0.016 |
+| **E4 TTN (row-split, threshold 150)** | **0.9171** (obj_neg 0.9678, subj_neg 0.9343, verb_neg 0.8842) | **+0.082** | 0.8889 | -0.048 |
+
+**E2 TTN** (grouped/strict split + threshold 150): 0.5432, vs. R6 TTN
+(0.4864, also grouped/strict): **+0.0568 — clears the +0.03 real-effect
+threshold**, the one genuine positive result from the threshold sweep,
+though still nowhere near the paper's number under the strict split, and
+SVO-Swap is flat-to-worse (0.4359 vs R6's 0.4519). Consistent with
+"vocabulary calibration helps a little, split protocol is what actually
+matters."
+
+**E3 TTN and E4 TTN both exceed the published DisCoCLIP SVO-Probes
+target (0.8355)** under the row-split protocol — the paper's own
+headline metric. E4 (threshold 150 combined with row-split) is the
+better of the two on Probes (0.9171); E3 is marginally better on Swap
+(0.9043 vs 0.8889). Text-tower size differs sharply between them (E3:
+629 symbols/7.9M params — our full threshold-50 vocabulary; E4: 260
+symbols/3.1M params — the threshold-150 cut), yet both land in the same
+high range, meaning **the split protocol, not vocabulary size, is doing
+essentially all of the work** once the split is relaxed to match the
+reference's own — matching Phase 5.5's original filter-calibration
+finding once split is controlled for.
+
+## The headline result
+
+**Under the apples-to-apples protocol the published DisCoCLIP result
+actually used, our from-scratch tensor-network image tower (TTN) matches
+or exceeds the published SVO-Probes benchmark** (0.9171 / 0.8915 vs.
+0.8355), on the same task, same metric, same split methodology. This is
+a direct, literature-comparable result: the paper's own protocol is the
+standard other DisCoCLIP-descended work would be measured against, and
+our tower reaches it without the frozen-CLIP image encoder DisCoCLIP
+relies on.
+
+Read together with Phase 5.1's S1-clean result (0.5542, strict
+held-out-image split, no train/test image overlap): the honest, complete
+statement for the thesis is two numbers, not one — *under the published
+paper's own protocol our tower reaches 0.92, matching or exceeding the
+literature; under a stricter, fully held-out-image protocol the same
+tower reaches 0.55.* Both are legitimate, and the gap between them is
+now fully characterised (row-split leakage) rather than mysterious.
