@@ -26,6 +26,7 @@ CACHE_DIR=/SAN/intelsys/discoviz/fotinos/cache
 export PYTHONPATH=$PROJECT_DIR
 
 export HF_HOME=$CACHE_DIR/huggingface_cache
+export HF_HUB_OFFLINE=1  # CLIPTextModel/CLIPTokenizer are fully cached; skip the online freshness check that can hang on this cluster's network
 export TRANSFORMERS_CACHE=$CACHE_DIR/transformers_cache
 export TORCH_HOME=$CACHE_DIR/torch_cache
 export NLTK_DATA=$CACHE_DIR/nltk_data
