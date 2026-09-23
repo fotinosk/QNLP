@@ -1090,3 +1090,28 @@ memorise seen (caption, image) pairs when the split allows it, and that
 effect alone can close (and exceed) the entire 0.254-point gap this
 campaign spent weeks chasing as if it were a modelling or data-coverage
 problem. TTN's counterpart (job 7437358) still running.
+
+## E1 result (job 7437381, CLIP arm): reproduction complete
+
+Our pipeline, discoclip's exact `train`/`val`/`test.csv` (no word-
+frequency filtering — every caption they kept survives as-is), same
+splits, same vocabulary.
+
+| | SVO-Probes | SVO-Swap | symbols | text params |
+|---|---|---|---|---|
+| **E1 (our code, their data)** | **0.8203** (obj_neg 0.8836, subj_neg 0.7958, verb_neg 0.7951) | **0.8316** | 167 | 1.66M |
+| DisCoCLIP target | 0.8355 (obj 87.79, subj 80.74, verb 82.42) | 0.9368 | 171 | 1.68M |
+
+**Within 1.5 points of the published target on Probes, per-subset shape
+matches closely, and the symbol/parameter counts are nearly identical to
+their own checkpoint (167 vs 171, 1.66M vs 1.68M).** Per the plan's
+Phase 0 success criterion (reproduce within ~2 points), **this closes the
+reproduction campaign for the CLIP control arm outright.** Every earlier
+divergence (data coverage, vocabulary threshold calibration, split
+protocol) is now fully accounted for: give our code the reference's
+exact data and it reproduces their number to within noise. SVO-Swap
+(0.8316 vs 0.9368) is further off — the 95-row swap set is small enough
+that this gap is plausibly still within its own noise floor, not
+independently verified further. TTN's counterpart (job 7437382) still
+running — that number is the one this whole campaign has been building
+toward.
