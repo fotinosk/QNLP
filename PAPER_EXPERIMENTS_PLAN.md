@@ -62,6 +62,39 @@ tower symbol count and parameter count.
 
 **Runs in parallel with Step 2.**
 
+## Step 1 results (2026-09-24)
+
+CLIPTextModel built (`qnlp/discoviz/models/clip_text_model.py`), wired
+through both SVO's and ARO's dataset/eval pipelines. Two bugs found by
+the first real cluster runs and fixed: `evaluate_svo_probes` still
+called `sym2weight` directly (missed when the other three OOV-filter
+sites were fixed), and ARO's `run.py` had unguarded Winoground/ARO/
+SugarCREPE eval calls, so a Winoground crash (its own `WinogroundDataset`
+was never extended for CLIP text's raw-text passthrough — out of scope
+for Step 1) prevented the ARO number from ever being computed. Both
+fixed; M3's numbers below were recovered from the already-trained
+checkpoints via `reeval_checkpoint.py`, not a retrain.
+
+| model | SVO-Probes | SVO-Swap | ARO overall | ARO attribution | ARO relation |
+|---|---|---|---|---|---|
+| **M1** (CLIP image, DisCoCat text) | 0.9274 (E4 CLIP) | 0.9524 | 0.6735 | 0.7341 | 0.5997 |
+| **M2** (TTN image, DisCoCat text) | 0.9171 (E4 TTN) | 0.8889 | pending (retraining, `m2_aro_retry`) | — | — |
+| **M3** (TTN image, CLIP text) | 0.6394 (obj_neg 0.7189, subj_neg 0.5962, verb_neg 0.6196) | 0.4127 | 0.4723 | 0.4676 | 0.4781 |
+
+**M2 ARO's first attempt was OOM-killed** at epoch 24 (transient cluster
+memory issue, unrelated to any code change — training had reached
+hard_neg_acc 0.90 on train at that point) — relaunched as `m2_aro_retry`,
+still running.
+
+**M3 sits well below M1 and M2 on both benchmarks**, and its ARO number
+(0.4723) is essentially exact chance (0.5) — a frozen, general-purpose
+CLIP text encoder does not transfer well to either task when paired with
+the from-scratch TTN image tower, in contrast to M1's frozen-CLIP-image
+pairing (which reaches 0.93+ on SVO). This is a real, reportable finding
+for the paper's discussion of M3 as the image-tower isolation control:
+the tower alone, without a compatible from-scratch text encoder trained
+jointly with it, does not carry the representation on its own.
+
 ---
 
 # Step 2 — Winoground substitution
