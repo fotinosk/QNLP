@@ -99,29 +99,37 @@ jointly with it, does not carry the representation on its own.
 
 # Step 2 — Winoground substitution
 
-## Starting position (measured, 365 local pairs)
+## Starting position — re-measured (2026-09-24, `qnlp/scripts/winoground/coverage_analysis.py`)
+
+Coverage measured at the (word, exact CCG-type) level, not word alone —
+`EinsumModel.sym2weight` looks up parameters by the full Symbol (word +
+its specific MPS-chain-piece type), so a word known under one
+grammatical role doesn't make a different-type usage of it covered.
+Local and cluster atlases now agree exactly (both give 800 flattened
+rows, 16 CCG-compile failures, 392 pairs with both captions
+successfully compiled) — the earlier "400 cluster vs 365 local" note is
+stale, from before the atlas was resynced; superseded by this
+measurement.
 
 | category | pairs | action |
 |---|---|---|
-| already covered by ARO vocabulary | 22 (6.0%) | keep untouched |
-| blocked by >= 1 **type mismatch** | 266 (72.9%) | **drop** (D3) |
-| **substitutable** (all blockers are genuinely new words) | **99 (27.1%)** | substitute |
+| already covered by ARO vocabulary | 23 (5.9%) | keep untouched |
+| blocked by >= 1 **type mismatch** | 286 (73.0%) | **drop** (D3) |
+| **substitutable** (all blockers are genuinely new words) | **83 (21.2%)** | substitute where a real synonym exists (Rule 2) |
 
-**99 pairs is the ceiling**, requiring substitution of **124 distinct
-content word-stems**. Partial effort scales poorly: top 50 stems yields
-only 53 usable pairs.
+**83 pairs is the ceiling**, requiring synonyms for up to **139 distinct
+new-word stems** — fewer pairs will end up substituted in practice,
+since Rule 2 forbids forcing a synonym that isn't genuinely in ARO's
+vocabulary; some stems will have none.
 
-**Re-measure on the cluster atlas first** — it has 400 pairs against the
-local parquets' 365.
+## Why most pairs are unreachable — this is itself a result
 
-## Why 266 pairs are unreachable — this is itself a result
-
-The top blocking stems are `be`, `there`, `than`, `more`, `while`, `it`:
-comparatives ("more ... than"), existentials ("there is"), and copulas.
-These are **grammatical constructions absent from ARO's caption
-distribution**, not missing words. An ARO-trained DisCoCat encoder cannot
-parse most of Winoground because it has never seen those constructions,
-and the parser is correct to type them differently.
+The top blocking stems are `with`, `be`, `in`, `than`, `wear`: copulas,
+prepositions, and comparatives — **grammatical constructions absent from
+ARO's caption distribution**, not missing content words. An ARO-trained
+DisCoCat encoder cannot parse most of Winoground because it has never
+seen those constructions, and the parser is correct to type them
+differently rather than papering over the gap.
 
 This applies to **DisCoCLIP identically** — same text-encoder family,
 same training data. Report the coverage analysis as a finding regardless
