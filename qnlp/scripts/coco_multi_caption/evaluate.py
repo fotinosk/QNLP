@@ -487,7 +487,7 @@ def evaluate_svo_probes(
         use_non_linear_contractions=non_linear,
     )
     loader = _make_loader(ds, batch_size, vlm_collate_fn)
-    known = set(model.text_model.sym2weight.keys())
+    known = _known_symbols(model)
     score_head = getattr(model, "score_head", None)
 
     correct_by_subset: dict[str, list[bool]] = defaultdict(list)
@@ -497,7 +497,11 @@ def evaluate_svo_probes(
         for batch in loader:
             captions = batch["caption"]
 
-            valid = [i for i in range(len(captions)) if all(s in known for s in captions[i][1])]
+            valid = (
+                list(range(len(captions)))
+                if known is None
+                else [i for i in range(len(captions)) if all(s in known for s in captions[i][1])]
+            )
             n_skipped += len(captions) - len(valid)
             if not valid:
                 continue

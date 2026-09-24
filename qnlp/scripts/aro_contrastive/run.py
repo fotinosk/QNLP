@@ -166,51 +166,74 @@ def run():
 
         test_metrics = trainer.fit()
 
+        def _guard(name: str, fn):
+            try:
+                return fn()
+            except Exception as e:
+                logger.warning(f"{name}: eval skipped ({type(e).__name__}: {e})")
+                return None
+
+        # WinogroundDataset (unlike VLMDataset) has not been extended for
+        # text_backbone=clip's raw-text passthrough -- guarded so an M3 run's
+        # Winoground failure doesn't prevent the ARO numbers Step 1 actually
+        # needs from being computed at all.
         logger.info("--- Winoground ---")
-        wino = evaluate_winoground(model, device, cfg.batch_size)
+        wino = _guard("Winoground", lambda: evaluate_winoground(model, device, cfg.batch_size))
 
         # ARO on the HELD-OUT test split only (matching path suffix). The shared
         # aro_eval.parquet pools all splits, so it contains this run's training
         # rows — evaluating on it would be leakage. test_parquet is disjoint from
         # train/val and uses the same contraction paths the model trained on.
         logger.info("--- ARO (held-out test split) ---")
-        aro = evaluate_aro(model, device, cfg.batch_size, parquet=test_parquet)
+        aro = _guard("ARO", lambda: evaluate_aro(model, device, cfg.batch_size, parquet=test_parquet))
 
         logger.info("--- SugarCREPE (swap_obj) ---")
-        sc = evaluate_sugarcrepe(model, device, cfg.batch_size)
+        sc = _guard("SugarCREPE", lambda: evaluate_sugarcrepe(model, device, cfg.batch_size))
 
         sep = "=" * 60
         logger.info(sep)
         logger.info("FINAL RESULTS")
         logger.info(sep)
         logger.info("Winoground")
-        logger.info(f"  text:  {wino['text_score']:.4f}")
-        logger.info(f"  image: {wino['image_score']:.4f}")
-        logger.info(f"  group: {wino['group_score']:.4f}")
-        logger.info(f"  pairs: {wino['n_pairs']}  skipped: {wino['n_skipped']}")
+        if wino:
+            logger.info(f"  text:  {wino['text_score']:.4f}")
+            logger.info(f"  image: {wino['image_score']:.4f}")
+            logger.info(f"  group: {wino['group_score']:.4f}")
+            logger.info(f"  pairs: {wino['n_pairs']}  skipped: {wino['n_skipped']}")
+        else:
+            logger.info("  (unavailable)")
         logger.info("ARO")
-        logger.info(f"  {'task':<14}{'N':>7}{'acc':>9}{'true_cos':>10}{'false_cos':>11}")
-        for task in [*sorted(k for k in aro if k != "overall"), "overall"]:
-            r = aro[task]
-            logger.info(
-                f"  {task:<14}{r['n']:>7}{r['hard_neg_acc']:>9.4f}{r['true_cos']:>10.4f}{r['false_cos']:>11.4f}"
-            )
+        if aro:
+            logger.info(f"  {'task':<14}{'N':>7}{'acc':>9}{'true_cos':>10}{'false_cos':>11}")
+            for task in [*sorted(k for k in aro if k != "overall"), "overall"]:
+                r = aro[task]
+                logger.info(
+                    f"  {task:<14}{r['n']:>7}{r['hard_neg_acc']:>9.4f}{r['true_cos']:>10.4f}{r['false_cos']:>11.4f}"
+                )
+        else:
+            logger.info("  (unavailable)")
         logger.info("SugarCREPE (swap_obj)")
-        logger.info(f"  acc: {sc['hard_neg_acc']:.4f}  evaluated: {sc['n_evaluated']}  skipped: {sc['n_skipped']}")
+        if sc:
+            logger.info(f"  acc: {sc['hard_neg_acc']:.4f}  evaluated: {sc['n_evaluated']}  skipped: {sc['n_skipped']}")
+        else:
+            logger.info("  (unavailable)")
         logger.info(sep)
 
         if mlflow.active_run():
-            mlflow.log_metrics(
-                {
-                    "wino/text": wino["text_score"],
-                    "wino/image": wino["image_score"],
-                    "wino/group": wino["group_score"],
-                }
-            )
-            mlflow.log_metrics(
-                {f"aro/{task}/acc": res["hard_neg_acc"] for task, res in aro.items() if isinstance(res, dict)}
-            )
-            mlflow.log_metrics({"sugarcrepe/swap_obj": sc["hard_neg_acc"]})
+            if wino:
+                mlflow.log_metrics(
+                    {
+                        "wino/text": wino["text_score"],
+                        "wino/image": wino["image_score"],
+                        "wino/group": wino["group_score"],
+                    }
+                )
+            if aro:
+                mlflow.log_metrics(
+                    {f"aro/{task}/acc": res["hard_neg_acc"] for task, res in aro.items() if isinstance(res, dict)}
+                )
+            if sc:
+                mlflow.log_metrics({"sugarcrepe/swap_obj": sc["hard_neg_acc"]})
             mlflow.log_artifact(checkpoint_path)
 
         send_training_finished_notification(
@@ -218,9 +241,9 @@ def run():
                 "experiment": EXPERIMENT_NAME,
                 "run": run.info.run_name,
                 **test_metrics,
-                "wino_group": wino["group_score"],
-                "aro_overall": aro.get("overall", {}).get("hard_neg_acc", float("nan")),
-                "sugarcrepe": sc["hard_neg_acc"],
+                "wino_group": wino["group_score"] if wino else float("nan"),
+                "aro_overall": (aro or {}).get("overall", {}).get("hard_neg_acc", float("nan")),
+                "sugarcrepe": sc["hard_neg_acc"] if sc else float("nan"),
             }
         )
 
